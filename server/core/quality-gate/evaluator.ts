@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import type { SessionManager } from "../agent/session.js";
+import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createLogger } from "../../utils/logger.js";
 import type { VerificationResult, VerificationScope, Verdict, Severity, Score, VerificationIssue } from "../../../shared/types.js";
 
@@ -77,7 +78,8 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
         );
 
         const runResult = await session.send(evaluationPrompt);
-        const result = parseVerificationResult(taskId, runResult.stdout, opts.scope, evaluatorId);
+        const parsed = parseStreamJson(runResult.stdout);
+        const result = parseVerificationResult(taskId, parsed.text, opts.scope, evaluatorId);
 
         // Store result
         db.prepare(`

@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import type { SessionManager } from "../agent/session.js";
+import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createLogger } from "../../utils/logger.js";
 import type { VerificationScope } from "../../../shared/types.js";
@@ -202,14 +203,15 @@ Respond in this EXACT JSON format:
 `;
 
       const runResult = await session.send(decomposePrompt);
+      const parsed = parseStreamJson(runResult.stdout);
 
       // Parse tasks from AI response
       try {
-        const jsonMatch = runResult.stdout.match(/```json\s*([\s\S]*?)\s*```/);
+        const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
         if (!jsonMatch) throw new Error("No JSON found in decomposition response");
 
-        const parsed = JSON.parse(jsonMatch[1]);
-        const tasks = parsed.tasks ?? [];
+        const decomposed = JSON.parse(jsonMatch[1]);
+        const tasks = decomposed.tasks ?? [];
 
         for (const t of tasks) {
           db.prepare(`
