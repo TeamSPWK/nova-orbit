@@ -24,7 +24,9 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // SQLite datetime('now') returns UTC without 'Z' suffix — append it
+  const normalized = iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z";
+  return new Date(normalized).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatWsMessage(

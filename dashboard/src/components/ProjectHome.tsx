@@ -191,8 +191,11 @@ export function ProjectHome() {
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
 
+  const [queueToggling, setQueueToggling] = useState(false);
+
   const handleToggleQueue = async () => {
-    if (!currentProjectId) return;
+    if (!currentProjectId || queueToggling) return;
+    setQueueToggling(true);
     try {
       if (queueRunning) {
         await api.orchestration.stopQueue(currentProjectId);
@@ -202,7 +205,11 @@ export function ProjectHome() {
         setQueueRunning(true);
       }
     } catch {
-      setToast(queueRunning ? t("stopQueue") : t("runQueue"));
+      // 409 = already running, just sync state
+      const status = await api.orchestration.queueStatus(currentProjectId).catch(() => ({ running: false }));
+      setQueueRunning(status.running);
+    } finally {
+      setQueueToggling(false);
     }
   };
 
@@ -475,16 +482,19 @@ export function ProjectHome() {
                 </h2>
                 <button
                   onClick={handleToggleQueue}
+                  disabled={queueToggling}
                   className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                    queueRunning
-                      ? "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
-                      : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                    queueToggling
+                      ? "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-wait"
+                      : queueRunning
+                        ? "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                        : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50"
                   }`}
                 >
-                  {queueRunning && (
+                  {queueRunning && !queueToggling && (
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                   )}
-                  {queueRunning ? t("stopQueue") : t("runQueue")}
+                  {queueToggling ? "..." : queueRunning ? t("stopQueue") : t("runQueue")}
                 </button>
               </div>
               {queueRunning && (
