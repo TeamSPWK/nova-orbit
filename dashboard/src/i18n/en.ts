@@ -98,6 +98,7 @@ const en = {
   // App connection status
   connected: "Connected",
   disconnected: "Disconnected",
+  serverDown: "Server is not responding. Please check if the server is running (npm run dev:server).",
 
   // CommandPalette
   cmdPlaceholder: "Type a command...",

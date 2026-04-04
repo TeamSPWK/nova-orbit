@@ -98,6 +98,7 @@ const ko = {
   // App connection status
   connected: "연결됨",
   disconnected: "연결 끊김",
+  serverDown: "서버가 응답하지 않습니다. 서버가 실행 중인지 확인해주세요 (npm run dev:server).",
 
   // CommandPalette
   cmdPlaceholder: "명령어를 입력하세요...",

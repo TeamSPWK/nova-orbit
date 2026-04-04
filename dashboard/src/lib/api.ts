@@ -1,15 +1,33 @@
 const BASE = "/api";
 
+// Global server status — components can check this
+let serverDown = false;
+export function isServerDown() { return serverDown; }
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? "Request failed");
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    // Server responded — mark as up
+    if (serverDown) {
+      serverDown = false;
+      window.dispatchEvent(new CustomEvent("nova:server-status", { detail: { up: true } }));
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error ?? "Request failed");
+    }
+    return res.json();
+  } catch (err: any) {
+    // Network error = server is down
+    if (err instanceof TypeError && err.message.includes("fetch")) {
+      serverDown = true;
+      window.dispatchEvent(new CustomEvent("nova:server-status", { detail: { up: false } }));
+    }
+    throw err;
   }
-  return res.json();
 }
 
 // Projects
