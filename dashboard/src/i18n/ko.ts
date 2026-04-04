@@ -9,9 +9,18 @@ const ko = {
 
   // ProjectHome tabs
   tabOverview: "개요",
+  tabAgents: "에이전트",
   tabKanban: "칸반",
   tabVerification: "검증 로그",
   tabSettings: "설정",
+
+  // OrgChart
+  orgChartTitle: "조직도",
+  agentCount: "{{count}}명",
+  goToAgentsTab: "에이전트 탭으로 →",
+  teamPresetApply: "팀 프리셋 적용",
+  noAgentsOrgChart: "에이전트가 없습니다",
+  noAgentsOrgChartDesc: "에이전트를 추가하거나 팀 프리셋을 적용해보세요",
 
   // ProjectHome sections
   agents: "에이전트",

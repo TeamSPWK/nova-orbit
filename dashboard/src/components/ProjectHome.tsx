@@ -2,9 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
-import { AgentCard } from "./AgentCard";
-import { AgentChip } from "./AgentChip";
 import { AgentChatLog } from "./AgentChatLog";
+import { OrgChart } from "./OrgChart";
 import { AgentDetail } from "./AgentDetail";
 import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
@@ -17,7 +16,7 @@ import { Toast } from "./Toast";
 import { WelcomeGuide } from "./WelcomeGuide";
 import { ProjectStats } from "./ProjectStats";
 
-type Tab = "overview" | "kanban" | "verification" | "settings";
+type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
 
 export function ProjectHome() {
   const { t } = useTranslation();
@@ -93,7 +92,7 @@ export function ProjectHome() {
   useEffect(() => {
     const onGoTab = (e: Event) => {
       const { tab } = (e as CustomEvent<{ tab: string }>).detail;
-      if (tab === "kanban" || tab === "verification" || tab === "settings" || tab === "overview") {
+      if (tab === "kanban" || tab === "verification" || tab === "settings" || tab === "overview" || tab === "agents") {
         setTab(tab as Tab);
       }
     };
@@ -427,9 +426,10 @@ export function ProjectHome() {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700">
-          {(["overview", "kanban", "verification", "settings"] as Tab[]).map((tabId) => {
+          {(["overview", "agents", "kanban", "verification", "settings"] as Tab[]).map((tabId) => {
             const tabLabel: Record<Tab, string> = {
               overview: t("tabOverview"),
+              agents: t("tabAgents"),
               kanban: t("tabKanban"),
               verification: t("tabVerification"),
               settings: t("tabSettings"),
@@ -456,87 +456,44 @@ export function ProjectHome() {
           <div className="flex gap-6">
             {/* Main column — scrollable, takes remaining width */}
             <div className="flex-1 min-w-0">
-              {/* Agents Section */}
+              {/* Agents Section — compact summary */}
               <section className="mb-8">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-                    {t("agents")}
-                  </h2>
-                  <button
-                    onClick={handleAddAgent}
-                    className="text-xs text-gray-400 hover:text-gray-600"
-                  >
-                    {t("addAgent")}
-                  </button>
-                </div>
-                {agents.length === 0 ? (
-                  <div className="py-6 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center space-y-4">
-                    <div>
-                      <div className="text-3xl mb-2 opacity-40">🤖</div>
-                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
-                        {t("emptyAgentsTitle")}
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 max-w-xs mx-auto">
-                        {t("emptyAgentsDesc")}
-                      </p>
-                    </div>
-                    {/* Team preset buttons */}
-                    <div className="flex flex-wrap gap-2 justify-center">
-                      {[
-                        { id: "solo", label: "Solo Founder", desc: "Dev + Reviewer" },
-                        { id: "fullstack", label: "Full Stack", desc: "CTO → BE + FE + QA" },
-                        { id: "product", label: "Product", desc: "CTO → FE + UX + QA" },
-                        { id: "startup", label: "Startup", desc: "CTO → Full Team" },
-                      ].map((preset) => (
-                        <button
-                          key={preset.id}
-                          onClick={async () => {
-                            if (!currentProjectId) return;
-                            await api.agents.createTeam(currentProjectId, preset.id);
-                            loadData();
-                          }}
-                          className="text-left px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/30 dark:hover:bg-blue-900/20 transition-colors"
-                        >
-                          <div className="text-xs font-medium text-gray-700 dark:text-gray-200">{preset.label}</div>
-                          <div className="text-[10px] text-gray-400 dark:text-gray-500">{preset.desc}</div>
-                        </button>
-                      ))}
-                    </div>
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="font-medium text-gray-700 dark:text-gray-300 shrink-0">{t("agents")}:</span>
+                  {agents.length === 0 ? (
                     <button
                       onClick={handleAddAgent}
-                      className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
                     >
                       {t("addAgent")}
                     </button>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {/* Leaders with inline children — chip tree (horizontal scroll) */}
-                    {agents.filter((a) => !a.parent_id).map((leader) => {
-                      const children = agents.filter((a) => a.parent_id === leader.id);
-                      return (
-                        <div key={leader.id} className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-0.5 scrollbar-thin">
-                          <AgentChip agent={leader} onClick={() => setSelectedAgentId(leader.id)} />
-                          {children.length > 0 && (
-                            <>
-                              <span className="text-gray-300 dark:text-gray-600 text-xs shrink-0">──</span>
-                              {children.map((child) => (
-                                <AgentChip key={child.id} agent={child} onClick={() => setSelectedAgentId(child.id)} />
-                              ))}
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {/* Orphan agents (no parent, not a leader with children) */}
-                    {(() => {
-                      const leaders = new Set(agents.filter((a) => !a.parent_id).map((a) => a.id));
-                      const orphans = agents.filter((a) => !a.parent_id && !agents.some((c) => c.parent_id === a.id));
-                      // Already rendered above in leaders loop, so skip
-                      return null;
-                    })()}
-                  </div>
-                )}
+                  ) : (
+                    <>
+                      <span className="flex flex-wrap gap-1 items-center min-w-0">
+                        {agents.map((a, idx) => (
+                          <span key={a.id} className="inline-flex items-center gap-0.5">
+                            {a.status === "working" && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+                            )}
+                            <span className="text-gray-700 dark:text-gray-300">{a.name}</span>
+                            {idx < agents.length - 1 && (
+                              <span className="text-gray-300 dark:text-gray-600">,</span>
+                            )}
+                          </span>
+                        ))}
+                        <span className="text-gray-400 dark:text-gray-500">
+                          ({t("agentCount", { count: agents.length })})
+                        </span>
+                      </span>
+                      <button
+                        onClick={() => setTab("agents")}
+                        className="shrink-0 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors whitespace-nowrap"
+                      >
+                        {t("goToAgentsTab")}
+                      </button>
+                    </>
+                  )}
+                </div>
               </section>
 
               {/* Goals Section */}
@@ -785,6 +742,14 @@ export function ProjectHome() {
               </div>
             </div>
           </div>
+        ) : tab === "agents" ? (
+          <OrgChart
+            agents={agents}
+            tasks={tasks}
+            onAddAgent={handleAddAgent}
+            onAgentDeleted={() => { setSelectedAgentId(null); loadData(); }}
+            onAgentKilled={() => { setSelectedAgentId(null); loadData(); }}
+          />
         ) : tab === "kanban" ? (
           <KanbanBoard tasks={tasks} agents={agents} onUpdate={loadData} />
         ) : (

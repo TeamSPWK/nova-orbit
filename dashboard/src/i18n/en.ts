@@ -9,9 +9,18 @@ const en = {
 
   // ProjectHome tabs
   tabOverview: "Overview",
+  tabAgents: "Agents",
   tabKanban: "Kanban",
   tabVerification: "Verification Log",
   tabSettings: "Settings",
+
+  // OrgChart
+  orgChartTitle: "Organization",
+  agentCount: "{{count}} agents",
+  goToAgentsTab: "Agents tab →",
+  teamPresetApply: "Apply Team Preset",
+  noAgentsOrgChart: "No agents yet",
+  noAgentsOrgChartDesc: "Add an agent or apply a team preset to get started",
 
   // ProjectHome sections
   agents: "Agents",
