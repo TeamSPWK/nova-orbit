@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { AppContext } from "../../index.js";
 import { createSessionManager } from "../../core/agent/session.js";
 import { createOrchestrationEngine } from "../../core/orchestration/engine.js";
+import { createScheduler } from "../../core/orchestration/scheduler.js";
 
 export function createOrchestrationRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -9,6 +10,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
   const sessionManager = createSessionManager(db);
   const engine = createOrchestrationEngine(db, sessionManager, broadcast);
+  const scheduler = createScheduler(db, sessionManager, broadcast);
 
   // Execute a single task
   router.post("/tasks/:taskId/execute", async (req, res) => {
@@ -65,6 +67,56 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
   router.post("/sessions/kill-all", (_req, res) => {
     sessionManager.killAll();
     res.json({ status: "all_killed" });
+  });
+
+  // Pause an agent session
+  router.post("/agents/:agentId/pause", (req, res) => {
+    const { agentId } = req.params;
+    try {
+      sessionManager.pauseSession(agentId);
+      broadcast("agent:status", { id: agentId, status: "paused" });
+      res.json({ status: "paused", agentId });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Resume a paused agent session
+  router.post("/agents/:agentId/resume", (req, res) => {
+    const { agentId } = req.params;
+    try {
+      sessionManager.resumeSession(agentId);
+      broadcast("agent:status", { id: agentId, status: "working" });
+      res.json({ status: "resumed", agentId });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Start priority queue for a project
+  router.post("/projects/:projectId/run-queue", (req, res) => {
+    const { projectId } = req.params;
+
+    const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    if (scheduler.isRunning(projectId)) {
+      return res.status(409).json({ error: "Queue already running for this project" });
+    }
+
+    scheduler.startQueue(projectId);
+    res.json({ status: "queue_started", projectId });
+  });
+
+  // Stop priority queue for a project
+  router.post("/projects/:projectId/stop-queue", (req, res) => {
+    const { projectId } = req.params;
+
+    const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    scheduler.stopQueue(projectId);
+    res.json({ status: "queue_stopped", projectId });
   });
 
   return router;

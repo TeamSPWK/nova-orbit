@@ -95,5 +95,55 @@ export function createVerificationRoutes(ctx: AppContext): Router {
     });
   });
 
+  // Create a fix task from a failed verification
+  router.post("/:id/create-fix-task", (req, res) => {
+    const { id } = req.params;
+
+    const verification = db.prepare("SELECT * FROM verifications WHERE id = ?").get(id) as any;
+    if (!verification) return res.status(404).json({ error: "Verification not found" });
+
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(verification.task_id) as any;
+    if (!task) return res.status(404).json({ error: "Original task not found" });
+
+    let issues: any[] = [];
+    try {
+      issues = JSON.parse(verification.issues);
+    } catch {
+      // fallback to empty
+    }
+
+    const issueSummary = issues.length > 0
+      ? issues.map((i: any) => i.message ?? String(i)).join("; ").slice(0, 120)
+      : "verification issues";
+
+    const title = `Fix: ${issueSummary}`;
+    const description = issues.length > 0
+      ? `Issues found during verification of "${task.title}":\n\n` +
+        issues.map((i: any) =>
+          `- [${i.severity ?? "issue"}] ${i.file ? `${i.file}:${i.line ?? ""} — ` : ""}${i.message ?? i}${i.suggestion ? `\n  Suggestion: ${i.suggestion}` : ""}`,
+        ).join("\n")
+      : `Fix issues found in task "${task.title}".`;
+
+    const result = db.prepare(`
+      INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status)
+      VALUES (?, ?, ?, ?, ?, 'todo')
+    `).run(task.goal_id, task.project_id, title, description, task.assignee_id ?? null);
+
+    const newTask = db.prepare("SELECT * FROM tasks WHERE rowid = ?").get(result.lastInsertRowid) as any;
+
+    broadcast("task:updated", { ...newTask, action: "created" });
+
+    db.prepare(`
+      INSERT INTO activities (project_id, type, message, metadata)
+      VALUES (?, 'task_created', ?, ?)
+    `).run(
+      task.project_id,
+      `Fix task created: "${title}"`,
+      JSON.stringify({ sourceVerificationId: id, sourceTaskId: task.id }),
+    );
+
+    res.status(201).json(newTask);
+  });
+
   return router;
 }

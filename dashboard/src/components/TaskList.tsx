@@ -178,6 +178,28 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                       ))}
                     </select>
 
+                    {/* Governance: Approve/Reject for in_review tasks */}
+                    {task.status === "in_review" && (
+                      <>
+                        <button
+                          onClick={async () => { await api.tasks.approve(task.id); onUpdate?.(); }}
+                          className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"
+                        >
+                          {t("approve")}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const fb = window.prompt(t("rejectFeedbackPrompt"));
+                            await api.tasks.reject(task.id, fb ?? undefined);
+                            onUpdate?.();
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
+                        >
+                          {t("reject")}
+                        </button>
+                      </>
+                    )}
+
                     {/* Run button — only for assigned tasks in todo/blocked */}
                     {task.assignee_id &&
                       (task.status === "todo" || task.status === "blocked") && (

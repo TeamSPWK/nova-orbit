@@ -41,6 +41,13 @@ export const api = {
     create: (data: any) => request<any>("/tasks", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request<any>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    approve: (id: string) =>
+      request<any>(`/tasks/${id}/approve`, { method: "POST" }),
+    reject: (id: string, feedback?: string) =>
+      request<any>(`/tasks/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ feedback }),
+      }),
   },
   activities: {
     list: (projectId: string) => request<any[]>(`/activities?projectId=${projectId}`),

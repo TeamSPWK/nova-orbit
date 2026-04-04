@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { exec } from "node:child_process";
 
 const DEFAULT_PORT = 3000;
 
@@ -9,6 +10,7 @@ async function main() {
     args.find((a) => a.startsWith("--port="))?.split("=")[1] ?? `${DEFAULT_PORT}`,
     10,
   );
+  const noOpen = args.includes("--no-open");
 
   console.log(`
   ╔══════════════════════════════════════════╗
@@ -29,10 +31,17 @@ async function main() {
   const { startServer } = await import("../server/index.js");
   await startServer({ port, dataDir });
 
+  const url = `http://localhost:${port}`;
   console.log(`
-  Dashboard: http://localhost:${port}
+  Dashboard: ${url}
   Press Ctrl+C to stop.
   `);
+
+  if (!noOpen) {
+    if (process.platform === "darwin") exec(`open ${url}`);
+    else if (process.platform === "linux") exec(`xdg-open ${url}`);
+    else if (process.platform === "win32") exec(`start ${url}`);
+  }
 }
 
 main().catch((err) => {

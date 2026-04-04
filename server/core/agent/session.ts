@@ -10,6 +10,8 @@ export interface SessionManager {
   getSession: (agentId: string) => ClaudeCodeSession | undefined;
   killSession: (agentId: string) => void;
   killAll: () => void;
+  pauseSession: (agentId: string) => void;
+  resumeSession: (agentId: string) => void;
 }
 
 export function createSessionManager(db: Database): SessionManager {
@@ -92,6 +94,26 @@ export function createSessionManager(db: Database): SessionManager {
       }
       sessions.clear();
       log.info("Killed all sessions");
+    },
+
+    pauseSession(agentId: string): void {
+      const session = sessions.get(agentId);
+      if (!session?.process?.pid) {
+        throw new Error(`No active session for agent ${agentId}`);
+      }
+      process.kill(session.process.pid, "SIGSTOP");
+      db.prepare("UPDATE agents SET status = 'paused' WHERE id = ?").run(agentId);
+      log.info(`Paused session for agent ${agentId} (pid ${session.process.pid})`);
+    },
+
+    resumeSession(agentId: string): void {
+      const session = sessions.get(agentId);
+      if (!session?.process?.pid) {
+        throw new Error(`No active session for agent ${agentId}`);
+      }
+      process.kill(session.process.pid, "SIGCONT");
+      db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agentId);
+      log.info(`Resumed session for agent ${agentId} (pid ${session.process.pid})`);
     },
   };
 }

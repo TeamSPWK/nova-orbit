@@ -79,6 +79,58 @@ export function createTaskRoutes(ctx: AppContext): Router {
     res.json(updated);
   });
 
+  // Approve task (governance gate: in_review → done)
+  router.post("/:id/approve", (req, res) => {
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
+    if (!task) return res.status(404).json({ error: "Task not found" });
+    if (task.status !== "in_review") {
+      return res.status(400).json({ error: `Cannot approve task in status '${task.status}'. Must be 'in_review'.` });
+    }
+
+    db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
+      .run(req.params.id);
+
+    updateGoalProgress(db, task.goal_id);
+
+    const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+    broadcast("task:updated", updated);
+
+    // Log activity
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
+    ).run(task.project_id, `Approved: ${task.title}`);
+
+    res.json(updated);
+  });
+
+  // Reject task (governance gate: in_review → todo with feedback)
+  router.post("/:id/reject", (req, res) => {
+    const { feedback } = req.body ?? {};
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
+    if (!task) return res.status(404).json({ error: "Task not found" });
+    if (task.status !== "in_review") {
+      return res.status(400).json({ error: `Cannot reject task in status '${task.status}'. Must be 'in_review'.` });
+    }
+
+    // Append feedback to task description
+    const newDesc = feedback
+      ? `${task.description}\n\n--- Rejection Feedback ---\n${feedback}`
+      : task.description;
+
+    db.prepare(
+      "UPDATE tasks SET status = 'todo', description = ?, updated_at = datetime('now') WHERE id = ?",
+    ).run(newDesc, req.params.id);
+
+    const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+    broadcast("task:updated", updated);
+
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_rejected', ?)",
+    ).run(task.project_id, `Rejected: ${task.title}${feedback ? ` — ${feedback}` : ""}`);
+
+    res.json(updated);
+  });
+
   // Delete task
   router.delete("/:id", (req, res) => {
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
