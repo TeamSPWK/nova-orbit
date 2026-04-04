@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { AgentCard } from "./AgentCard";
 import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
+import { ActivityFeed } from "./ActivityFeed";
 
 type Tab = "overview" | "verification";
 
@@ -224,11 +225,19 @@ export function ProjectHome() {
             </section>
 
             {/* Tasks Section */}
-            <section>
+            <section className="mb-8">
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
                 Tasks
               </h2>
               <TaskList tasks={tasks} agents={agents} onUpdate={loadData} />
+            </section>
+
+            {/* Recent Activity Section */}
+            <section>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                Recent Activity
+              </h2>
+              <ActivityFeed projectId={currentProjectId!} />
             </section>
           </>
         ) : (

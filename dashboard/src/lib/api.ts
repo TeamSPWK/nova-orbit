@@ -41,6 +41,9 @@ export const api = {
     update: (id: string, data: any) =>
       request<any>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   },
+  activities: {
+    list: (projectId: string) => request<any[]>(`/activities?projectId=${projectId}`),
+  },
   verifications: {
     list: (projectId: string) => request<any[]>(`/verifications?projectId=${projectId}`),
     listByTask: (taskId: string) => request<any[]>(`/verifications?taskId=${taskId}`),

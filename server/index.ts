@@ -2,6 +2,7 @@ import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { createDatabase, migrate } from "./db/schema.js";
 import { createProjectRoutes } from "./api/routes/projects.js";
 import { createAgentRoutes } from "./api/routes/agents.js";
@@ -9,6 +10,7 @@ import { createTaskRoutes } from "./api/routes/tasks.js";
 import { createVerificationRoutes } from "./api/routes/verification.js";
 import { createGoalRoutes } from "./api/routes/goals.js";
 import { createOrchestrationRoutes } from "./api/routes/orchestration.js";
+import { createActivityRoutes } from "./api/routes/activities.js";
 import { createWSHandler } from "./api/websocket.js";
 import type { Database } from "better-sqlite3";
 
@@ -77,17 +79,32 @@ export async function startServer(config: ServerConfig): Promise<void> {
   app.use("/api/tasks", createTaskRoutes(ctx));
   app.use("/api/verifications", createVerificationRoutes(ctx));
   app.use("/api/orchestration", createOrchestrationRoutes(ctx));
+  app.use("/api/activities", createActivityRoutes(ctx));
 
   // Health check
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", version: "0.1.0" });
   });
 
-  // Serve dashboard (production)
-  const dashboardDist = resolve(import.meta.dirname ?? __dirname, "../dashboard/dist");
+  // Serve dashboard (production build)
+  // In dev: ../dashboard/dist, in built: ../dashboard (copied by build:dashboard)
+  const serverDir = import.meta.dirname ?? __dirname;
+  const dashboardPaths = [
+    resolve(serverDir, "../dashboard"),       // built (dist/dashboard/)
+    resolve(serverDir, "../dashboard/dist"),   // dev fallback
+  ];
+  const dashboardDist = dashboardPaths.find((p) => {
+    try { return existsSync(resolve(p, "index.html")); } catch { return false; }
+  }) ?? dashboardPaths[0];
+
   app.use(express.static(dashboardDist));
   app.get("/{*splat}", (_req, res) => {
-    res.sendFile(resolve(dashboardDist, "index.html"));
+    const indexPath = resolve(dashboardDist, "index.html");
+    if (existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).json({ error: "Dashboard not built. Run: npm run build:dashboard" });
+    }
   });
 
   server.listen(port, () => {

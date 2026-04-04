@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { AppContext } from "../../index.js";
+import { getAgentPresets } from "../../core/agent/roles.js";
 
 export function createAgentRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -12,6 +13,11 @@ export function createAgentRoutes(ctx: AppContext): Router {
       ? db.prepare("SELECT * FROM agents WHERE project_id = ? ORDER BY created_at").all(projectId)
       : db.prepare("SELECT * FROM agents ORDER BY created_at").all();
     res.json(agents);
+  });
+
+  // List available agent role presets loaded from templates/agents/*.yaml
+  router.get("/presets", (_req, res) => {
+    res.json(getAgentPresets());
   });
 
   // Get single agent

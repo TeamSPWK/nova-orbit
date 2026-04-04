@@ -11,9 +11,9 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:dashboard": "cd dashboard && npm run dev",
     "build": "npm run build:server && npm run build:dashboard",
-    "build:server": "tsup server/index.ts --out-dir dist/server --format esm --dts",
-    "build:dashboard": "cd dashboard && npm run build",
-    "build:bin": "tsup bin/nova-orbit.ts --out-dir dist/bin --format esm",
+    "build:server": "tsup",
+    "build:dashboard": "cd dashboard && npm run build && cp -r dist ../dist/dashboard",
+    "postbuild": "echo '#!/usr/bin/env node' | cat - dist/bin/nova-orbit.js > dist/bin/_tmp && mv dist/bin/_tmp dist/bin/nova-orbit.js && chmod +x dist/bin/nova-orbit.js",
     "start": "node dist/bin/nova-orbit.js",
     "db:migrate": "tsx server/db/migrate.ts",
     "test": "vitest run",
@@ -29,6 +29,12 @@
   ],
   "author": "TeamSPWK",
   "license": "MIT",
+  "files": [
+    "dist/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
