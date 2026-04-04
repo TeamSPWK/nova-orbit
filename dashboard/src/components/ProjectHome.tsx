@@ -123,11 +123,18 @@ export function ProjectHome() {
     setGoals([...goals, goal]);
   };
 
+  const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
+
   const handleDecomposeGoal = async (goalId: string) => {
+    setDecomposingGoalId(goalId);
     try {
       await api.orchestration.decomposeGoal(goalId);
+      loadData();
+      setToast(t("decomposeSuccess"));
     } catch {
-      setToast(t("errorDecomposeFailed"));
+      setToast(t("decomposeFailed"));
+    } finally {
+      setDecomposingGoalId(null);
     }
   };
 
@@ -422,10 +429,24 @@ export function ProjectHome() {
                       </span>
                       <button
                         onClick={() => handleDecomposeGoal(goal.id)}
-                        className="text-[10px] px-2 py-0.5 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50"
-                        title="AI Decompose: Break goal into tasks"
+                        disabled={decomposingGoalId === goal.id}
+                        className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 ${
+                          decomposingGoalId === goal.id
+                            ? "bg-purple-100 dark:bg-purple-900/50 text-purple-400 cursor-wait"
+                            : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
+                        }`}
                       >
-                        {t("decompose")}
+                        {decomposingGoalId === goal.id ? (
+                          <>
+                            <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                            </svg>
+                            {t("decomposing")}
+                          </>
+                        ) : (
+                          t("decompose")
+                        )}
                       </button>
                       <button
                         onClick={() => handleAddTask(goal.id)}
