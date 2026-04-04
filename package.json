@@ -7,7 +7,7 @@
     "nova-orbit": "./dist/bin/nova-orbit.js"
   },
   "scripts": {
-    "predev": "node -e \"const{execSync}=require('child_process');try{execSync('kill -9 $(lsof -ti :3000)',{stdio:'ignore'})}catch{};try{execSync('kill -9 $(lsof -ti :5173)',{stdio:'ignore'})}catch{}\"",
+    "predev": "bash scripts/predev.sh",
     "dev": "concurrently --kill-others \"npm run dev:server\" \"npm run dev:dashboard\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:dashboard": "wait-on http://127.0.0.1:3000/api/health && cd dashboard && npx vite --port 5173",
