@@ -303,32 +303,32 @@ export function ProjectHome() {
               {goals.map((goal) => (
                 <div
                   key={goal.id}
-                  className="mb-4 p-3 border border-gray-200 rounded-lg"
+                  className="mb-4 p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d]"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-800">
+                    <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
                       {goal.description}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-gray-400 dark:text-gray-500">
                         {goal.progress}%
                       </span>
                       <button
                         onClick={() => handleDecomposeGoal(goal.id)}
-                        className="text-[10px] px-2 py-0.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100"
+                        className="text-[10px] px-2 py-0.5 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50"
                         title="AI Decompose: Break goal into tasks"
                       >
                         {t("decompose")}
                       </button>
                       <button
                         onClick={() => handleAddTask(goal.id)}
-                        className="text-[10px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded hover:bg-gray-200"
+                        className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
                       >
                         {t("addTask")}
                       </button>
                     </div>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-full h-1.5">
+                  <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
                     <div
                       className="bg-blue-500 h-1.5 rounded-full transition-all"
                       style={{ width: `${goal.progress}%` }}
