@@ -82,6 +82,7 @@ const en = {
   rejectFeedbackPrompt: "Rejection feedback (optional):",
   assign: "assign",
   verified: "verified",
+  unverified: "unverified",
   noTasks: "No tasks yet.",
 
   // KanbanBoard

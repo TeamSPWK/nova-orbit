@@ -82,6 +82,7 @@ const ko = {
   rejectFeedbackPrompt: "반려 사유 (선택):",
   assign: "담당자 지정",
   verified: "검증됨",
+  unverified: "미검증",
   noTasks: "태스크가 없습니다.",
 
   // KanbanBoard

@@ -211,6 +211,15 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                     {/* Governance: Approve/Reject for in_review tasks */}
                     {task.status === "in_review" && (
                       <>
+                        {task.verification_id ? (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
+                            {t("verified")}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded">
+                            {t("unverified")}
+                          </span>
+                        )}
                         <button
                           onClick={async () => { await api.tasks.approve(task.id); onUpdate?.(); }}
                           className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"

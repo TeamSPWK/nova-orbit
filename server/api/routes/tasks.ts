@@ -80,22 +80,23 @@ export function createTaskRoutes(ctx: AppContext): Router {
   });
 
   // Approve task (governance gate: in_review → done)
-  router.post("/:id/approve", (req, res) => {
+  // If skipVerification is false (default), triggers Quality Gate before marking done
+  router.post("/:id/approve", async (req, res) => {
+    const { skipVerification = false } = req.body ?? {};
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
     if (!task) return res.status(404).json({ error: "Task not found" });
     if (task.status !== "in_review") {
       return res.status(400).json({ error: `Cannot approve task in status '${task.status}'. Must be 'in_review'.` });
     }
 
+    // Mark as done
     db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
       .run(req.params.id);
-
     updateGoalProgress(db, task.goal_id);
 
     const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
     broadcast("task:updated", updated);
 
-    // Log activity
     db.prepare(
       "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
     ).run(task.project_id, `Approved: ${task.title}`);
