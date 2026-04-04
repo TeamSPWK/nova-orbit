@@ -40,11 +40,27 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState<Record<string, number>>({});
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskUsage, setTaskUsage] = useState<Map<string, { costUsd: number; totalTokens: number }>>(new Map());
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
   // Per-task interval refs for elapsed time counters
   const intervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  // Accumulate usage per task from WebSocket events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const payload = (e as CustomEvent<{ taskId: string; costUsd: number; totalTokens: number }>).detail;
+      if (!payload.taskId) return;
+      setTaskUsage((prev) => {
+        const next = new Map(prev);
+        next.set(payload.taskId, { costUsd: payload.costUsd, totalTokens: payload.totalTokens });
+        return next;
+      });
+    };
+    window.addEventListener("nova:task-usage", handler);
+    return () => window.removeEventListener("nova:task-usage", handler);
+  }, []);
 
   // Clear timers for tasks that are no longer running (status changed via WebSocket)
   useEffect(() => {
@@ -148,6 +164,7 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
               {filtered.map((task) => {
                 const isRunning = runningTasks.has(task.id);
                 const seconds = elapsedSeconds[task.id] ?? 0;
+                const usage = taskUsage.get(task.id);
                 return (
                 <div
                   key={task.id}
@@ -163,6 +180,11 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                     {task.verification_id && (
                       <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
                         {t("verified")}
+                      </span>
+                    )}
+                    {task.status === "done" && usage && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded shrink-0">
+                        ${usage.costUsd.toFixed(2)}
                       </span>
                     )}
                   </div>

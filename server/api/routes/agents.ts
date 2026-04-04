@@ -53,6 +53,28 @@ export function createAgentRoutes(ctx: AppContext): Router {
     res.status(201).json({ suggestions, created, count: created.length });
   });
 
+  // Get agent stats: taskCount, totalTokens, totalCostUsd
+  router.get("/:id/stats", (req, res) => {
+    const agent = db.prepare("SELECT id FROM agents WHERE id = ?").get(req.params.id);
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+    const taskRow = db
+      .prepare("SELECT COUNT(*) as taskCount FROM tasks WHERE assignee_id = ? AND status = 'done'")
+      .get(req.params.id) as { taskCount: number };
+
+    const sessionRow = db
+      .prepare(
+        "SELECT COALESCE(SUM(token_usage), 0) as totalTokens, COALESCE(SUM(cost_usd), 0) as totalCostUsd FROM sessions WHERE agent_id = ?",
+      )
+      .get(req.params.id) as { totalTokens: number; totalCostUsd: number };
+
+    res.json({
+      taskCount: taskRow.taskCount,
+      totalTokens: sessionRow.totalTokens,
+      totalCostUsd: sessionRow.totalCostUsd,
+    });
+  });
+
   // Get single agent
   router.get("/:id", (req, res) => {
     const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(req.params.id);

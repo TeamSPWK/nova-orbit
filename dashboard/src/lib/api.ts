@@ -53,6 +53,8 @@ export const api = {
     create: (data: any) => request<any>("/agents", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request<any>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    stats: (id: string) =>
+      request<{ taskCount: number; totalTokens: number; totalCostUsd: number }>(`/agents/${id}/stats`),
   },
   goals: {
     list: (projectId: string) => request<any[]>(`/goals?projectId=${projectId}`),

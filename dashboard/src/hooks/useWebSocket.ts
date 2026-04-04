@@ -35,6 +35,11 @@ export function useWebSocket() {
                 })
               );
               break;
+            case "task:usage":
+              window.dispatchEvent(
+                new CustomEvent("nova:task-usage", { detail: msg.payload })
+              );
+              break;
             case "agent:status":
             case "verification:result":
             case "project:updated":

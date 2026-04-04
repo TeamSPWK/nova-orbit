@@ -87,6 +87,7 @@ export function migrate(db: Database.Database): void {
       ended_at TEXT,
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'failed', 'killed')),
       token_usage INTEGER DEFAULT 0,
+      cost_usd REAL DEFAULT 0,
       last_output TEXT      -- Last output snippet for display
     );
 

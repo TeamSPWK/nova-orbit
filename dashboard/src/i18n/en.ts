@@ -269,6 +269,10 @@ const en = {
   statCompleted: "Completed",
   statInProgress: "In Progress",
   statVerified: "Verified",
+  totalCost: "Cost",
+  contextTokens: "{{count}}K ctx",
+  tasksCost: "{{count}} tasks · ${{cost}}",
+  noCostData: "—",
 
   // KeyboardShortcuts
   keyboardShortcuts: "Keyboard Shortcuts",

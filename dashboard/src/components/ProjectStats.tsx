@@ -1,7 +1,15 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface Task {
   status: string;
+}
+
+interface UsagePayload {
+  taskId: string;
+  agentId: string;
+  totalTokens: number;
+  costUsd: number;
 }
 
 interface ProjectStatsProps {
@@ -10,11 +18,30 @@ interface ProjectStatsProps {
 
 export function ProjectStats({ tasks }: ProjectStatsProps) {
   const { t } = useTranslation();
+  const [totalCostUsd, setTotalCostUsd] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const payload = (e as CustomEvent<UsagePayload>).detail;
+      setTotalCostUsd((prev) => prev + (payload.costUsd ?? 0));
+      setTotalTokens((prev) => prev + (payload.totalTokens ?? 0));
+    };
+    window.addEventListener("nova:task-usage", handler);
+    return () => window.removeEventListener("nova:task-usage", handler);
+  }, []);
 
   const total = tasks.length;
   const completed = tasks.filter((t) => t.status === "done").length;
   const inProgress = tasks.filter((t) => t.status === "in_progress").length;
   const verified = tasks.filter((t) => t.status === "verified").length;
+
+  const costLabel =
+    totalCostUsd > 0 ? `$${totalCostUsd.toFixed(2)}` : t("noCostData");
+  const tokenLabel =
+    totalTokens > 0
+      ? t("contextTokens", { count: (totalTokens / 1000).toFixed(1) })
+      : t("noCostData");
 
   const stats = [
     {
@@ -56,6 +83,16 @@ export function ProjectStats({ tasks }: ProjectStatsProps) {
           )}
         </div>
       ))}
+      <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+      <div className="text-center">
+        <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{costLabel}</span>
+        <p className="text-[11px] leading-none mt-0.5 text-gray-400 dark:text-gray-500">{t("totalCost")}</p>
+      </div>
+      <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+      <div className="text-center">
+        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{tokenLabel}</span>
+        <p className="text-[11px] leading-none mt-0.5 text-gray-400 dark:text-gray-500">Tokens</p>
+      </div>
     </div>
   );
 }

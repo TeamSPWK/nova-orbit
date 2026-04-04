@@ -4,6 +4,12 @@ import { api } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { AgentAvatar } from "./AgentAvatar";
 
+interface AgentStats {
+  taskCount: number;
+  totalTokens: number;
+  totalCostUsd: number;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   idle: "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400",
   working: "bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 animate-pulse",
@@ -37,6 +43,7 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
   const { t } = useTranslation();
   const [showConfirm, setShowConfirm] = useState(false);
   const [workingSeconds, setWorkingSeconds] = useState(0);
+  const [stats, setStats] = useState<AgentStats | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentTask = tasks?.find((task) => task.id === agent.current_task_id);
 
@@ -60,6 +67,28 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
       }
     };
   }, [agent.status]);
+
+  useEffect(() => {
+    api.agents.stats(agent.id).then(setStats).catch(() => {});
+  }, [agent.id]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const payload = (e as CustomEvent<{ agentId: string; totalTokens: number; costUsd: number }>).detail;
+      if (payload.agentId !== agent.id) return;
+      setStats((prev) =>
+        prev
+          ? {
+              taskCount: prev.taskCount + 1,
+              totalTokens: prev.totalTokens + payload.totalTokens,
+              totalCostUsd: prev.totalCostUsd + payload.costUsd,
+            }
+          : { taskCount: 1, totalTokens: payload.totalTokens, totalCostUsd: payload.costUsd }
+      );
+    };
+    window.addEventListener("nova:task-usage", handler);
+    return () => window.removeEventListener("nova:task-usage", handler);
+  }, [agent.id]);
 
   const handleKillClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -165,6 +194,19 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
             </span>
           )}
         </div>
+        {stats && stats.taskCount > 0 && (
+          <div className="mt-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+            {t("tasksCost", {
+              count: stats.taskCount,
+              cost: stats.totalCostUsd.toFixed(2),
+            })}
+            {stats.totalTokens > 0 && (
+              <span className="ml-1">
+                · {t("contextTokens", { count: (stats.totalTokens / 1000).toFixed(1) })}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </>
   );

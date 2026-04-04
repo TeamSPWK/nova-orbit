@@ -269,6 +269,10 @@ const ko = {
   statCompleted: "완료",
   statInProgress: "진행 중",
   statVerified: "검증됨",
+  totalCost: "비용",
+  contextTokens: "{{count}}K ctx",
+  tasksCost: "{{count}} 태스크 · ${{cost}}",
+  noCostData: "—",
 
   // KeyboardShortcuts
   keyboardShortcuts: "키보드 단축키",

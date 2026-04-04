@@ -46,6 +46,29 @@ export function createWSHandler(wss: WebSocketServer): void {
 }
 
 /**
+ * Broadcast token usage and cost for a completed task.
+ */
+export function broadcastTaskUsage(
+  wss: WebSocketServer,
+  payload: { taskId: string; agentId: string; totalTokens: number; costUsd: number },
+): void {
+  const message = JSON.stringify({
+    type: "task:usage",
+    payload,
+    timestamp: new Date().toISOString(),
+  });
+
+  for (const client of wss.clients) {
+    if (client.readyState !== 1) continue;
+    try {
+      client.send(message);
+    } catch {
+      // Skip failed clients
+    }
+  }
+}
+
+/**
  * Safe broadcast — skip clients that are not ready.
  */
 export function broadcastAgentOutput(
