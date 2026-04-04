@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface Activity {
@@ -27,6 +28,7 @@ function formatTime(iso: string): string {
 }
 
 export function ActivityFeed({ projectId }: ActivityFeedProps) {
+  const { t } = useTranslation();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -71,13 +73,13 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
   }, []);
 
   if (loading) {
-    return <p className="text-xs text-gray-400 italic">Loading activity...</p>;
+    return <p className="text-xs text-gray-400 italic">{t("loadingActivity")}</p>;
   }
 
   if (activities.length === 0) {
     return (
       <p className="text-xs text-gray-400 italic">
-        No activity yet. Activity will appear here when agents run tasks.
+        {t("noActivity")}
       </p>
     );
   }

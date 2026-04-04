@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type Theme = "light" | "dark" | "system";
 
@@ -18,6 +19,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const [theme, setTheme] = useState<Theme>(() => {
     const stored = localStorage.getItem("nova-theme") as Theme | null;
     return stored ?? "system";
@@ -51,7 +53,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? t("switchToLight") : t("switchToDark")}
       className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400"
     >
       {isDark ? (
