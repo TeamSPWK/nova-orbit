@@ -56,6 +56,12 @@ export function ProjectHome() {
   const [panelPromptSending, setPanelPromptSending] = useState(false);
   const [panelPromptToast, setPanelPromptToast] = useState<string | null>(null);
 
+  // Multi-agent prompt state
+  const [multiAgentMode, setMultiAgentMode] = useState(false);
+  const [multiAgentIds, setMultiAgentIds] = useState<string[]>([]);
+  const [multiPromptProgress, setMultiPromptProgress] = useState<{ current: number; total: number } | null>(null);
+  const [multiPromptResults, setMultiPromptResults] = useState<{ agentId: string; agentName: string; result: string }[]>([]);
+
   const project = projects.find((p) => p.id === currentProjectId);
 
   const loadData = useCallback(() => {
@@ -273,6 +279,57 @@ export function ProjectHome() {
       setPanelPromptToast(err.message ?? t("promptSendError"));
       setPanelPromptSending(false);
     }
+  };
+
+  const handleSendMultiPrompt = async () => {
+    if (!panelPromptMessage.trim() || multiAgentIds.length < 2 || panelPromptSending || !currentProjectId) return;
+    setPanelPromptSending(true);
+    setPanelPromptToast(null);
+    setMultiPromptProgress({ current: 0, total: multiAgentIds.length });
+    setMultiPromptResults([]);
+    try {
+      await api.orchestration.multiPrompt(multiAgentIds, panelPromptMessage.trim(), currentProjectId);
+      setPanelPromptMessage("");
+      // Don't set sending=false — wait for multi-prompt:complete event
+    } catch (err: any) {
+      setPanelPromptToast(err.message ?? t("promptSendError"));
+      setPanelPromptSending(false);
+      setMultiPromptProgress(null);
+    }
+  };
+
+  // Listen for multi-prompt WebSocket events
+  useEffect(() => {
+    const onAgentDone = (e: Event) => {
+      const { agentId, agentName, result, index, total } = (e as CustomEvent).detail;
+      setMultiPromptProgress({ current: index + 1, total });
+      setMultiPromptResults((prev) => [...prev, { agentId, agentName, result }]);
+    };
+    const onComplete = (e: Event) => {
+      const { results } = (e as CustomEvent).detail;
+      setMultiPromptResults(results);
+      setMultiPromptProgress(null);
+      setPanelPromptSending(false);
+    };
+    // Also handle single-prompt complete to reset sending state
+    const onSingleComplete = () => {
+      if (!multiAgentMode) setPanelPromptSending(false);
+    };
+
+    window.addEventListener("nova:multi-agent-done", onAgentDone);
+    window.addEventListener("nova:multi-complete", onComplete);
+    window.addEventListener("nova:prompt-complete", onSingleComplete);
+    return () => {
+      window.removeEventListener("nova:multi-agent-done", onAgentDone);
+      window.removeEventListener("nova:multi-complete", onComplete);
+      window.removeEventListener("nova:prompt-complete", onSingleComplete);
+    };
+  }, [multiAgentMode]);
+
+  const toggleMultiAgentId = (agentId: string) => {
+    setMultiAgentIds((prev) =>
+      prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId]
+    );
   };
 
   // Derive in-progress task and its assigned agent for the chat panel
@@ -685,43 +742,151 @@ export function ProjectHome() {
               {/* Direct Prompt — only when no task is running */}
               {!inProgressTask && agents.length > 0 && (
                 <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                  <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     <h2 className="text-xs font-medium text-gray-600 dark:text-gray-300">
                       {t("directPromptTitle")}
                     </h2>
+                    {/* Mode toggle */}
+                    <button
+                      onClick={() => {
+                        setMultiAgentMode((m) => !m);
+                        setMultiAgentIds([]);
+                        setMultiPromptResults([]);
+                        setMultiPromptProgress(null);
+                      }}
+                      disabled={panelPromptSending}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-40 ${
+                        multiAgentMode
+                          ? "bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400"
+                          : "bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-blue-300"
+                      }`}
+                    >
+                      {multiAgentMode ? t("multiAgentMode") : t("singleAgentMode")}
+                    </button>
                   </div>
                   <div className="p-3 bg-white dark:bg-[#1e1e2e] space-y-2">
-                    <select
-                      value={panelPromptAgentId}
-                      onChange={(e) => setPanelPromptAgentId(e.target.value)}
-                      disabled={panelPromptSending}
-                      className="w-full text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
-                    >
-                      <option value="">{t("selectAgent")}</option>
-                      {agents.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name} ({a.role})
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={panelPromptMessage}
-                        onChange={(e) => setPanelPromptMessage(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleSendPanelPrompt(); }}
-                        disabled={panelPromptSending || !panelPromptAgentId}
-                        placeholder={t("promptPlaceholder")}
-                        className="flex-1 text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
-                      />
-                      <button
-                        onClick={handleSendPanelPrompt}
-                        disabled={panelPromptSending || !panelPromptMessage.trim() || !panelPromptAgentId}
-                        className="px-3 py-1.5 text-xs font-medium bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                      >
-                        {panelPromptSending ? t("promptRunning") : t("sendPrompt")}
-                      </button>
-                    </div>
+                    {multiAgentMode ? (
+                      <>
+                        {/* Multi-agent checkbox list */}
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500">{t("selectMultipleAgents")}</p>
+                          <div className="max-h-[120px] overflow-y-auto space-y-1 border border-gray-100 dark:border-gray-700 rounded-lg p-2">
+                            {agents.map((a) => {
+                              const isSelected = multiAgentIds.includes(a.id);
+                              const order = multiAgentIds.indexOf(a.id);
+                              return (
+                                <label
+                                  key={a.id}
+                                  className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${
+                                    isSelected
+                                      ? "bg-blue-50 dark:bg-blue-900/20"
+                                      : "hover:bg-gray-50 dark:hover:bg-gray-800"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    disabled={panelPromptSending}
+                                    onChange={() => toggleMultiAgentId(a.id)}
+                                    className="rounded border-gray-300 text-blue-500 focus:ring-blue-400 disabled:opacity-50"
+                                  />
+                                  <span className="flex-1 text-xs text-gray-700 dark:text-gray-300">
+                                    {a.name}
+                                    <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500">({a.role})</span>
+                                  </span>
+                                  {isSelected && (
+                                    <span className="text-[10px] font-medium text-blue-500 dark:text-blue-400 w-4 text-center">
+                                      {order + 1}
+                                    </span>
+                                  )}
+                                </label>
+                              );
+                            })}
+                          </div>
+                          {multiAgentIds.length > 0 && (
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500">
+                              {t("agentOrder")}: {multiAgentIds.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(" → ")}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={panelPromptMessage}
+                            onChange={(e) => setPanelPromptMessage(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleSendMultiPrompt(); }}
+                            disabled={panelPromptSending || multiAgentIds.length < 2}
+                            placeholder={t("promptPlaceholder")}
+                            className="flex-1 text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
+                          />
+                          <button
+                            onClick={handleSendMultiPrompt}
+                            disabled={panelPromptSending || !panelPromptMessage.trim() || multiAgentIds.length < 2}
+                            className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                          >
+                            {panelPromptSending && multiPromptProgress
+                              ? t("multiPromptRunning", { current: multiPromptProgress.current, total: multiPromptProgress.total })
+                              : t("sendPrompt")}
+                          </button>
+                        </div>
+                        {/* Multi-prompt results */}
+                        {multiPromptResults.length > 0 && (
+                          <div className="mt-2 space-y-2 max-h-[200px] overflow-y-auto">
+                            {multiPromptResults.map((r, i) => (
+                              <div key={r.agentId + i} className="border border-gray-100 dark:border-gray-700 rounded-lg overflow-hidden">
+                                <div className="px-2 py-1 bg-gray-50 dark:bg-gray-800 flex items-center gap-1.5">
+                                  <span className="text-[10px] font-medium text-gray-500 dark:text-gray-400">
+                                    {i + 1}. {r.agentName}
+                                  </span>
+                                </div>
+                                <div className="px-3 py-2 text-[11px] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words max-h-[80px] overflow-y-auto">
+                                  {r.result}
+                                </div>
+                              </div>
+                            ))}
+                            {!panelPromptSending && multiPromptResults.length === multiAgentIds.length && (
+                              <p className="text-[10px] text-center text-green-600 dark:text-green-400 font-medium">
+                                {t("multiPromptComplete")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <select
+                          value={panelPromptAgentId}
+                          onChange={(e) => setPanelPromptAgentId(e.target.value)}
+                          disabled={panelPromptSending}
+                          className="w-full text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
+                        >
+                          <option value="">{t("selectAgent")}</option>
+                          {agents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name} ({a.role})
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={panelPromptMessage}
+                            onChange={(e) => setPanelPromptMessage(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleSendPanelPrompt(); }}
+                            disabled={panelPromptSending || !panelPromptAgentId}
+                            placeholder={t("promptPlaceholder")}
+                            className="flex-1 text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
+                          />
+                          <button
+                            onClick={handleSendPanelPrompt}
+                            disabled={panelPromptSending || !panelPromptMessage.trim() || !panelPromptAgentId}
+                            className="px-3 py-1.5 text-xs font-medium bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                          >
+                            {panelPromptSending ? t("promptRunning") : t("sendPrompt")}
+                          </button>
+                        </div>
+                      </>
+                    )}
                     {panelPromptToast && (
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">{panelPromptToast}</p>
                     )}

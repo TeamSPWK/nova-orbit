@@ -41,6 +41,19 @@ export function useWebSocket() {
               // Also trigger refresh to sync agent status
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
+            case "multi-prompt:agent-done":
+              window.dispatchEvent(
+                new CustomEvent("nova:multi-agent-done", { detail: msg.payload })
+              );
+              // Refresh to sync agent status changes
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "multi-prompt:complete":
+              window.dispatchEvent(
+                new CustomEvent("nova:multi-complete", { detail: msg.payload })
+              );
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
             case "task:usage":
               window.dispatchEvent(
                 new CustomEvent("nova:task-usage", { detail: msg.payload })

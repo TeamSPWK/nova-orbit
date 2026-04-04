@@ -289,6 +289,15 @@ const en = {
   selectAgent: "Select agent",
   directPromptTitle: "Direct Prompt",
   promptSendError: "Send failed",
+  selectMultipleAgents: "Select multiple agents",
+  multiPromptRunning: "Running {{current}}/{{total}} agents...",
+  multiPromptComplete: "Multi-prompt complete",
+  multiAgentMode: "Multi-agent",
+  singleAgentMode: "Single agent",
+  addAgent: "Add",
+  removeAgent: "Remove",
+  agentOrder: "Execution order",
+  multiPromptAutoCreated: "{{count}} tasks auto-created",
 
   // TaskDetail modal
   taskDetail: "Task Detail",

@@ -289,6 +289,15 @@ const ko = {
   selectAgent: "에이전트 선택",
   directPromptTitle: "직접 프롬프트",
   promptSendError: "전송 실패",
+  selectMultipleAgents: "여러 에이전트 선택",
+  multiPromptRunning: "{{current}}/{{total}} 에이전트 실행 중...",
+  multiPromptComplete: "멀티 프롬프트 완료",
+  multiAgentMode: "멀티 에이전트",
+  singleAgentMode: "단일 에이전트",
+  addAgent: "추가",
+  removeAgent: "제거",
+  agentOrder: "실행 순서",
+  multiPromptAutoCreated: "태스크 {{count}}개 자동 생성됨",
 
   // TaskDetail modal
   taskDetail: "태스크 상세",

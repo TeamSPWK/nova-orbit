@@ -137,5 +137,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ message }),
       }),
+    multiPrompt: (agentIds: string[], message: string, projectId: string) =>
+      request<{ status: string; sessionId: string }>("/orchestration/multi-prompt", {
+        method: "POST",
+        body: JSON.stringify({ agentIds, message, projectId }),
+      }),
   },
 };

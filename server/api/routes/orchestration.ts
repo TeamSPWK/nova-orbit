@@ -251,6 +251,164 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     })();
   });
 
+  // Send a prompt to multiple agents sequentially
+  router.post("/multi-prompt", async (req, res) => {
+    const { agentIds, message, projectId } = req.body ?? {};
+
+    if (!Array.isArray(agentIds) || agentIds.length < 2) {
+      return res.status(400).json({ error: "agentIds must be an array of at least 2" });
+    }
+    if (!message || typeof message !== "string" || message.trim() === "") {
+      return res.status(400).json({ error: "message is required" });
+    }
+    if (!projectId || typeof projectId !== "string") {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // Validate all agents exist and are not working
+    const agentList: any[] = [];
+    for (const agentId of agentIds) {
+      const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as any;
+      if (!agent) return res.status(404).json({ error: `Agent ${agentId} not found` });
+      if (agent.status === "working") {
+        return res.status(409).json({ error: `Agent "${agent.name}" is already working` });
+      }
+      agentList.push(agent);
+    }
+
+    const sessionId = `multi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // Return immediately — run asynchronously
+    res.json({ status: "started", sessionId });
+
+    (async () => {
+      const workdir = project.workdir || process.cwd();
+      const results: { agentId: string; agentName: string; result: string }[] = [];
+
+      for (let i = 0; i < agentList.length; i++) {
+        const agent = agentList[i];
+
+        // Build prompt with previous context
+        let prompt: string;
+        if (i === 0) {
+          prompt = message.trim();
+        } else {
+          const discussionLines = results
+            .map((r) => {
+              const prevAgent = agentList.find((a) => a.id === r.agentId)!;
+              return `### ${r.agentName} (${prevAgent.role})의 의견:\n${r.result}`;
+            })
+            .join("\n\n---\n\n");
+
+          prompt = `## 이전 논의\n\n${discussionLines}\n\n---\n\n## 당신의 차례\n\n위 논의를 참고하여 다음 질문에 답해주세요:\n${message.trim()}`;
+        }
+
+        // Mark agent as working
+        db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agent.id);
+        broadcast("agent:status", { id: agent.id, name: agent.name, status: "working" });
+
+        let agentResult = "";
+        let session: any;
+        try {
+          session = sessionManager.spawnAgent(agent.id, workdir);
+
+          session.on("output", (text: string) => {
+            broadcast("agent:output", { agentId: agent.id, output: text });
+          });
+
+          const execResult = await session.send(prompt);
+
+          const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");
+          const parsed = parseStreamJson(execResult.stdout);
+          agentResult = parsed.text;
+        } catch (err: any) {
+          agentResult = `[Error: ${err.message}]`;
+        } finally {
+          db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(agent.id);
+          broadcast("agent:status", { id: agent.id, name: agent.name, status: "idle" });
+        }
+
+        results.push({ agentId: agent.id, agentName: agent.name, result: agentResult });
+        broadcast("multi-prompt:agent-done", {
+          sessionId,
+          agentId: agent.id,
+          agentName: agent.name,
+          result: agentResult,
+          index: i,
+          total: agentList.length,
+        });
+      }
+
+      // If the last agent is CTO, try to auto-create goal + tasks
+      let autoCreated = false;
+      const lastAgent = agentList[agentList.length - 1];
+      if (lastAgent.role === "cto") {
+        try {
+          const lastResult = results[results.length - 1].result;
+          const jsonMatch = lastResult.match(/```json\s*([\s\S]*?)\s*```/) ??
+                            lastResult.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
+          if (jsonMatch) {
+            const jsonStr = jsonMatch[1] ?? jsonMatch[0];
+            const data = JSON.parse(jsonStr);
+            const tasks = data.tasks ?? [];
+            if (tasks.length > 0) {
+              const goalDesc = data.goal ?? data.analysis ?? message.trim().slice(0, 200);
+              const goalResult = db.prepare(
+                "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, 'high')",
+              ).run(project.id, goalDesc);
+              const goalId = (db.prepare("SELECT id FROM goals WHERE rowid = ?").get(goalResult.lastInsertRowid) as any)?.id;
+
+              if (goalId) {
+                const projectAgents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(project.id) as any[];
+                const ctoAgent = projectAgents.find((a: any) => a.role === "cto");
+                const candidates = ctoAgent
+                  ? projectAgents.filter((a: any) => a.parent_id === ctoAgent.id)
+                  : projectAgents.filter((a: any) => a.role !== "cto");
+
+                const findAgentForRole = (role: string) =>
+                  candidates.find((a: any) => a.role === role) ??
+                  candidates.find((a: any) => a.role === "coder") ??
+                  candidates[0] ?? null;
+
+                for (const t of tasks) {
+                  if (!t.title || typeof t.title !== "string") continue;
+                  const assignee = findAgentForRole(t.role ?? "coder");
+                  db.prepare(
+                    "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id) VALUES (?, ?, ?, ?, ?)",
+                  ).run(goalId, project.id, t.title.slice(0, 200), (t.description ?? "").slice(0, 2000), assignee?.id ?? null);
+                }
+
+                autoCreated = true;
+                broadcast("project:updated", { projectId: project.id });
+
+                db.prepare(
+                  "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
+                ).run(project.id, lastAgent.id, `CTO created goal "${goalDesc.slice(0, 50)}" with ${tasks.length} tasks (multi-prompt)`);
+              }
+            }
+          }
+        } catch {
+          // JSON parsing failed — show text result only
+        }
+      }
+
+      if (!autoCreated) {
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_completed', ?)",
+        ).run(project.id, `Multi-prompt completed (${agentList.length} agents)`);
+      }
+
+      broadcast("multi-prompt:complete", {
+        sessionId,
+        results,
+        autoCreated,
+      });
+    })();
+  });
+
   // Kill an agent session
   router.post("/agents/:agentId/kill", (req, res) => {
     const { agentId } = req.params;
