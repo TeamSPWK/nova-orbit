@@ -73,6 +73,7 @@ const ko = {
   verificationPassed: "검증: 통과",
   verificationFailed: "검증: 실패",
   agentOutput: "에이전트 출력",
+  waitingForAgent: "에이전트 활동 대기 중...",
   collapsePanel: "접기",
   expandPanel: "펼치기",
   approve: "승인",

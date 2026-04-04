@@ -73,6 +73,7 @@ const en = {
   verificationPassed: "Verification: PASS",
   verificationFailed: "Verification: FAIL",
   agentOutput: "Agent Output",
+  waitingForAgent: "Waiting for agent activity...",
   collapsePanel: "Collapse",
   expandPanel: "Expand",
   approve: "Approve",
