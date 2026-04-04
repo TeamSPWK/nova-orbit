@@ -32,10 +32,11 @@ interface TaskListProps {
     verification_id: string | null;
   }>;
   agents: Array<{ id: string; name: string }>;
+  projectId?: string;
   onUpdate?: () => void;
 }
 
-export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
+export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) {
   const { t } = useTranslation();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
   const [verifyingTasks, setVerifyingTasks] = useState<Set<string>>(new Set());
@@ -192,6 +193,17 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
             <div className="flex items-center gap-2 mb-2">
               <span className={`text-xs font-medium ${config.color}`}>{t(labelKey)}</span>
               <span className="text-[10px] text-gray-300">{filtered.length}</span>
+              {status === "in_review" && filtered.length > 1 && projectId && (
+                <button
+                  onClick={async () => {
+                    await api.tasks.bulkApprove(projectId);
+                    onUpdate?.();
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600 ml-auto"
+                >
+                  {t("bulkApprove", { count: filtered.length })}
+                </button>
+              )}
             </div>
             <div className="space-y-1">
               {filtered.map((task) => {

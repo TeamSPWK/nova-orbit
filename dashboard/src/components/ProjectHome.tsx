@@ -598,7 +598,7 @@ export function ProjectHome() {
                     {t("queueRunning")}
                   </p>
                 )}
-                <TaskList tasks={tasks} agents={agents} onUpdate={loadData} />
+                <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} />
               </section>
             </div>
 

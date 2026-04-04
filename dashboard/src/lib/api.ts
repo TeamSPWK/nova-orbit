@@ -84,6 +84,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ feedback }),
       }),
+    bulkApprove: (projectId: string) =>
+      request<{ approved: number }>("/tasks/bulk-approve", {
+        method: "POST",
+        body: JSON.stringify({ projectId }),
+      }),
   },
   activities: {
     list: (projectId: string) => request<any[]>(`/activities?projectId=${projectId}`),

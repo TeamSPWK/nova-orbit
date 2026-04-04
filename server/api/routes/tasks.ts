@@ -55,7 +55,7 @@ export function createTaskRoutes(ctx: AppContext): Router {
     in_progress: ["in_review", "blocked", "todo"],
     in_review: ["done", "todo", "blocked"],
     done: ["todo"],
-    blocked: ["todo"],
+    blocked: ["todo", "in_progress"],
   };
   const VALID_STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
 
@@ -142,6 +142,32 @@ export function createTaskRoutes(ctx: AppContext): Router {
     ).run(task.project_id, `Approved: ${task.title}`);
 
     res.json(updated);
+  });
+
+  // Bulk approve all in_review tasks for a project
+  router.post("/bulk-approve", (req, res) => {
+    const { projectId } = req.body;
+    if (!projectId) return res.status(400).json({ error: "projectId is required" });
+
+    const tasks = db.prepare(
+      "SELECT * FROM tasks WHERE project_id = ? AND status = 'in_review'",
+    ).all(projectId) as any[];
+
+    let approved = 0;
+    for (const task of tasks) {
+      db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
+        .run(task.id);
+      updateGoalProgress(db, task.goal_id);
+      approved++;
+    }
+
+    broadcast("project:updated", { projectId });
+
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
+    ).run(projectId, `Bulk approved ${approved} tasks`);
+
+    res.json({ approved, total: tasks.length });
   });
 
   // Reject task (governance gate: in_review → todo with feedback)

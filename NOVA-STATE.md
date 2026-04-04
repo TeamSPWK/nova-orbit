@@ -1,7 +1,7 @@
 # Nova State
 
 ## Current
-- **Goal**: Nova Orbit v0.1.0 — 전체 기능 구현 + 안정화 완료
+- **Goal**: Nova Orbit v0.1.0 — 전체 기능 구현 + 안정화 + 보안 강화 완료
 - **Phase**: done
 - **Blocker**: none
 
@@ -14,19 +14,23 @@
 | 안정성 수정 | done | PASS | WS에러핸들링/타임아웃/좀비프로세스/Hooks순서 |
 | 사용성 개선 | done | PASS | 가이드/분해UX/큐상태/Activity포맷/2단계에이전트추가 |
 | 비용 추적 | done | PASS | token/cost 파싱+대시보드표시 |
-| E2E Playwright 테스트 | done | PASS | Todo App 전체 흐름 검증 |
+| 보안 강화 | done | PASS | Command Injection/Path Traversal/상태머신/try-catch/query검증 |
+| UX 오버홀 | done | PASS | 반려모달/검증흐름/i18n통일/반응형/ARIA/$NaN수정 |
+| Dev Server 관리 | done | PASS | 포트자동할당(4001~)/시작중지/브라우저열기 |
+| Rate Limit 처리 | done | PASS | 감지+1분대기재시도+배너경고+todo복구 |
+| 일괄 승인 | done | PASS | in_review 태스크 전체 승인 버튼 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| 에이전트 삭제/프롬프트편집/2단계추가 | 2026-04-04 | PASS | 55커밋 |
-| 비용 추적 (token/cost) | 2026-04-04 | PASS | stream-json 파싱 |
-| 서버 안정성 (5분 타임아웃, WS 에러) | 2026-04-04 | PASS | stuck 에이전트 방지 |
+| Dev Server 관리 + Rate Limit + 일괄 승인 | 2026-04-04 | PASS | 34파일 +1121 |
+| 보안 강화 + UX 오버홀 | 2026-04-04 | PASS | Nova Review 2회 통과 |
+| 실사용 테스트 (Weather + Markdown) | 2026-04-04 | PASS | 2프로젝트 100% 완료 |
 
 ## Known Risks
 | Risk | Severity | Status |
 |------|----------|--------|
-| Claude Pro 동시 세션 rate limit 미실측 | Warning | 미해결 |
+| Claude Pro 동시 세션 rate limit | Warning | 완화됨 (감지+재시도+배너) |
 | API 인증 없음 (localhost 바인딩으로 완화) | Warning | 완화됨 |
 
 ## Known Gaps
@@ -34,14 +38,13 @@
 |------|-------------------|----------|
 | npm publish | npmjs.com 미배포 | Medium |
 | 자동화 E2E 테스트 | Playwright CI 파이프라인 미구성 | Medium |
-| 실시간 터미널 로그 | 에이전트 출력이 터미널처럼 보이면 좋겠다는 피드백 | Low |
 
 ## Last Activity
-- 에이전트 삭제+2단계추가+비용추적+안정성 — 55커밋 | 2026-04-04T10:00:00Z
+- 보안강화+UX오버홀+DevServer+RateLimit+일괄승인+실사용테스트 | 2026-04-04T22:00:00Z
 
 ## Refs
 - Plan: docs/PROJECT.md
 - Design: docs/KICKOFF.md
 - Evaluator: docs/EVALUATOR.md
 - Figma: https://www.figma.com/design/oYV8Yp8DvntGwWi2kxnrGi
-- Last Verification: Nova Review PASS + vitest 44/44 PASS
+- Last Verification: Nova Review 2차 PASS + vitest 44/44 PASS + 빌드 PASS + 실사용 2프로젝트 완료
