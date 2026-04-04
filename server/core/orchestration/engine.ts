@@ -106,7 +106,29 @@ When complete, provide a summary of changes made.
 `;
 
         const implResult = await session.send(implementationPrompt);
-        log.info(`Implementation complete for task "${task.title}"`);
+        const implParsed = parseStreamJson(implResult.stdout);
+        log.info(`Implementation complete for task "${task.title}"`, {
+          cost: implParsed.usage?.totalCostUsd,
+          tokens: implParsed.usage ? implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens : 0,
+          duration: implParsed.usage?.durationMs,
+        });
+
+        // Broadcast usage data for dashboard
+        if (implParsed.usage) {
+          broadcast("task:usage", {
+            taskId,
+            agentId: task.assignee_id,
+            usage: implParsed.usage,
+          });
+
+          // Update session token usage in DB
+          db.prepare(
+            "UPDATE sessions SET token_usage = token_usage + ? WHERE agent_id = ? AND status = 'active'",
+          ).run(
+            implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens,
+            task.assignee_id,
+          );
+        }
 
         // Broadcast completion
         broadcast("task:completed", {
