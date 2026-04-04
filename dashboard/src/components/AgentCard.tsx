@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const ROLE_ICONS: Record<string, string> = {
   coder: "\uD83D\uDCBB",
@@ -41,11 +43,16 @@ interface AgentCardProps {
 
 export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
   const { t } = useTranslation();
+  const [showConfirm, setShowConfirm] = useState(false);
   const currentTask = tasks?.find((task) => task.id === agent.current_task_id);
 
-  const handleKill = async (e: React.MouseEvent) => {
+  const handleKillClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Kill agent "${agent.name}"?`)) return;
+    setShowConfirm(true);
+  };
+
+  const handleKillConfirm = async () => {
+    setShowConfirm(false);
     await api.orchestration.killAgent(agent.id);
     onKill?.();
   };
@@ -53,42 +60,51 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
   const statusLabelKey = STATUS_LABEL_KEYS[agent.status] ?? "statusIdle";
 
   return (
-    <div
-      className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-[#25253d] transition-colors cursor-pointer"
-      onClick={onClick}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
-          <div>
-            <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{agent.name}</div>
-            <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</div>
+    <>
+      {showConfirm && (
+        <ConfirmDialog
+          message={t("confirmKillAgent")}
+          onConfirm={handleKillConfirm}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+      <div
+        className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-[#25253d] transition-colors cursor-pointer"
+        onClick={onClick}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
+            <div>
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{agent.name}</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</div>
+            </div>
           </div>
+          {agent.status === "working" && (
+            <button
+              onClick={handleKillClick}
+              className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+              title={t("confirmKillAgent")}
+            >
+              {t("stopAgent")}
+            </button>
+          )}
         </div>
-        {agent.status === "working" && (
-          <button
-            onClick={handleKill}
-            className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-            title="Kill session"
+        <div className="flex items-center gap-2">
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded ${
+              STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle
+            }`}
           >
-            {t("stopAgent")}
-          </button>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <span
-          className={`text-[10px] px-1.5 py-0.5 rounded ${
-            STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle
-          }`}
-        >
-          {t(statusLabelKey)}
-        </span>
-        {currentTask && (
-          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-            {currentTask.title}
+            {t(statusLabelKey)}
           </span>
-        )}
+          {currentTask && (
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+              {currentTask.title}
+            </span>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

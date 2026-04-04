@@ -36,6 +36,7 @@ interface TaskListProps {
 export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
   const { t } = useTranslation();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
+  const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
 
   if (tasks.length === 0) {
@@ -54,23 +55,12 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
     } catch {
       // Error will be broadcast via WebSocket
     }
-    // Don't remove from running — WebSocket will update the task status
   };
 
-  const handleAssign = async (taskId: string) => {
-    if (agents.length === 0) return;
-    const agentName = prompt(
-      `Assign to agent:\n${agents.map((a) => `  ${a.name} (${a.id.slice(0, 6)})`).join("\n")}`,
-    );
-    if (!agentName) return;
-    const agent = agents.find(
-      (a) => a.name.toLowerCase() === agentName.toLowerCase() || a.id.startsWith(agentName),
-    );
-    if (!agent) {
-      alert("Agent not found");
-      return;
-    }
-    await api.tasks.update(taskId, { assignee_id: agent.id });
+  const handleAssignSelect = async (taskId: string, agentId: string) => {
+    setAssigningTaskId(null);
+    if (!agentId) return;
+    await api.tasks.update(taskId, { assignee_id: agentId });
     onUpdate?.();
   };
 
@@ -109,9 +99,22 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                       <span className="text-[10px] text-gray-400 dark:text-gray-400 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600">
                         {agentMap[task.assignee_id].name}
                       </span>
+                    ) : assigningTaskId === task.id ? (
+                      <select
+                        autoFocus
+                        defaultValue=""
+                        onChange={(e) => handleAssignSelect(task.id, e.target.value)}
+                        onBlur={() => setAssigningTaskId(null)}
+                        className="text-[10px] text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-blue-300 dark:border-blue-600 rounded px-1 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      >
+                        <option value="" disabled>{t("promptAssignAgent")}</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
                     ) : (
                       <button
-                        onClick={() => handleAssign(task.id)}
+                        onClick={() => setAssigningTaskId(task.id)}
                         className="text-[10px] text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 px-1.5 py-0.5 border border-dashed border-gray-200 dark:border-gray-600 rounded"
                       >
                         {t("assign")}

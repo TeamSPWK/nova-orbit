@@ -10,6 +10,8 @@ import { ActivityFeed } from "./ActivityFeed";
 import { AddAgentDialog } from "./AddAgentDialog";
 import { KanbanBoard } from "./KanbanBoard";
 import { ProjectSettings } from "./ProjectSettings";
+import { InputDialog } from "./InputDialog";
+import { Toast } from "./Toast";
 
 type Tab = "overview" | "kanban" | "verification" | "settings";
 
@@ -26,6 +28,11 @@ export function ProjectHome() {
   const [editingHeaderMission, setEditingHeaderMission] = useState(false);
   const [headerMissionDraft, setHeaderMissionDraft] = useState("");
   const [savingMission, setSavingMission] = useState(false);
+
+  // Dialog / toast state
+  const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
+  const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const project = projects.find((p) => p.id === currentProjectId);
 
@@ -64,11 +71,9 @@ export function ProjectHome() {
       }
     };
     const onAddAgent = () => setShowAddAgent(true);
-    const onAddGoal = async () => {
-      const description = prompt("Goal description:");
-      if (!description || !currentProjectId) return;
-      const goal = await api.goals.create({ project_id: currentProjectId, description });
-      setGoals([...goals, goal]);
+    const onAddGoal = () => {
+      if (!currentProjectId) return;
+      setShowDialog("addGoal");
     };
 
     window.addEventListener("nova:go-tab", onGoTab);
@@ -79,7 +84,7 @@ export function ProjectHome() {
       window.removeEventListener("nova:add-agent", onAddAgent);
       window.removeEventListener("nova:add-goal", onAddGoal);
     };
-  }, [currentProjectId, goals, setGoals]);
+  }, [currentProjectId]);
 
   if (!project) {
     return (
@@ -107,34 +112,38 @@ export function ProjectHome() {
     setShowAddAgent(false);
   };
 
-  const handleAddGoal = async () => {
-    const description = prompt("Goal description:");
-    if (!description) return;
-    const goal = await api.goals.create({
-      project_id: currentProjectId,
-      description,
-    });
+  const handleAddGoal = () => setShowDialog("addGoal");
+
+  const handleAddGoalSubmit = async (description: string) => {
+    setShowDialog(null);
+    if (!currentProjectId) return;
+    const goal = await api.goals.create({ project_id: currentProjectId, description });
     setGoals([...goals, goal]);
   };
 
   const handleDecomposeGoal = async (goalId: string) => {
     try {
       await api.orchestration.decomposeGoal(goalId);
-      // Tasks will be created and we'll get a WebSocket notification
-    } catch (err) {
-      alert("Failed to decompose goal");
+    } catch {
+      setToast(t("errorDecomposeFailed"));
     }
   };
 
-  const handleAddTask = async (goalId: string) => {
-    const title = prompt("Task title:");
-    if (!title) return;
+  const handleAddTask = (goalId: string) => {
+    setAddTaskGoalId(goalId);
+    setShowDialog("addTask");
+  };
+
+  const handleAddTaskSubmit = async (title: string) => {
+    setShowDialog(null);
+    if (!addTaskGoalId) return;
     const task = await api.tasks.create({
-      goal_id: goalId,
+      goal_id: addTaskGoalId,
       project_id: currentProjectId,
       title,
     });
     setTasks([...tasks, task]);
+    setAddTaskGoalId(null);
   };
 
   const startEditHeaderMission = () => {
@@ -159,7 +168,7 @@ export function ProjectHome() {
       updateProject(updated);
       setEditingHeaderMission(false);
     } catch {
-      alert("Failed to save mission");
+      setToast(t("errorSaveMissionFailed"));
     } finally {
       setSavingMission(false);
     }
@@ -174,6 +183,23 @@ export function ProjectHome() {
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {showDialog === "addGoal" && (
+        <InputDialog
+          title={t("promptGoalDesc")}
+          placeholder={t("promptGoalDescHint")}
+          onSubmit={handleAddGoalSubmit}
+          onCancel={() => setShowDialog(null)}
+        />
+      )}
+      {showDialog === "addTask" && (
+        <InputDialog
+          title={t("promptTaskTitle")}
+          placeholder={t("promptTaskTitleHint")}
+          onSubmit={handleAddTaskSubmit}
+          onCancel={() => { setShowDialog(null); setAddTaskGoalId(null); }}
+        />
+      )}
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
       {showAddAgent && currentProjectId && (
         <AddAgentDialog
           projectId={currentProjectId}
@@ -207,28 +233,28 @@ export function ProjectHome() {
                   onKeyDown={handleHeaderMissionKeyDown}
                   disabled={savingMission}
                   className="flex-1 text-sm border border-blue-400 rounded px-2 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  placeholder="Project mission..."
+                  placeholder={t("projectMissionPlaceholder")}
                 />
                 <button
                   onClick={saveHeaderMission}
                   disabled={savingMission}
                   className="text-xs px-2 py-0.5 bg-gray-900 text-white rounded hover:bg-gray-700 disabled:opacity-50"
                 >
-                  {savingMission ? "Saving…" : "Save"}
+                  {savingMission ? t("savingLabel") : t("saveLabel")}
                 </button>
                 <button
                   onClick={cancelEditHeaderMission}
                   disabled={savingMission}
                   className="text-xs px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-50"
                 >
-                  Cancel
+                  {t("cancelLabel")}
                 </button>
               </div>
             ) : (
               <p
                 className="text-gray-500 cursor-pointer hover:text-gray-700 group inline-flex items-center gap-1"
                 onClick={startEditHeaderMission}
-                title="Click to edit"
+                title={t("clickToEdit")}
               >
                 {project.mission || <span className="italic text-gray-400">{t("noMission")}</span>}
                 <span className="text-xs text-gray-300 group-hover:text-gray-400 transition-colors">
@@ -295,9 +321,7 @@ export function ProjectHome() {
                 </button>
               </div>
               {agents.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No agents yet. Add one to get started.
-                </p>
+                <p className="text-sm text-gray-400">{t("noAgents")}</p>
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   {agents.map((agent) => (
@@ -375,7 +399,7 @@ export function ProjectHome() {
             {/* Recent Activity Section */}
             <section>
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                Recent Activity
+                {t("recentActivity")}
               </h2>
               <ActivityFeed projectId={currentProjectId!} />
             </section>

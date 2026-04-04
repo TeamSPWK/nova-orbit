@@ -11,7 +11,7 @@ import { CommandPalette, CMD_EVENTS } from "./components/CommandPalette";
 
 function App() {
   const { t, i18n } = useTranslation();
-  const { projects, setProjects, setCurrentProject, connected } = useStore();
+  const { setProjects, setCurrentProject, connected } = useStore();
 
   useWebSocket();
 
@@ -36,35 +36,14 @@ function App() {
 
   // CommandPalette action handlers
   useEffect(() => {
-    const onNewProject = async () => {
-      const name = prompt("Project name:");
-      if (!name) return;
-      const mission = prompt("Mission (what are you building?):");
-      const project = await api.projects.create({ name, mission: mission ?? "", source: "new" });
-      setProjects([...projects, project]);
-      setCurrentProject(project.id);
+    const onNewProject = () => {
+      // Delegate to Sidebar which owns the NewProjectDialog
+      window.dispatchEvent(new CustomEvent("nova:open-new-project"));
     };
 
-    const onImportLocal = async () => {
-      const path = prompt("Local project path (e.g., ~/projects/my-app):");
-      if (!path) return;
-      try {
-        const res = await fetch("/api/projects/import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, name: path.split("/").pop() }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          alert(err.error ?? "Import failed");
-          return;
-        }
-        const imported = await res.json();
-        setProjects([...projects, imported]);
-        setCurrentProject(imported.id);
-      } catch {
-        alert("Import failed");
-      }
+    const onImportLocal = () => {
+      // Delegate to Sidebar which owns the import dialog
+      window.dispatchEvent(new CustomEvent("nova:open-import"));
     };
 
     const onConnectGitHub = () => {
@@ -125,7 +104,7 @@ function App() {
       window.removeEventListener(CMD_EVENTS.SWITCH_LANG, onSwitchLang);
       window.removeEventListener(CMD_EVENTS.GO_TAB, onGoTab);
     };
-  }, [projects, setProjects, setCurrentProject, i18n]);
+  }, [i18n]);
 
   return (
     <div className="flex h-screen bg-white dark:bg-[#1a1a2e]">
