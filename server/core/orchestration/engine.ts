@@ -31,6 +31,7 @@ interface GoalRow {
 interface AgentRow {
   id: string;
   role: string;
+  parent_id: string | null;
 }
 
 export interface OrchestrationConfig {
@@ -264,10 +265,13 @@ Fix ONLY these issues. Do not modify other code.
 
       log.info(`Decomposing goal: "${goal.description}"`);
 
-      // Find or create a coder agent for decomposition
+      // Prefer CTO/lead agent for decomposition; fall back to any agent
       const agent = db.prepare(
-        "SELECT * FROM agents WHERE project_id = ? LIMIT 1",
-      ).get(goal.project_id) as AgentRow | undefined;
+        "SELECT * FROM agents WHERE project_id = ? AND role = 'cto' LIMIT 1",
+      ).get(goal.project_id) as AgentRow | undefined
+        ?? db.prepare(
+          "SELECT * FROM agents WHERE project_id = ? LIMIT 1",
+        ).get(goal.project_id) as AgentRow | undefined;
 
       if (!agent) {
         throw new Error("No agents available for task decomposition");
@@ -312,15 +316,20 @@ Respond in this EXACT JSON format:
         const decomposed = JSON.parse(jsonMatch[1]);
         const tasks = decomposed.tasks ?? [];
 
-        // Auto-assign agents by role
+        // Auto-assign agents by role — prefer CTO's children if hierarchy exists
         const projectAgents = db.prepare(
           "SELECT * FROM agents WHERE project_id = ?",
         ).all(goal.project_id) as AgentRow[];
 
+        const ctoAgent = projectAgents.find((a) => a.role === "cto");
+        const candidates = ctoAgent
+          ? projectAgents.filter((a) => a.parent_id === ctoAgent.id)
+          : projectAgents.filter((a) => a.role !== "cto");
+
         const findAgent = (role: string) =>
-          projectAgents.find((a) => a.role === role) ??
-          projectAgents.find((a) => a.role === "coder") ??
-          projectAgents[0] ?? null;
+          candidates.find((a) => a.role === role) ??
+          candidates.find((a) => a.role === "coder") ??
+          candidates[0] ?? projectAgents[0] ?? null;
 
         const MAX_TITLE_LEN = 200;
         const MAX_DESC_LEN = 2000;
