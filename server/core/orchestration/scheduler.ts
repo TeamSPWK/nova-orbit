@@ -36,13 +36,16 @@ export function createScheduler(
   const running = new Map<string, boolean>();
 
   function pickNextTask(projectId: string): any | null {
-    const PRIORITY_ORDER = "CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END";
+    // Join with goals to get priority ordering
     return db.prepare(`
-      SELECT * FROM tasks
-      WHERE project_id = ?
-        AND status = 'todo'
-        AND assignee_id IS NOT NULL
-      ORDER BY ${PRIORITY_ORDER}, created_at ASC
+      SELECT t.* FROM tasks t
+      LEFT JOIN goals g ON t.goal_id = g.id
+      WHERE t.project_id = ?
+        AND t.status = 'todo'
+        AND t.assignee_id IS NOT NULL
+      ORDER BY
+        CASE g.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+        t.created_at ASC
       LIMIT 1
     `).get(projectId) ?? null;
   }
