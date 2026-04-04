@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { TaskDetail } from "./TaskDetail";
 
 const STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
 
@@ -38,7 +39,9 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
   const [elapsedSeconds, setElapsedSeconds] = useState<Record<string, number>>({});
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+  const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
   // Per-task interval refs for elapsed time counters
   const intervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -76,6 +79,13 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
     return <p className="text-sm text-gray-400">{t("noTasks")}</p>;
   }
 
+  const handleTaskClick = (e: React.MouseEvent, taskId: string) => {
+    // Don't open modal if clicking on interactive controls inside the row
+    const target = e.target as HTMLElement;
+    if (target.closest("select") || target.closest("button")) return;
+    setSelectedTaskId(taskId);
+  };
+
   const handleStatusChange = async (taskId: string, newStatus: string) => {
     await api.tasks.update(taskId, { status: newStatus });
     onUpdate?.();
@@ -102,6 +112,15 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
   };
 
   return (
+    <>
+      {selectedTask && (
+        <TaskDetail
+          task={selectedTask}
+          agents={agents}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdate={() => { setSelectedTaskId(null); onUpdate?.(); }}
+        />
+      )}
     <div className="space-y-5">
       {STATUSES.map((status) => {
         const filtered = tasks.filter((task) => task.status === status);
@@ -122,7 +141,8 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                 return (
                 <div
                   key={task.id}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors dark:bg-gray-800 ${
+                  onClick={(e) => handleTaskClick(e, task.id)}
+                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors dark:bg-gray-800 cursor-pointer ${
                     isRunning
                       ? "border-blue-400 dark:border-blue-500 animate-pulse"
                       : `border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600`

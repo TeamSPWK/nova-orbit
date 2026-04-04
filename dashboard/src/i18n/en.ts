@@ -190,6 +190,23 @@ const en = {
   agentDetailNoTasks: "No tasks assigned yet.",
   agentDetailKillSession: "Kill Session",
 
+  // TaskDetail modal
+  taskDetail: "Task Detail",
+  closeDetail: "Close",
+
+  // VerificationLog fix button
+  createFixTask: "Create Fix Task",
+  fixTaskCreated: "Fix task created",
+
+  // Queue controls
+  runQueue: "Run Queue",
+  stopQueue: "Stop Queue",
+  queueRunning: "Queue Running",
+
+  // Agent pause/resume
+  pauseAgent: "Pause",
+  resumeAgent: "Resume",
+
   // ProjectHome hardcoded strings
   noAgents: "No agents yet. Add one to get started.",
   projectMissionPlaceholder: "Project mission...",

@@ -1,0 +1,222 @@
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { api } from "../lib/api";
+
+const STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
+
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  todo: "statusTodo",
+  in_progress: "statusInProgress",
+  in_review: "statusInReview",
+  done: "statusDone",
+  blocked: "statusBlocked",
+};
+
+const DIM_LABEL_KEYS: Record<string, string> = {
+  functionality: "dimFunctionality",
+  dataFlow: "dimDataFlow",
+  designAlignment: "dimDesignAlignment",
+  craft: "dimCraft",
+  edgeCases: "dimEdgeCases",
+};
+
+interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  assignee_id: string | null;
+  verification_id: string | null;
+}
+
+interface Agent {
+  id: string;
+  name: string;
+}
+
+interface Verification {
+  id: string;
+  verdict: string;
+  scope: string;
+  severity: string;
+  dimensions: Record<string, { value: number; notes: string }>;
+  issues: Array<{
+    severity: string;
+    file?: string;
+    line?: number;
+    message: string;
+    suggestion?: string;
+  }>;
+  created_at: string;
+}
+
+interface TaskDetailProps {
+  task: Task;
+  agents: Agent[];
+  onClose: () => void;
+  onUpdate?: () => void;
+}
+
+export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps) {
+  const { t } = useTranslation();
+  const [verification, setVerification] = useState<Verification | null>(null);
+  const [status, setStatus] = useState(task.status);
+  const [assigneeId, setAssigneeId] = useState<string>(task.assignee_id ?? "");
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Load verification data if task has one
+  useEffect(() => {
+    if (task.verification_id) {
+      api.verifications.listByTask(task.id).then((list) => {
+        if (list.length > 0) setVerification(list[0]);
+      });
+    }
+  }, [task.id, task.verification_id]);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  const handleStatusChange = async (newStatus: string) => {
+    setStatus(newStatus);
+    await api.tasks.update(task.id, { status: newStatus });
+    onUpdate?.();
+  };
+
+  const handleAssigneeChange = async (newAgentId: string) => {
+    setAssigneeId(newAgentId);
+    await api.tasks.update(task.id, { assignee_id: newAgentId || null });
+    onUpdate?.();
+  };
+
+  const VERDICT_COLORS: Record<string, string> = {
+    pass: "bg-green-100 text-green-700",
+    conditional: "bg-yellow-100 text-yellow-700",
+    fail: "bg-red-100 text-red-700",
+  };
+
+  return (
+    <div
+      ref={overlayRef}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={handleOverlayClick}
+    >
+      <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-[#1e1e2e] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("taskDetail")}</h2>
+          <button
+            onClick={onClose}
+            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            {t("closeDetail")}
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+          {/* Title */}
+          <div>
+            <p className="text-base font-medium text-gray-900 dark:text-gray-100">{task.title}</p>
+            {task.description && (
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{task.description}</p>
+            )}
+          </div>
+
+          {/* Status + Agent row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">{t("statusTodo").replace("Todo", "Status")}:</span>
+              <select
+                value={status}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {t(STATUS_LABEL_KEYS[s])}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">{t("assign")}:</span>
+              <select
+                value={assigneeId}
+                onChange={(e) => handleAssigneeChange(e.target.value)}
+                className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                <option value="">— {t("promptAssignAgent")} —</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Verification results */}
+          {verification && (
+            <div className="border border-gray-100 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50 space-y-3">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${VERDICT_COLORS[verification.verdict] ?? "bg-gray-100 text-gray-600"}`}
+                >
+                  {verification.verdict === "pass"
+                    ? t("verdictPass")
+                    : verification.verdict === "conditional"
+                      ? t("verdictConditional")
+                      : t("verdictFail")}
+                </span>
+                <span className="text-xs text-gray-400">{verification.scope}</span>
+                <span className="text-xs text-gray-300 dark:text-gray-600 ml-auto">
+                  {new Date(verification.created_at).toLocaleString()}
+                </span>
+              </div>
+
+              {/* 5-Dimension scores */}
+              <div>
+                <p className="text-[10px] font-medium text-gray-400 uppercase mb-1.5">{t("dimensionScore")}</p>
+                <div className="space-y-1.5">
+                  {Object.entries(verification.dimensions).map(([key, dim]) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-400 dark:text-gray-500 w-20 shrink-0">
+                        {DIM_LABEL_KEYS[key] ? t(DIM_LABEL_KEYS[key]) : key}
+                      </span>
+                      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                        <div
+                          className={`h-1.5 rounded-full transition-all ${
+                            dim.value >= 8
+                              ? "bg-green-400"
+                              : dim.value >= 5
+                                ? "bg-yellow-400"
+                                : "bg-red-400"
+                          }`}
+                          style={{ width: `${dim.value * 10}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 w-5 text-right">
+                        {dim.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

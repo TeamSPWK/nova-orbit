@@ -55,6 +55,8 @@ export const api = {
   verifications: {
     list: (projectId: string) => request<any[]>(`/verifications?projectId=${projectId}`),
     listByTask: (taskId: string) => request<any[]>(`/verifications?taskId=${taskId}`),
+    createFixTask: (id: string) =>
+      request<any>(`/verifications/${id}/create-fix-task`, { method: "POST" }),
   },
   orchestration: {
     executeTask: (taskId: string, scope = "standard") =>
@@ -68,5 +70,13 @@ export const api = {
       request<any>(`/orchestration/agents/${agentId}/kill`, { method: "POST" }),
     killAll: () =>
       request<any>("/orchestration/sessions/kill-all", { method: "POST" }),
+    startQueue: (projectId: string) =>
+      request<any>(`/orchestration/projects/${projectId}/run-queue`, { method: "POST" }),
+    stopQueue: (projectId: string) =>
+      request<any>(`/orchestration/projects/${projectId}/stop-queue`, { method: "POST" }),
+    pauseAgent: (agentId: string) =>
+      request<any>(`/orchestration/agents/${agentId}/pause`, { method: "POST" }),
+    resumeAgent: (agentId: string) =>
+      request<any>(`/orchestration/agents/${agentId}/resume`, { method: "POST" }),
   },
 };

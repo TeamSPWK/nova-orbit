@@ -190,6 +190,23 @@ const ko = {
   agentDetailNoTasks: "아직 할당된 태스크가 없습니다.",
   agentDetailKillSession: "세션 종료",
 
+  // TaskDetail modal
+  taskDetail: "태스크 상세",
+  closeDetail: "닫기",
+
+  // VerificationLog fix button
+  createFixTask: "수정 태스크 생성",
+  fixTaskCreated: "수정 태스크가 생성되었습니다",
+
+  // Queue controls
+  runQueue: "큐 실행",
+  stopQueue: "큐 중지",
+  queueRunning: "큐 실행 중",
+
+  // Agent pause/resume
+  pauseAgent: "일시정지",
+  resumeAgent: "재개",
+
   // ProjectHome hardcoded strings
   noAgents: "에이전트가 없습니다. 추가하여 시작하세요.",
   projectMissionPlaceholder: "프로젝트 미션...",
