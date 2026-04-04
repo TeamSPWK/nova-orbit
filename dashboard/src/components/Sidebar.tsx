@@ -1,7 +1,9 @@
+import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const { projects, currentProjectId, setCurrentProject, setProjects } = useStore();
 
   const handleNewProject = async () => {
@@ -85,15 +87,15 @@ export function Sidebar() {
       {/* Logo */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
         <h1 className="text-sm font-semibold text-gray-800 dark:text-gray-200 tracking-tight">
-          Nova Orbit
+          {t("appName")}
         </h1>
-        <p className="text-xs text-gray-400 dark:text-gray-500">AI Team Orchestration</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">{t("appSubtitle")}</p>
       </div>
 
       {/* Project List */}
       <nav className="flex-1 overflow-y-auto py-2">
         <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium">
-          Projects
+          {t("projects")}
         </div>
         {projects.map((p) => (
           <button
@@ -123,19 +125,19 @@ export function Sidebar() {
           onClick={handleNewProject}
           className="w-full py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         >
-          + New Project
+          {t("newProject")}
         </button>
         <button
           onClick={handleImportProject}
           className="w-full py-1.5 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         >
-          Import Local
+          {t("importLocal")}
         </button>
         <button
           onClick={handleConnectGitHub}
           className="w-full py-1.5 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         >
-          Connect GitHub
+          {t("connectGitHub")}
         </button>
       </div>
     </aside>

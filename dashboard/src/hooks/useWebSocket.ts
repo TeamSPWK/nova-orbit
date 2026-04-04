@@ -9,6 +9,9 @@ export function useWebSocket() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws`;
 
+    let destroyed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     function connect() {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
@@ -39,8 +42,9 @@ export function useWebSocket() {
 
       ws.onclose = () => {
         setConnected(false);
-        // Reconnect after 3s
-        setTimeout(connect, 3000);
+        if (!destroyed) {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
       };
 
       ws.onerror = () => {
@@ -51,6 +55,8 @@ export function useWebSocket() {
     connect();
 
     return () => {
+      destroyed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
   }, [setConnected, updateTask]);

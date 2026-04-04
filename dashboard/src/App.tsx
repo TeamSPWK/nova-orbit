@@ -1,12 +1,15 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useStore } from "./stores/useStore";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { api } from "./lib/api";
 import { Sidebar } from "./components/Sidebar";
 import { ProjectHome } from "./components/ProjectHome";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { LanguageToggle } from "./components/LanguageToggle";
 
 function App() {
+  const { t } = useTranslation();
   const { setProjects, setCurrentProject, connected } = useStore();
 
   useWebSocket();
@@ -37,6 +40,7 @@ function App() {
         {/* Top bar */}
         <header className="h-10 border-b border-gray-200 dark:border-gray-700 flex items-center justify-end px-4 shrink-0 bg-white dark:bg-[#1a1a2e]">
           <div className="flex items-center gap-3">
+            <LanguageToggle />
             <ThemeToggle />
             <div className="flex items-center gap-2">
               <span
@@ -45,7 +49,7 @@ function App() {
                 }`}
               />
               <span className="text-[10px] text-gray-400">
-                {connected ? "Connected" : "Disconnected"}
+                {connected ? t("connected") : t("disconnected")}
               </span>
             </div>
           </div>

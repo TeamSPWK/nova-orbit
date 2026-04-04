@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* TailwindCSS v4: enable .dark class-based dark mode */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --sidebar-width: 260px;
   --color-bg: #ffffff;

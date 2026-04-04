@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 import { AgentCard } from "./AgentCard";
@@ -13,6 +14,7 @@ import { ProjectSettings } from "./ProjectSettings";
 type Tab = "overview" | "kanban" | "verification" | "settings";
 
 export function ProjectHome() {
+  const { t } = useTranslation();
   const { currentProjectId, projects, agents, setAgents, goals, setGoals, tasks, setTasks, updateProject } =
     useStore();
   const [loading, setLoading] = useState(true);
@@ -58,7 +60,7 @@ export function ProjectHome() {
       <div className="flex-1 flex items-center justify-center text-gray-400">
         <div className="text-center">
           <div className="text-4xl mb-4">&#x1F680;</div>
-          <p className="text-lg">Select or create a project to get started</p>
+          <p className="text-lg">{t("noProject")}</p>
         </div>
       </div>
     );
@@ -67,7 +69,7 @@ export function ProjectHome() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400">
-        Loading...
+        {t("loading")}
       </div>
     );
   }
@@ -226,19 +228,27 @@ export function ProjectHome() {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700">
-          {(["overview", "kanban", "verification", "settings"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`pb-2 text-sm capitalize transition-colors ${
-                tab === t
-                  ? "text-gray-900 dark:text-gray-100 border-b-2 border-gray-900 dark:border-gray-100 font-medium"
-                  : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              }`}
-            >
-              {t === "verification" ? "Verification Log" : t}
-            </button>
-          ))}
+          {(["overview", "kanban", "verification", "settings"] as Tab[]).map((tabId) => {
+            const tabLabel: Record<Tab, string> = {
+              overview: t("tabOverview"),
+              kanban: t("tabKanban"),
+              verification: t("tabVerification"),
+              settings: t("tabSettings"),
+            };
+            return (
+              <button
+                key={tabId}
+                onClick={() => setTab(tabId)}
+                className={`pb-2 text-sm transition-colors ${
+                  tab === tabId
+                    ? "text-gray-900 dark:text-gray-100 border-b-2 border-gray-900 dark:border-gray-100 font-medium"
+                    : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                }`}
+              >
+                {tabLabel[tabId]}
+              </button>
+            );
+          })}
         </div>
 
         {tab === "settings" ? (
@@ -249,13 +259,13 @@ export function ProjectHome() {
             <section className="mb-8">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-                  Agents
+                  {t("agents")}
                 </h2>
                 <button
                   onClick={handleAddAgent}
                   className="text-xs text-gray-400 hover:text-gray-600"
                 >
-                  + Add Agent
+                  {t("addAgent")}
                 </button>
               </div>
               {agents.length === 0 ? (
@@ -281,13 +291,13 @@ export function ProjectHome() {
             <section className="mb-8">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-                  Goals
+                  {t("goals")}
                 </h2>
                 <button
                   onClick={handleAddGoal}
                   className="text-xs text-gray-400 hover:text-gray-600"
                 >
-                  + Add Goal
+                  {t("addGoal")}
                 </button>
               </div>
               {goals.map((goal) => (
