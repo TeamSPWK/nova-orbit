@@ -7,7 +7,8 @@
     "nova-orbit": "./dist/bin/nova-orbit.js"
   },
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:dashboard\"",
+    "predev": "node -e \"const{execSync}=require('child_process');try{execSync('kill -9 $(lsof -ti :3000)',{stdio:'ignore'})}catch{};try{execSync('kill -9 $(lsof -ti :5173)',{stdio:'ignore'})}catch{}\"",
+    "dev": "concurrently --kill-others --kill-others-on-fail \"npm run dev:server\" \"npm run dev:dashboard\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:dashboard": "cd dashboard && npm run dev",
     "build": "npm run build:server && npm run build:dashboard",
