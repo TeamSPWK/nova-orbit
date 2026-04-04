@@ -107,8 +107,10 @@ export async function startServer(config: ServerConfig): Promise<void> {
     }
   });
 
-  server.listen(port, () => {
-    console.log(`  Server listening on port ${port}`);
+  // Bind to localhost only by default (security: prevent network exposure)
+  const host = process.env.NOVA_ORBIT_HOST ?? "127.0.0.1";
+  server.listen(port, host, () => {
+    console.log(`  Server listening on ${host}:${port}`);
   });
 
   // Graceful shutdown
