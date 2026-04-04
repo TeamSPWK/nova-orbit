@@ -106,6 +106,10 @@ const en = {
   customAgentPlaceholder: "Custom agent name...",
   create: "Create",
   cancel: "Cancel",
+  next: "Next",
+  back: "← Back",
+  previewPromptDesc: "Review and edit the system prompt before adding.",
+  addAgentConfirm: "Add Agent",
 
   // ActivityFeed
   noActivity: "No activity yet. Activity will appear here when agents run tasks.",

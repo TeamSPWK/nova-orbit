@@ -383,6 +383,7 @@ export function ProjectHome() {
                         agent={agent}
                         tasks={tasks}
                         onKill={loadData}
+                        onDeleted={loadData}
                         onClick={() => setSelectedAgentId(agent.id)}
                       />
                     ))}

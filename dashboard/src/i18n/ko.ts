@@ -106,6 +106,10 @@ const ko = {
   customAgentPlaceholder: "커스텀 에이전트 이름...",
   create: "생성",
   cancel: "취소",
+  next: "다음",
+  back: "← 뒤로",
+  previewPromptDesc: "추가 전에 시스템 프롬프트를 확인하고 수정하세요.",
+  addAgentConfirm: "에이전트 추가",
 
   // ActivityFeed
   noActivity: "아직 활동이 없습니다. 에이전트가 태스크를 실행하면 여기에 표시됩니다.",
