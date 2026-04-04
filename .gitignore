@@ -12,3 +12,4 @@ dist/
 coverage/
 .turbo/
 dashboard/dist/
+.playwright-mcp/

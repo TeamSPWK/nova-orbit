@@ -9,7 +9,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
 
   // List agents (optionally filter by project)
   router.get("/", (req, res) => {
-    const { projectId } = req.query;
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
     const agents = projectId
       ? db.prepare("SELECT * FROM agents WHERE project_id = ? ORDER BY created_at").all(projectId)
       : db.prepare("SELECT * FROM agents ORDER BY created_at").all();
@@ -90,14 +90,23 @@ export function createAgentRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: "project_id, name, and role are required" });
     }
 
-    const result = db.prepare(`
-      INSERT INTO agents (project_id, name, role, system_prompt, session_behavior)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(project_id, name, role, system_prompt, session_behavior);
+    const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom"];
+    if (!VALID_ROLES.includes(role)) {
+      return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
+    }
 
-    const agent = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
-    broadcast("agent:status", agent);
-    res.status(201).json(agent);
+    try {
+      const result = db.prepare(`
+        INSERT INTO agents (project_id, name, role, system_prompt, session_behavior)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(project_id, name, role, system_prompt, session_behavior);
+
+      const agent = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
+      broadcast("agent:status", agent);
+      res.status(201).json(agent);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // Update agent status
@@ -126,8 +135,10 @@ export function createAgentRoutes(ctx: AppContext): Router {
     res.json(updated);
   });
 
-  // Delete agent
+  // Delete agent — kill running session before DB delete
   router.delete("/:id", (req, res) => {
+    // Kill any running session for this agent (prevents orphaned processes)
+    ctx.sessionManager?.killSession?.(req.params.id);
     const result = db.prepare("DELETE FROM agents WHERE id = ?").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ error: "Agent not found" });
     res.json({ success: true });

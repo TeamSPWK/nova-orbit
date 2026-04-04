@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 interface Task {
   status: string;
+  verification_id?: string | null;
 }
 
 interface UsagePayload {
@@ -14,18 +15,27 @@ interface UsagePayload {
 
 interface ProjectStatsProps {
   tasks: Task[];
+  projectId?: string;
 }
 
-export function ProjectStats({ tasks }: ProjectStatsProps) {
+export function ProjectStats({ tasks, projectId }: ProjectStatsProps) {
   const { t } = useTranslation();
   const [totalCostUsd, setTotalCostUsd] = useState(0);
   const [totalTokens, setTotalTokens] = useState(0);
 
+  // Reset accumulated cost when project changes
+  useEffect(() => {
+    setTotalCostUsd(0);
+    setTotalTokens(0);
+  }, [projectId]);
+
   useEffect(() => {
     const handler = (e: Event) => {
-      const payload = (e as CustomEvent<UsagePayload>).detail;
-      setTotalCostUsd((prev) => prev + (payload.costUsd ?? 0));
-      setTotalTokens((prev) => prev + (payload.totalTokens ?? 0));
+      const payload = (e as CustomEvent<any>).detail;
+      const u = payload.usage;
+      setTotalCostUsd((prev) => prev + (u?.totalCostUsd ?? payload.costUsd ?? 0));
+      const tokens = u ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.cacheCreationTokens ?? 0) : (payload.totalTokens ?? 0);
+      setTotalTokens((prev) => prev + tokens);
     };
     window.addEventListener("nova:task-usage", handler);
     return () => window.removeEventListener("nova:task-usage", handler);
@@ -34,7 +44,7 @@ export function ProjectStats({ tasks }: ProjectStatsProps) {
   const total = tasks.length;
   const completed = tasks.filter((t) => t.status === "done").length;
   const inProgress = tasks.filter((t) => t.status === "in_progress").length;
-  const verified = tasks.filter((t) => t.status === "verified").length;
+  const verified = tasks.filter((t) => t.verification_id != null).length;
 
   const costLabel =
     totalCostUsd > 0 ? `$${totalCostUsd.toFixed(2)}` : t("noCostData");
@@ -91,7 +101,7 @@ export function ProjectStats({ tasks }: ProjectStatsProps) {
       <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
       <div className="text-center">
         <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{tokenLabel}</span>
-        <p className="text-[11px] leading-none mt-0.5 text-gray-400 dark:text-gray-500">Tokens</p>
+        <p className="text-[11px] leading-none mt-0.5 text-gray-400 dark:text-gray-500">{t("totalTokens")}</p>
       </div>
     </div>
   );

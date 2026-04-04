@@ -67,7 +67,11 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
   };
 
   if (verifications.length === 0) {
-    return <p className="text-sm text-gray-400">No verifications yet.</p>;
+    return (
+      <div className="py-6 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
+        <p className="text-sm text-gray-400 dark:text-gray-500">{t("noVerification")}</p>
+      </div>
+    );
   }
 
   return (

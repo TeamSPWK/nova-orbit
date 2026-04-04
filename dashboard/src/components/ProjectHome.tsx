@@ -35,6 +35,14 @@ export function ProjectHome() {
   // Queue state
   const [queueRunning, setQueueRunning] = useState(false);
 
+  // Dev server state
+  const [devServerStatus, setDevServerStatus] = useState<{
+    running: boolean;
+    port: number | null;
+    url: string | null;
+  }>({ running: false, port: null, url: null });
+  const [devServerStarting, setDevServerStarting] = useState(false);
+
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
@@ -51,11 +59,13 @@ export function ProjectHome() {
       api.goals.list(currentProjectId),
       api.tasks.list(currentProjectId),
       api.orchestration.queueStatus(currentProjectId).catch(() => ({ running: false })),
-    ]).then(([a, g, t, qs]) => {
+      api.projects.devServerStatus(currentProjectId).catch(() => ({ running: false, port: null, url: null })),
+    ]).then(([a, g, t, qs, ds]) => {
       setAgents(a);
       setGoals(g);
       setTasks(t);
       setQueueRunning(qs.running);
+      setDevServerStatus({ running: ds.running, port: ds.port ?? null, url: ds.url ?? null });
       setLoading(false);
     });
   }, [currentProjectId, setAgents, setGoals, setTasks]);
@@ -209,6 +219,29 @@ export function ProjectHome() {
     }
   };
 
+  const handleStartDevServer = async () => {
+    if (!currentProjectId || devServerStarting) return;
+    setDevServerStarting(true);
+    try {
+      const result = await api.projects.startDevServer(currentProjectId);
+      setDevServerStatus({ running: true, port: result.port, url: result.url });
+    } catch (err: any) {
+      setToast(err.message ?? "Failed to start dev server");
+    } finally {
+      setDevServerStarting(false);
+    }
+  };
+
+  const handleStopDevServer = async () => {
+    if (!currentProjectId) return;
+    try {
+      await api.projects.stopDevServer(currentProjectId);
+      setDevServerStatus({ running: false, port: null, url: null });
+    } catch (err: any) {
+      setToast(err.message ?? "Failed to stop dev server");
+    }
+  };
+
   // Derive in-progress task and its assigned agent for the chat panel
   const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
   const inProgressAgent = inProgressTask?.assignee_id
@@ -297,23 +330,64 @@ export function ProjectHome() {
               </p>
             )}
           </div>
-          <div className="flex gap-2 mt-2">
-            <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">
-              {project.status}
+          <div className="flex flex-wrap gap-2 mt-2 items-center">
+            <span className="text-xs px-2 py-0.5 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded">
+              {t(`projectStatus_${project.status}`)}
             </span>
-            <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded">
-              {project.source}
+            <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded">
+              {t(`projectSource_${project.source}`)}
             </span>
             {project.workdir && (
               <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-400 rounded font-mono">
                 {project.workdir}
               </span>
             )}
+            {/* Dev server controls */}
+            {project.workdir && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                {devServerStatus.running ? (
+                  <>
+                    <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      {t("devServerRunning", { port: devServerStatus.port })}
+                    </span>
+                    {devServerStatus.url && (
+                      <a
+                        href={devServerStatus.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+                      >
+                        {t("openInBrowser")}
+                      </a>
+                    )}
+                    <button
+                      onClick={handleStopDevServer}
+                      className="text-xs px-2.5 py-0.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded hover:bg-red-100 dark:hover:bg-red-900/50 font-medium"
+                    >
+                      {t("stopDevServer")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleStartDevServer}
+                    disabled={devServerStarting}
+                    className={`text-xs px-2.5 py-0.5 rounded font-medium transition-colors ${
+                      devServerStarting
+                        ? "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-wait"
+                        : "bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/50"
+                    }`}
+                  >
+                    {devServerStarting ? t("devServerStarting") : t("startDevServer")}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Project Stats */}
-        <ProjectStats tasks={tasks} />
+        <ProjectStats tasks={tasks} projectId={currentProjectId ?? undefined} />
 
         {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700">
@@ -426,23 +500,30 @@ export function ProjectHome() {
                     key={goal.id}
                     className="mb-4 p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d]"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <span className="text-sm font-medium text-gray-800 dark:text-gray-100 min-w-0">
                         {goal.description}
                       </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 dark:text-gray-500">
-                          {goal.progress}%
-                        </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {(() => {
+                          const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                          const doneTasks = goalTasks.filter((tk) => tk.status === "done").length;
+                          const pct = goalTasks.length > 0 ? Math.round((doneTasks / goalTasks.length) * 100) : 0;
+                          return (
+                            <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                              {doneTasks}/{goalTasks.length} ({pct}%)
+                            </span>
+                          );
+                        })()}
                         {tasks.some((t) => t.goal_id === goal.id) ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
                             {t("decomposed")}
                           </span>
                         ) : (
                           <button
                             onClick={() => handleDecomposeGoal(goal.id)}
                             disabled={decomposingGoalId !== null}
-                            className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
+                            className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
                               decomposingGoalId === goal.id
                                 ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
                                 : decomposingGoalId !== null
@@ -465,18 +546,25 @@ export function ProjectHome() {
                         )}
                         <button
                           onClick={() => handleAddTask(goal.id)}
-                          className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+                          className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap"
                         >
                           {t("addTask")}
                         </button>
                       </div>
                     </div>
-                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
-                      <div
-                        className="bg-blue-500 h-1.5 rounded-full transition-all"
-                        style={{ width: `${goal.progress}%` }}
-                      />
-                    </div>
+                    {(() => {
+                      const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                      const doneTasks = goalTasks.filter((tk) => tk.status === "done").length;
+                      const pct = goalTasks.length > 0 ? Math.round((doneTasks / goalTasks.length) * 100) : 0;
+                      return (
+                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
+                          <div
+                            className="bg-blue-500 h-1.5 rounded-full transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </section>
@@ -515,7 +603,7 @@ export function ProjectHome() {
             </div>
 
             {/* Side panel — sticky, fixed width, scrollable within */}
-            <div className="w-[360px] shrink-0 sticky top-0 self-start max-h-[calc(100vh-200px)] overflow-y-auto space-y-4">
+            <div className="w-[360px] max-w-[calc(100vw-2rem)] shrink-0 sticky top-0 self-start max-h-[calc(100vh-200px)] overflow-y-auto space-y-4">
               {/* Agent Output */}
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                 <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">

@@ -76,6 +76,7 @@ export function createSessionManager(db: Database): SessionManager {
     killSession(agentId: string): void {
       const session = sessions.get(agentId);
       if (session) {
+        session.removeAllListeners();
         session.cleanup();
         sessions.delete(agentId);
         db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
@@ -88,8 +89,11 @@ export function createSessionManager(db: Database): SessionManager {
 
     killAll(): void {
       for (const [agentId, session] of sessions) {
+        session.removeAllListeners();
         session.cleanup();
         db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
+          .run(agentId);
+        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
           .run(agentId);
       }
       sessions.clear();

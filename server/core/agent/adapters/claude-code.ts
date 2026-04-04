@@ -101,11 +101,18 @@ export function createClaudeCodeAdapter() {
 
             session.process = proc;
 
-            // Kill process after timeout
+            // Kill process after timeout — SIGTERM first, SIGKILL fallback
             const timeout = setTimeout(() => {
               if (session.process) {
-                log.warn(`Session ${session.id} timed out after ${TIMEOUT_MS / 1000}s, killing`);
+                log.warn(`Session ${session.id} timed out after ${TIMEOUT_MS / 1000}s, sending SIGTERM`);
                 session.process.kill("SIGTERM");
+                // SIGKILL fallback if process doesn't exit within 5s
+                setTimeout(() => {
+                  if (session.process) {
+                    log.warn(`Session ${session.id} did not exit after SIGTERM, sending SIGKILL`);
+                    session.process.kill("SIGKILL");
+                  }
+                }, 5000);
               }
             }, TIMEOUT_MS);
             let stdout = "";
@@ -178,6 +185,17 @@ export function createClaudeCodeAdapter() {
           log.info(
             `Session "${resumeId}" unavailable, retrying with fresh session`,
           );
+          session.lastSessionId = null;
+          return runAttempt(null);
+        }
+
+        // Rate limit detection — wait and retry once
+        if (result.exitCode !== 0 && isRateLimitError(result.stderr)) {
+          const waitMs = 60_000; // Wait 1 minute before retry
+          log.warn(`Rate limit hit, waiting ${waitMs / 1000}s before retry`);
+          session.emit("rate-limit", { waitMs, stderr: result.stderr.slice(0, 200) });
+          session.emit("output", `\n⏳ Rate limit reached. Waiting ${waitMs / 1000}s before retry...\n`);
+          await new Promise((r) => setTimeout(r, waitMs));
           session.lastSessionId = null;
           return runAttempt(null);
         }
@@ -336,5 +354,21 @@ function isUnknownSessionError(stderr: string): boolean {
     lower.includes("unknown session") ||
     lower.includes("session not found") ||
     lower.includes("invalid session")
+  );
+}
+
+/**
+ * Check if error indicates a rate limit (Claude Pro usage exhausted).
+ * Common patterns: "out of extra usage", "rate limit", "too many requests", "429"
+ */
+function isRateLimitError(stderr: string): boolean {
+  const lower = stderr.toLowerCase();
+  return (
+    lower.includes("out of") && lower.includes("usage") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("429") ||
+    lower.includes("quota") ||
+    lower.includes("capacity")
   );
 }

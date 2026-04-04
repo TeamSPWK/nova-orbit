@@ -3,6 +3,7 @@ import type { AppContext } from "../../index.js";
 import { createSessionManager } from "../../core/agent/session.js";
 import { createOrchestrationEngine } from "../../core/orchestration/engine.js";
 import { createScheduler } from "../../core/orchestration/scheduler.js";
+import { createQualityGate } from "../../core/quality-gate/evaluator.js";
 
 export function createOrchestrationRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -11,6 +12,10 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
   const sessionManager = createSessionManager(db);
   const engine = createOrchestrationEngine(db, sessionManager, broadcast);
   const scheduler = createScheduler(db, sessionManager, broadcast);
+  const qualityGate = createQualityGate(db, sessionManager);
+
+  // Expose sessionManager on ctx so other routes (e.g. agent delete) can kill sessions
+  ctx.sessionManager = sessionManager;
 
   // Execute a single task
   router.post("/tasks/:taskId/execute", async (req, res) => {
@@ -20,6 +25,14 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
     if (!task) return res.status(404).json({ error: "Task not found" });
     if (!task.assignee_id) return res.status(400).json({ error: "Task has no assigned agent" });
+
+    // Prevent duplicate execution — atomic status transition
+    if (task.status === "in_progress") {
+      return res.status(409).json({ error: "Task is already in progress" });
+    }
+    if (task.status === "done") {
+      return res.status(400).json({ error: "Task is already done" });
+    }
 
     // Start execution asynchronously, return immediately
     res.json({ status: "started", taskId });
@@ -58,6 +71,61 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     } catch (err: any) {
       broadcast("project:updated", { projectId: goal.project_id, error: err.message });
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Verify a task (Quality Gate only, no execution)
+  // If verdict is pass, auto-approves the task to done
+  router.post("/tasks/:taskId/verify", async (req, res) => {
+    const { taskId } = req.params;
+    const { scope = "standard" } = req.body ?? {};
+
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
+    if (!task) return res.status(404).json({ error: "Task not found" });
+
+    // Return immediately, run verification asynchronously
+    res.json({ status: "verifying", taskId });
+
+    try {
+      const result = await qualityGate.verify(taskId, { scope });
+      broadcast("verification:result", result);
+
+      // Link verification to task
+      const verification = db.prepare(
+        "SELECT id FROM verifications WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
+      ).get(taskId) as any;
+
+      if (verification) {
+        db.prepare("UPDATE tasks SET verification_id = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(verification.id, taskId);
+      }
+
+      // Auto-approve on pass
+      if (result.verdict === "pass") {
+        db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
+          .run(taskId);
+
+        const goalRow = db.prepare("SELECT goal_id FROM tasks WHERE id = ?").get(taskId) as any;
+        if (goalRow?.goal_id) {
+          const stats = db.prepare(`
+            SELECT COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
+            FROM tasks WHERE goal_id = ?
+          `).get(goalRow.goal_id) as { total: number; done: number };
+          const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+          db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalRow.goal_id);
+        }
+
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
+        ).run(task.project_id, `Verified & approved: ${task.title}`);
+      }
+
+      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
+      broadcast("task:updated", updated);
+    } catch (err: any) {
+      // Read actual DB state — evaluator may have set it to 'blocked'
+      const currentTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
+      broadcast("task:updated", currentTask ?? { taskId, status: "in_review", error: err.message });
     }
   });
 

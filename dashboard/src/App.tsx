@@ -11,6 +11,7 @@ import { CommandPalette, CMD_EVENTS } from "./components/CommandPalette";
 import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { GettingStarted } from "./components/GettingStarted";
+import { RateLimitBanner } from "./components/RateLimitBanner";
 import { useNotifications } from "./stores/useNotifications";
 
 function App() {
@@ -155,6 +156,8 @@ function App() {
             {t("serverDown")}
           </div>
         )}
+        {/* Rate limit warning */}
+        <RateLimitBanner />
         {/* Top bar */}
         <header className="h-10 border-b border-gray-200 dark:border-gray-700 flex items-center justify-end px-4 shrink-0 bg-white dark:bg-[#1a1a2e]">
           <div className="flex items-center gap-3">

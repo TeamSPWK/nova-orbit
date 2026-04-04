@@ -7,7 +7,8 @@ export function createVerificationRoutes(ctx: AppContext): Router {
 
   // List verifications for a task
   router.get("/", (req, res) => {
-    const { taskId, projectId } = req.query;
+    const taskId = typeof req.query.taskId === "string" ? req.query.taskId : undefined;
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
     let verifications;
     if (taskId) {

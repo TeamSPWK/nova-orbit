@@ -7,7 +7,8 @@ export function createTaskRoutes(ctx: AppContext): Router {
 
   // List tasks (filter by projectId or goalId)
   router.get("/", (req, res) => {
-    const { projectId, goalId } = req.query;
+    const goalId = typeof req.query.goalId === "string" ? req.query.goalId : undefined;
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
     let tasks;
     if (goalId) {
@@ -34,59 +35,98 @@ export function createTaskRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: "goal_id, project_id, and title are required" });
     }
 
-    const result = db.prepare(`
-      INSERT INTO tasks (goal_id, project_id, title, description, assignee_id)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(goal_id, project_id, title, description, assignee_id ?? null);
+    try {
+      const result = db.prepare(`
+        INSERT INTO tasks (goal_id, project_id, title, description, assignee_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(goal_id, project_id, title, description, assignee_id ?? null);
 
-    const task = db.prepare("SELECT * FROM tasks WHERE rowid = ?").get(result.lastInsertRowid);
-    broadcast("task:updated", task);
-    res.status(201).json(task);
+      const task = db.prepare("SELECT * FROM tasks WHERE rowid = ?").get(result.lastInsertRowid);
+      broadcast("task:updated", task);
+      res.status(201).json(task);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
+
+  // Valid status transitions
+  const VALID_TRANSITIONS: Record<string, string[]> = {
+    todo: ["in_progress", "blocked"],
+    in_progress: ["in_review", "blocked", "todo"],
+    in_review: ["done", "todo", "blocked"],
+    done: ["todo"],
+    blocked: ["todo"],
+  };
+  const VALID_STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
 
   // Update task
   router.patch("/:id", (req, res) => {
     const { title, description, assignee_id, status, verification_id } = req.body;
-    const existing = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+    const existing = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Task not found" });
 
-    db.prepare(`
-      UPDATE tasks SET
-        title = COALESCE(?, title),
-        description = COALESCE(?, description),
-        assignee_id = COALESCE(?, assignee_id),
-        status = COALESCE(?, status),
-        verification_id = COALESCE(?, verification_id),
-        updated_at = datetime('now')
-      WHERE id = ?
-    `).run(
-      title ?? null,
-      description ?? null,
-      assignee_id !== undefined ? assignee_id : null,
-      status ?? null,
-      verification_id ?? null,
-      req.params.id,
-    );
-
-    const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
-    broadcast("task:updated", updated);
-
-    // Update goal progress if task status changed
+    // Validate status transition
     if (status) {
-      updateGoalProgress(db, (existing as any).goal_id);
+      if (!VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` });
+      }
+      const allowed = VALID_TRANSITIONS[existing.status];
+      if (allowed && !allowed.includes(status)) {
+        return res.status(400).json({
+          error: `Cannot transition from '${existing.status}' to '${status}'. Allowed: ${allowed.join(", ")}`,
+        });
+      }
     }
 
-    res.json(updated);
+    try {
+      db.prepare(`
+        UPDATE tasks SET
+          title = COALESCE(?, title),
+          description = COALESCE(?, description),
+          assignee_id = COALESCE(?, assignee_id),
+          status = COALESCE(?, status),
+          verification_id = COALESCE(?, verification_id),
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        title ?? null,
+        description ?? null,
+        assignee_id !== undefined ? assignee_id : null,
+        status ?? null,
+        verification_id ?? null,
+        req.params.id,
+      );
+
+      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+      broadcast("task:updated", updated);
+
+      // Update goal progress if task status changed
+      if (status) {
+        updateGoalProgress(db, existing.goal_id);
+      }
+
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // Approve task (governance gate: in_review → done)
-  // If skipVerification is false (default), triggers Quality Gate before marking done
+  // Requires verification to exist — use /orchestration/tasks/:id/verify first
   router.post("/:id/approve", async (req, res) => {
-    const { skipVerification = false } = req.body ?? {};
+    const { force = false } = req.body ?? {};
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
     if (!task) return res.status(404).json({ error: "Task not found" });
     if (task.status !== "in_review") {
       return res.status(400).json({ error: `Cannot approve task in status '${task.status}'. Must be 'in_review'.` });
+    }
+
+    // Block approve without verification (unless force override)
+    if (!task.verification_id && !force) {
+      return res.status(400).json({
+        error: "Task has no verification. Run verification first.",
+        requiresVerification: true,
+      });
     }
 
     // Mark as done

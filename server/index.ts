@@ -12,7 +12,9 @@ import { createGoalRoutes } from "./api/routes/goals.js";
 import { createOrchestrationRoutes } from "./api/routes/orchestration.js";
 import { createActivityRoutes } from "./api/routes/activities.js";
 import { createWSHandler } from "./api/websocket.js";
+import { createDevServerManager, type DevServerManager } from "./core/project/dev-server.js";
 import type { Database } from "better-sqlite3";
+import type { SessionManager } from "./core/agent/session.js";
 
 export interface ServerConfig {
   port: number;
@@ -23,6 +25,8 @@ export interface AppContext {
   db: Database;
   wss: WebSocketServer;
   broadcast: (event: string, data: unknown) => void;
+  sessionManager?: SessionManager;
+  devServerManager: DevServerManager;
 }
 
 export async function startServer(config: ServerConfig): Promise<void> {
@@ -67,7 +71,8 @@ export async function startServer(config: ServerConfig): Promise<void> {
     }
   };
 
-  const ctx: AppContext = { db, wss, broadcast };
+  const devServerManager = createDevServerManager();
+  const ctx: AppContext = { db, wss, broadcast, devServerManager };
 
   // WebSocket handler
   createWSHandler(wss);
@@ -116,6 +121,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
   // Graceful shutdown
   const shutdown = () => {
     console.log("\n  Shutting down...");
+    devServerManager.stopAll();
     wss.close();
     server.close();
     db.close();
@@ -137,8 +143,9 @@ export async function startServer(config: ServerConfig): Promise<void> {
 const isDirectRun = process.argv[1]?.endsWith("server/index.ts") ||
                     process.argv[1]?.endsWith("server/index.js");
 if (isDirectRun) {
-  const dataDir = resolve(process.cwd(), ".nova-orbit");
-  startServer({ port: 3000, dataDir }).catch((err) => {
+  const port = parseInt(process.env.PORT || "3000", 10);
+  const dataDir = resolve(process.cwd(), process.env.NOVA_ORBIT_DATA_DIR || ".nova-orbit");
+  startServer({ port, dataDir }).catch((err) => {
     console.error("Failed to start server:", err);
     process.exit(1);
   });

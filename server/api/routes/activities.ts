@@ -7,7 +7,7 @@ export function createActivityRoutes(ctx: AppContext): Router {
 
   // GET /api/activities?projectId=xxx
   router.get("/", (req, res) => {
-    const { projectId } = req.query;
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
     if (!projectId) {
       return res.status(400).json({ error: "projectId query param required" });

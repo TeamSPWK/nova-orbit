@@ -39,6 +39,14 @@ export const api = {
     update: (id: string, data: any) =>
       request<any>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) => request<any>(`/projects/${id}`, { method: "DELETE" }),
+    startDevServer: (id: string) =>
+      request<{ status: string; port: number; url: string }>(`/projects/${id}/dev-server/start`, { method: "POST" }),
+    stopDevServer: (id: string) =>
+      request<{ status: string }>(`/projects/${id}/dev-server/stop`, { method: "POST" }),
+    devServerStatus: (id: string) =>
+      request<{ running: boolean; port: number | null; pid: number | null; url: string | null }>(
+        `/projects/${id}/dev-server/status`,
+      ),
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
@@ -108,5 +116,10 @@ export const api = {
       request<any>(`/orchestration/agents/${agentId}/pause`, { method: "POST" }),
     resumeAgent: (agentId: string) =>
       request<any>(`/orchestration/agents/${agentId}/resume`, { method: "POST" }),
+    verifyTask: (taskId: string, scope = "standard") =>
+      request<any>(`/orchestration/tasks/${taskId}/verify`, {
+        method: "POST",
+        body: JSON.stringify({ scope }),
+      }),
   },
 };

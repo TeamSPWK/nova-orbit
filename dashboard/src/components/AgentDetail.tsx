@@ -167,7 +167,13 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
                     STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle
                   }`}
                 >
-                  {agent.status.replace(/_/g, " ")}
+                  {t({
+                    idle: "statusIdle",
+                    working: "statusWorking",
+                    waiting_approval: "statusWaitingApproval",
+                    paused: "statusPaused",
+                    terminated: "statusTerminated",
+                  }[agent.status] ?? "statusIdle")}
                 </span>
               </div>
               {agent.session_id && (

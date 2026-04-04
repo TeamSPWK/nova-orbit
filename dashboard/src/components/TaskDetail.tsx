@@ -137,8 +137,9 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
           {/* Status + Agent row */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">{t("statusTodo").replace("Todo", "Status")}:</span>
+              <span className="text-xs text-gray-400">{t("taskStatus")}:</span>
               <select
+                aria-label={t("taskStatus")}
                 value={status}
                 onChange={(e) => handleStatusChange(e.target.value)}
                 className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -154,6 +155,7 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">{t("assign")}:</span>
               <select
+                aria-label={t("assign")}
                 value={assigneeId}
                 onChange={(e) => handleAssigneeChange(e.target.value)}
                 className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -169,6 +171,11 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
           </div>
 
           {/* Verification results */}
+          {!verification && (
+            <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-4 text-center">
+              <p className="text-xs text-gray-400 dark:text-gray-500">{t("noVerification")}</p>
+            </div>
+          )}
           {verification && (
             <div className="border border-gray-100 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50 space-y-3">
               <div className="flex items-center gap-2">

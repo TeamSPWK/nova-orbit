@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface InputDialogProps {
   title: string;
@@ -14,11 +15,12 @@ export function InputDialog({
   title,
   placeholder,
   defaultValue = "",
-  submitLabel = "OK",
-  cancelLabel = "Cancel",
+  submitLabel,
+  cancelLabel,
   onSubmit,
   onCancel,
 }: InputDialogProps) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(defaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -61,14 +63,14 @@ export function InputDialog({
             onClick={onCancel}
             className="text-xs px-3 py-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 rounded"
           >
-            {cancelLabel}
+            {cancelLabel ?? t("cancel")}
           </button>
           <button
             onClick={handleSubmit}
             disabled={!value.trim()}
             className="text-xs px-4 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-40"
           >
-            {submitLabel}
+            {submitLabel ?? t("confirm")}
           </button>
         </div>
       </div>

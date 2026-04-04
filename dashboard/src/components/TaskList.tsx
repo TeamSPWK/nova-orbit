@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { TaskDetail } from "./TaskDetail";
+import { RejectDialog } from "./RejectDialog";
 
 const STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
 
@@ -37,9 +38,11 @@ interface TaskListProps {
 export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
   const { t } = useTranslation();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
+  const [verifyingTasks, setVerifyingTasks] = useState<Set<string>>(new Set());
   const [elapsedSeconds, setElapsedSeconds] = useState<Record<string, number>>({});
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [rejectingTask, setRejectingTask] = useState<{ id: string; title: string } | null>(null);
   const [taskUsage, setTaskUsage] = useState<Map<string, { costUsd: number; totalTokens: number }>>(new Map());
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
@@ -78,6 +81,17 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
           }
         });
         return stillRunning;
+      });
+      // Clear verifying state for tasks that now have verification or changed status
+      setVerifyingTasks((prev) => {
+        const still = new Set<string>();
+        prev.forEach((id) => {
+          const task = tasks.find((t) => t.id === id);
+          if (task && task.status === "in_review" && !task.verification_id) {
+            still.add(id);
+          }
+        });
+        return still;
       });
     };
     window.addEventListener("nova:refresh", handler);
@@ -130,6 +144,18 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
     }
   };
 
+  const handleReject = async (taskId: string, feedback: string, autoRerun: boolean) => {
+    setRejectingTask(null);
+    await api.tasks.reject(taskId, feedback || undefined);
+    onUpdate?.();
+
+    // Auto-rerun: wait for status to go back to todo, then execute
+    if (autoRerun) {
+      // Small delay to let the status update propagate
+      setTimeout(() => handleRunTask(taskId), 500);
+    }
+  };
+
   const handleAssignSelect = async (taskId: string, agentId: string) => {
     setAssigningTaskId(null);
     if (!agentId) return;
@@ -145,6 +171,13 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
           agents={agents}
           onClose={() => setSelectedTaskId(null)}
           onUpdate={() => { setSelectedTaskId(null); onUpdate?.(); }}
+        />
+      )}
+      {rejectingTask && (
+        <RejectDialog
+          taskTitle={rejectingTask.title}
+          onReject={(fb, autoRerun) => handleReject(rejectingTask.id, fb, autoRerun)}
+          onCancel={() => setRejectingTask(null)}
         />
       )}
     <div className="space-y-5">
@@ -180,6 +213,11 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                     {task.verification_id && (
                       <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
                         {t("verified")}
+                      </span>
+                    )}
+                    {task.status === "todo" && task.description?.includes("--- Rejection Feedback ---") && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded shrink-0">
+                        {t("rejected")}
                       </span>
                     )}
                     {task.status === "done" && usage && (
@@ -219,6 +257,7 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
 
                     {/* Status dropdown */}
                     <select
+                      aria-label={t("taskStatus")}
                       value={task.status}
                       onChange={(e) => handleStatusChange(task.id, e.target.value)}
                       className="text-[10px] text-gray-400 dark:text-gray-400 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5 cursor-pointer"
@@ -230,30 +269,46 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                       ))}
                     </select>
 
-                    {/* Governance: Approve/Reject for in_review tasks */}
+                    {/* Governance: Verify → Approve/Reject for in_review tasks */}
                     {task.status === "in_review" && (
                       <>
                         {task.verification_id ? (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
-                            {t("verified")}
-                          </span>
+                          <>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
+                              {t("verified")}
+                            </span>
+                            <button
+                              onClick={async () => { await api.tasks.approve(task.id); onUpdate?.(); }}
+                              className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"
+                            >
+                              {t("approve")}
+                            </button>
+                          </>
                         ) : (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded">
-                            {t("unverified")}
-                          </span>
+                          <>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded">
+                              {t("unverified")}
+                            </span>
+                            <button
+                              onClick={async () => {
+                                setVerifyingTasks((prev) => new Set(prev).add(task.id));
+                                try {
+                                  await api.orchestration.verifyTask(task.id);
+                                } catch { /* result comes via WebSocket */ }
+                              }}
+                              disabled={verifyingTasks.has(task.id)}
+                              className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                                verifyingTasks.has(task.id)
+                                  ? "bg-purple-50 dark:bg-purple-900/30 text-purple-400 cursor-not-allowed"
+                                  : "bg-purple-500 text-white hover:bg-purple-600"
+                              }`}
+                            >
+                              {verifyingTasks.has(task.id) ? t("verifying") : t("verify")}
+                            </button>
+                          </>
                         )}
                         <button
-                          onClick={async () => { await api.tasks.approve(task.id); onUpdate?.(); }}
-                          className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"
-                        >
-                          {t("approve")}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            const fb = window.prompt(t("rejectFeedbackPrompt"));
-                            await api.tasks.reject(task.id, fb ?? undefined);
-                            onUpdate?.();
-                          }}
+                          onClick={() => setRejectingTask({ id: task.id, title: task.title })}
                           className="text-[10px] px-2 py-0.5 rounded font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
                         >
                           {t("reject")}

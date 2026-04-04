@@ -71,21 +71,28 @@ export function AgentCard({ agent, tasks, onKill, onDeleted, onClick }: AgentCar
   }, [agent.status]);
 
   useEffect(() => {
-    api.agents.stats(agent.id).then(setStats).catch(() => {});
+    let cancelled = false;
+    api.agents.stats(agent.id)
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [agent.id]);
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const payload = (e as CustomEvent<{ agentId: string; totalTokens: number; costUsd: number }>).detail;
+      const payload = (e as CustomEvent<{ agentId: string; usage?: { totalCostUsd?: number; inputTokens?: number; outputTokens?: number; cacheCreationTokens?: number } }>).detail;
       if (payload.agentId !== agent.id) return;
+      const u = payload.usage;
+      const costUsd = u?.totalCostUsd ?? 0;
+      const tokens = (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0) + (u?.cacheCreationTokens ?? 0);
       setStats((prev) =>
         prev
           ? {
               taskCount: prev.taskCount + 1,
-              totalTokens: prev.totalTokens + payload.totalTokens,
-              totalCostUsd: prev.totalCostUsd + payload.costUsd,
+              totalTokens: prev.totalTokens + tokens,
+              totalCostUsd: prev.totalCostUsd + costUsd,
             }
-          : { taskCount: 1, totalTokens: payload.totalTokens, totalCostUsd: payload.costUsd }
+          : { taskCount: 1, totalTokens: tokens, totalCostUsd: costUsd }
       );
     };
     window.addEventListener("nova:task-usage", handler);

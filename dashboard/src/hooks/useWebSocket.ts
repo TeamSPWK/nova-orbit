@@ -3,7 +3,6 @@ import { useStore } from "../stores/useStore";
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
-  const { setConnected, updateTask } = useStore();
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -17,7 +16,7 @@ export function useWebSocket() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        setConnected(true);
+        useStore.getState().setConnected(true);
       };
 
       ws.onmessage = (event) => {
@@ -26,7 +25,7 @@ export function useWebSocket() {
 
           switch (msg.type) {
             case "task:updated":
-              updateTask(msg.payload);
+              useStore.getState().updateTask(msg.payload);
               break;
             case "agent:output":
               window.dispatchEvent(
@@ -39,6 +38,11 @@ export function useWebSocket() {
               window.dispatchEvent(
                 new CustomEvent("nova:task-usage", { detail: msg.payload })
               );
+              break;
+            case "system:rate-limit":
+              window.dispatchEvent(new CustomEvent("nova:rate-limit", { detail: msg.payload }));
+              // Also trigger refresh
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
             case "agent:status":
             case "verification:result":
@@ -53,7 +57,7 @@ export function useWebSocket() {
       };
 
       ws.onclose = () => {
-        setConnected(false);
+        useStore.getState().setConnected(false);
         if (!destroyed) {
           reconnectTimer = setTimeout(connect, 3000);
         }
@@ -71,5 +75,5 @@ export function useWebSocket() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [setConnected, updateTask]);
+  }, []);
 }

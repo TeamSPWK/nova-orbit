@@ -33,10 +33,11 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
   const [selectedRole, setSelectedRole] = useState("");
   const [editablePrompt, setEditablePrompt] = useState("");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Custom agent fields
   const [customName, setCustomName] = useState("");
-  const [customPrompt, setCustomPrompt] = useState("");
+  const [customPrompt] = useState("");
 
   useEffect(() => {
     api.agents.presets().then(setPresets).catch(() => {
@@ -69,6 +70,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
   // Step 2: confirm and create
   const handleCreate = async () => {
     setCreating(true);
+    setError(null);
     try {
       const agent = await api.agents.create({
         project_id: projectId,
@@ -77,7 +79,8 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
         system_prompt: editablePrompt,
       });
       onCreated(agent);
-    } catch {
+    } catch (err: any) {
+      setError(err.message || t("createAgentFailed"));
       setCreating(false);
     }
   };
@@ -85,7 +88,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
   return (
     <div className="fixed inset-0 bg-black/20 dark:bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div
-        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[520px] max-h-[80vh] overflow-y-auto"
+        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[520px] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {step === "select" ? (
@@ -162,6 +165,9 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
               <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5 italic">
                 {t("promptHint")}
               </p>
+              {error && (
+                <p className="text-xs text-red-500 mt-2">{error}</p>
+              )}
             </div>
 
             <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex justify-between">

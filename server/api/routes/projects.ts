@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { homedir } from "node:os";
 import type { AppContext } from "../../index.js";
 import { analyzeProject } from "../../core/project/analyzer.js";
 import { connectGitHub } from "../../core/project/github.js";
@@ -77,12 +79,19 @@ export function createProjectRoutes(ctx: AppContext): Router {
 
   // Analyze a local directory (for project import)
   router.post("/analyze", (req, res) => {
-    const { path } = req.body;
-    if (!path) return res.status(400).json({ error: "path is required" });
-    if (!existsSync(path)) return res.status(400).json({ error: "Directory not found" });
+    const { path: inputPath } = req.body;
+    if (!inputPath) return res.status(400).json({ error: "path is required" });
+
+    // Resolve to absolute and prevent path traversal
+    const resolved = resolvePath(inputPath);
+    if (!resolved.startsWith(homedir()) && !resolved.startsWith("/tmp")) {
+      return res.status(400).json({ error: "Path must be within home directory" });
+    }
+
+    if (!existsSync(resolved)) return res.status(400).json({ error: "Directory not found" });
 
     try {
-      const analysis = analyzeProject(path);
+      const analysis = analyzeProject(resolved);
       res.json(analysis);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -93,17 +102,23 @@ export function createProjectRoutes(ctx: AppContext): Router {
   router.post("/import", (req, res) => {
     const { path: dirPath, name } = req.body;
     if (!dirPath) return res.status(400).json({ error: "path is required" });
-    if (!existsSync(dirPath)) return res.status(400).json({ error: "Directory not found" });
+
+    // Resolve to absolute and prevent path traversal
+    const resolvedImport = resolvePath(dirPath);
+    if (!resolvedImport.startsWith(homedir()) && !resolvedImport.startsWith("/tmp")) {
+      return res.status(400).json({ error: "Path must be within home directory" });
+    }
+    if (!existsSync(resolvedImport)) return res.status(400).json({ error: "Directory not found" });
 
     try {
-      const analysis = analyzeProject(dirPath);
-      const projectName = name || dirPath.split("/").pop() || "Imported Project";
+      const analysis = analyzeProject(resolvedImport);
+      const projectName = name || resolvedImport.split("/").pop() || "Imported Project";
 
       // Create project
       const result = db.prepare(`
         INSERT INTO projects (name, source, workdir, tech_stack)
         VALUES (?, 'local_import', ?, ?)
-      `).run(projectName, dirPath, JSON.stringify(analysis.techStack));
+      `).run(projectName, resolvedImport, JSON.stringify(analysis.techStack));
 
       const project = db.prepare("SELECT * FROM projects WHERE rowid = ?").get(result.lastInsertRowid) as any;
 
@@ -170,8 +185,39 @@ export function createProjectRoutes(ctx: AppContext): Router {
   router.delete("/:id", (req, res) => {
     const result = db.prepare("DELETE FROM projects WHERE id = ?").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ error: "Project not found" });
+    ctx.devServerManager.stop(req.params.id);
     broadcast("project:updated", { id: req.params.id, deleted: true });
     res.json({ success: true });
+  });
+
+  // Dev server routes
+  router.post("/:id/dev-server/start", async (req, res) => {
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (!project.workdir) return res.status(400).json({ error: "Project has no workdir configured" });
+
+    try {
+      const { port, url } = await ctx.devServerManager.start(req.params.id, project.workdir);
+      res.json({ status: "started", port, url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post("/:id/dev-server/stop", (req, res) => {
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    ctx.devServerManager.stop(req.params.id);
+    res.json({ status: "stopped" });
+  });
+
+  router.get("/:id/dev-server/status", (req, res) => {
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const status = ctx.devServerManager.getStatus(req.params.id);
+    res.json(status);
   });
 
   return router;

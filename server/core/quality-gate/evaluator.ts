@@ -61,19 +61,38 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
       // This is the core Generator-Evaluator separation
       const evaluatorId = `evaluator-${taskId}`;
 
-      // Create a temporary evaluator agent if needed
+      // Find reviewer agent — Generator-Evaluator separation requires a DIFFERENT agent
       let evaluatorAgent = db.prepare(
         "SELECT * FROM agents WHERE project_id = ? AND role = 'reviewer'",
       ).get(task.project_id) as any;
 
       if (!evaluatorAgent) {
-        // Use any existing agent's session manager, but with reviewer prompt
-        log.info("No reviewer agent found, using ad-hoc evaluator session");
+        // Find any agent that is NOT the task's assignee (Generator)
+        evaluatorAgent = db.prepare(
+          "SELECT * FROM agents WHERE project_id = ? AND id != ? LIMIT 1",
+        ).get(task.project_id, task.assignee_id) as any;
+      }
+
+      if (!evaluatorAgent) {
+        // Last resort: reuse or create a system reviewer agent (name prefixed to distinguish from user-created)
+        evaluatorAgent = db.prepare(
+          "SELECT * FROM agents WHERE project_id = ? AND name = '[Nova] Evaluator' LIMIT 1",
+        ).get(task.project_id) as any;
+
+        if (!evaluatorAgent) {
+          log.info("No separate evaluator agent found, creating system reviewer");
+          db.prepare(
+            "INSERT INTO agents (project_id, name, role, system_prompt) VALUES (?, '[Nova] Evaluator', 'reviewer', ?)",
+          ).run(task.project_id, "You are a code reviewer with an adversarial mindset. Find problems, don't pass them.");
+          evaluatorAgent = db.prepare(
+            "SELECT * FROM agents WHERE project_id = ? AND name = '[Nova] Evaluator' LIMIT 1",
+          ).get(task.project_id) as any;
+        }
       }
 
       try {
         const session = sessionManager.spawnAgent(
-          evaluatorAgent?.id ?? task.assignee_id,
+          evaluatorAgent.id,
           project.workdir || process.cwd(),
         );
 

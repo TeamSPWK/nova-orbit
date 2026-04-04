@@ -112,6 +112,18 @@ export function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
     CREATE INDEX IF NOT EXISTS idx_activities_project ON activities(project_id);
   `);
+
+  // Incremental migrations for existing databases
+  const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+  const hasTokenUsage = sessionColumns.some((c) => c.name === "token_usage");
+  const hasCostUsd = sessionColumns.some((c) => c.name === "cost_usd");
+
+  if (!hasTokenUsage) {
+    db.exec("ALTER TABLE sessions ADD COLUMN token_usage INTEGER DEFAULT 0");
+  }
+  if (!hasCostUsd) {
+    db.exec("ALTER TABLE sessions ADD COLUMN cost_usd REAL DEFAULT 0");
+  }
 }
 
 export function generateId(): string {

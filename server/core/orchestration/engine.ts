@@ -7,6 +7,32 @@ import type { VerificationScope } from "../../../shared/types.js";
 
 const log = createLogger("orchestration");
 
+// DB row types (snake_case as stored in SQLite)
+interface TaskRow {
+  id: string;
+  goal_id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  assignee_id: string | null;
+  status: string;
+  verification_id: string | null;
+}
+interface ProjectRow {
+  id: string;
+  name: string;
+  workdir: string;
+}
+interface GoalRow {
+  id: string;
+  project_id: string;
+  description: string;
+}
+interface AgentRow {
+  id: string;
+  role: string;
+}
+
 export interface OrchestrationConfig {
   verificationScope: VerificationScope;
   autoFix: boolean;
@@ -46,10 +72,10 @@ export function createOrchestrationEngine(
       config: Partial<OrchestrationConfig> = {},
     ): Promise<{ success: boolean; verdict: string }> {
       const opts = { ...DEFAULT_CONFIG, ...config };
-      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
+      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as TaskRow | undefined;
       if (!task) throw new Error(`Task ${taskId} not found`);
 
-      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(task.project_id) as any;
+      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(task.project_id) as ProjectRow | undefined;
       if (!project) throw new Error(`Project not found`);
 
       log.info(`Executing task: "${task.title}"`);
@@ -84,10 +110,23 @@ export function createOrchestrationEngine(
         broadcast("agent:output", { agentId: task.assignee_id, output: text, taskId });
       });
 
+      // Rate limit warning → broadcast to dashboard
+      session.on("rate-limit", (info: { waitMs: number; stderr: string }) => {
+        broadcast("system:rate-limit", {
+          agentId: task.assignee_id,
+          agentName: agent?.name ?? "",
+          taskId,
+          waitMs: info.waitMs,
+          message: info.stderr,
+        });
+      });
+
       // Update agent status
+      const agent = db.prepare("SELECT name FROM agents WHERE id = ?").get(task.assignee_id) as { name: string } | undefined;
+      const agentName = agent?.name ?? "";
       db.prepare("UPDATE agents SET status = 'working', current_task_id = ? WHERE id = ?")
         .run(taskId, task.assignee_id);
-      broadcast("agent:status", { id: task.assignee_id, status: "working", taskId });
+      broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "working", taskId });
       broadcast("task:started", { taskId, agentId: task.assignee_id, startedAt: new Date().toISOString() });
 
       try {
@@ -169,7 +208,11 @@ Fix ONLY these issues. Do not modify other code.
 `;
           // Spawn a NEW session for fix (prevent context pollution — Nova rule)
           const fixSession = sessionManager.spawnAgent(task.assignee_id, project.workdir || process.cwd());
-          await fixSession.send(fixPrompt);
+          try {
+            await fixSession.send(fixPrompt);
+          } finally {
+            fixSession.cleanup();
+          }
 
           // Re-verify
           const reVerification = await qualityGate.verify(taskId, {
@@ -187,17 +230,25 @@ Fix ONLY these issues. Do not modify other code.
           success: verification.verdict === "pass",
           verdict: verification.verdict,
         };
-      } catch (err) {
+      } catch (err: any) {
         log.error(`Task execution failed: ${task.title}`, err);
-        db.prepare("UPDATE tasks SET status = 'blocked', updated_at = datetime('now') WHERE id = ?")
+        // Rate limit errors → back to todo for retry, not blocked
+        const isRateLimit = err.message?.toLowerCase().includes("rate limit") ||
+          err.message?.toLowerCase().includes("out of") ||
+          err.message?.toLowerCase().includes("429");
+        const fallbackStatus = isRateLimit ? "todo" : "blocked";
+        db.prepare(`UPDATE tasks SET status = '${fallbackStatus}', updated_at = datetime('now') WHERE id = ?`)
           .run(taskId);
-        broadcast("task:updated", { ...task, status: "blocked" });
+        broadcast("task:updated", { ...task, status: fallbackStatus, error: err.message });
+        if (isRateLimit) {
+          log.warn(`Task "${task.title}" returned to todo due to rate limit — will retry on next queue poll`);
+        }
         throw err;
       } finally {
         // Reset agent status
         db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
           .run(task.assignee_id);
-        broadcast("agent:status", { id: task.assignee_id, status: "idle" });
+        broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
       }
     },
 
@@ -206,17 +257,17 @@ Fix ONLY these issues. Do not modify other code.
      * Uses a meta-agent to analyze the goal and create structured tasks.
      */
     async decomposeGoal(goalId: string): Promise<void> {
-      const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
+      const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as GoalRow | undefined;
       if (!goal) throw new Error(`Goal ${goalId} not found`);
 
-      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as any;
+      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as ProjectRow | undefined;
 
       log.info(`Decomposing goal: "${goal.description}"`);
 
       // Find or create a coder agent for decomposition
       const agent = db.prepare(
         "SELECT * FROM agents WHERE project_id = ? LIMIT 1",
-      ).get(goal.project_id) as any;
+      ).get(goal.project_id) as AgentRow | undefined;
 
       if (!agent) {
         throw new Error("No agents available for task decomposition");
@@ -264,19 +315,25 @@ Respond in this EXACT JSON format:
         // Auto-assign agents by role
         const projectAgents = db.prepare(
           "SELECT * FROM agents WHERE project_id = ?",
-        ).all(goal.project_id) as any[];
+        ).all(goal.project_id) as AgentRow[];
 
         const findAgent = (role: string) =>
           projectAgents.find((a) => a.role === role) ??
           projectAgents.find((a) => a.role === "coder") ??
           projectAgents[0] ?? null;
 
+        const MAX_TITLE_LEN = 200;
+        const MAX_DESC_LEN = 2000;
+
         for (const t of tasks) {
+          if (!t.title || typeof t.title !== "string") continue;
+          const title = t.title.slice(0, MAX_TITLE_LEN);
+          const description = typeof t.description === "string" ? t.description.slice(0, MAX_DESC_LEN) : "";
           const agent = findAgent(t.role ?? "coder");
           db.prepare(`
             INSERT INTO tasks (goal_id, project_id, title, description, assignee_id)
             VALUES (?, ?, ?, ?, ?)
-          `).run(goal.id, goal.project_id, t.title, t.description ?? "", agent?.id ?? null);
+          `).run(goal.id, goal.project_id, title, description, agent?.id ?? null);
         }
 
         log.info(`Created ${tasks.length} tasks from goal decomposition`);

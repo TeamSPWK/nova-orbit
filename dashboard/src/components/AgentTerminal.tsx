@@ -12,7 +12,6 @@ interface AgentTerminalProps {
 export function AgentTerminal({ agentId }: AgentTerminalProps) {
   const { t } = useTranslation();
   const [lines, setLines] = useState<string[]>([]);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: Event) => {

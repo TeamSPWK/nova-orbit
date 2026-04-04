@@ -79,10 +79,37 @@ const ko = {
   expandPanel: "펼치기",
   approve: "승인",
   reject: "반려",
+  rejected: "반려됨",
   rejectFeedbackPrompt: "반려 사유 (선택):",
+  rejectTitle: "태스크 반려",
+  rejectFeedbackLabel: "반려 사유",
+  rejectFeedbackPlaceholder: "어떤 부분을 수정해야 하는지 구체적으로 작성해주세요...",
+  rejectAutoRerun: "반려 후 자동 재실행",
+  rejectAutoRerunDesc: "에이전트가 피드백을 반영하여 즉시 재작업합니다",
+  rejectNextSteps: "반려 후 진행 흐름",
+  rejectStep1: "태스크가 '할 일'로 복귀합니다",
+  rejectStep2: "반려 사유가 태스크 설명에 추가됩니다",
+  rejectStep3Auto: "에이전트가 피드백을 포함하여 자동으로 재실행됩니다",
+  rejectStep3Manual: "수동으로 '실행' 버튼을 눌러 재작업을 시작하세요",
+  rejectConfirm: "반려하기",
   assign: "담당자 지정",
   verified: "검증됨",
   unverified: "미검증",
+  verify: "검증",
+  verifying: "검증 중...",
+  createAgentFailed: "에이전트 생성에 실패했습니다.",
+  taskStatus: "상태",
+  noVerification: "아직 검증되지 않았습니다",
+  totalTokens: "토큰",
+
+  // Project status/source labels
+  projectStatus_active: "활성",
+  projectStatus_archived: "보관됨",
+  projectStatus_paused: "일시중지",
+  projectSource_new: "새 프로젝트",
+  projectSource_local_import: "로컬 임포트",
+  projectSource_github: "GitHub",
+
   noTasks: "태스크가 없습니다.",
 
   // KanbanBoard
@@ -121,6 +148,15 @@ const ko = {
   activityVerification: "검증: {{verdict}}",
   activityProjectUpdated: "프로젝트 업데이트됨",
   activityUnknown: "{{type}}",
+  agentUnnamed: "에이전트",
+  agentStatus_working: "작업 중",
+  agentStatus_idle: "대기",
+  agentStatus_paused: "일시정지",
+  verdict_pass: "통과",
+  verdict_conditional: "조건부 통과",
+  verdict_fail: "실패",
+  rateLimitTitle: "⚠️ API 사용량 한도 도달",
+  rateLimitDesc: "{{agent}} 에이전트가 Rate Limit에 도달했습니다. {{seconds}}초 후 자동 재시도합니다.",
 
   // ThemeToggle
   switchToDark: "다크 모드로 전환",
@@ -237,6 +273,14 @@ const ko = {
   // VerificationLog fix button
   createFixTask: "수정 태스크 생성",
   fixTaskCreated: "수정 태스크가 생성되었습니다",
+
+  // Dev server controls
+  startDevServer: "실행",
+  stopDevServer: "중지",
+  devServerRunning: "실행 중 (포트 {{port}})",
+  devServerStopped: "중지됨",
+  devServerStarting: "시작 중...",
+  openInBrowser: "브라우저에서 열기",
 
   // Queue controls
   runQueue: "큐 실행",

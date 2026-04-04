@@ -79,10 +79,37 @@ const en = {
   expandPanel: "Expand",
   approve: "Approve",
   reject: "Reject",
+  rejected: "Rejected",
   rejectFeedbackPrompt: "Rejection feedback (optional):",
+  rejectTitle: "Reject Task",
+  rejectFeedbackLabel: "Rejection Reason",
+  rejectFeedbackPlaceholder: "Describe what needs to be fixed...",
+  rejectAutoRerun: "Auto-rerun after rejection",
+  rejectAutoRerunDesc: "Agent will immediately re-execute with your feedback",
+  rejectNextSteps: "What happens next",
+  rejectStep1: "Task status returns to 'Todo'",
+  rejectStep2: "Your feedback is appended to the task description",
+  rejectStep3Auto: "Agent auto-reruns with your feedback included",
+  rejectStep3Manual: "Manually click 'Run' to start rework",
+  rejectConfirm: "Reject",
   assign: "assign",
   verified: "verified",
   unverified: "unverified",
+  verify: "Verify",
+  verifying: "Verifying...",
+  createAgentFailed: "Failed to create agent.",
+  taskStatus: "Status",
+  noVerification: "Not yet verified",
+  totalTokens: "Tokens",
+
+  // Project status/source labels
+  projectStatus_active: "Active",
+  projectStatus_archived: "Archived",
+  projectStatus_paused: "Paused",
+  projectSource_new: "New Project",
+  projectSource_local_import: "Local Import",
+  projectSource_github: "GitHub",
+
   noTasks: "No tasks yet.",
 
   // KanbanBoard
@@ -121,6 +148,15 @@ const en = {
   activityVerification: "Verification: {{verdict}}",
   activityProjectUpdated: "Project updated",
   activityUnknown: "{{type}}",
+  agentUnnamed: "Agent",
+  agentStatus_working: "working",
+  agentStatus_idle: "idle",
+  agentStatus_paused: "paused",
+  verdict_pass: "PASS",
+  verdict_conditional: "CONDITIONAL",
+  verdict_fail: "FAIL",
+  rateLimitTitle: "API Rate Limit Reached",
+  rateLimitDesc: "Agent {{agent}} hit rate limit. Auto-retry in {{seconds}}s.",
 
   // ThemeToggle
   switchToDark: "Switch to dark mode",
@@ -237,6 +273,14 @@ const en = {
   // VerificationLog fix button
   createFixTask: "Create Fix Task",
   fixTaskCreated: "Fix task created",
+
+  // Dev server controls
+  startDevServer: "Run",
+  stopDevServer: "Stop",
+  devServerRunning: "Running (port {{port}})",
+  devServerStopped: "Stopped",
+  devServerStarting: "Starting...",
+  openInBrowser: "Open in browser",
 
   // Queue controls
   runQueue: "Run Queue",
