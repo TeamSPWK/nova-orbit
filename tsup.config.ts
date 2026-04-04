@@ -1,28 +1,29 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig([
-  // Server + bin entry points
+  // CLI binary — needs shebang
   {
-    entry: {
-      "bin/nova-orbit": "bin/nova-orbit.ts",
-      "server/index": "server/index.ts",
-    },
+    entry: { "bin/nova-orbit": "bin/nova-orbit.ts" },
+    outDir: "dist",
+    format: "esm",
+    target: "node20",
+    platform: "node",
+    splitting: false,
+    clean: true,
+    sourcemap: true,
+    external: ["better-sqlite3"],
+    banner: { js: "#!/usr/bin/env node" },
+  },
+  // Server library
+  {
+    entry: { "server/index": "server/index.ts" },
     outDir: "dist",
     format: "esm",
     target: "node20",
     platform: "node",
     splitting: true,
-    clean: true,
+    clean: false, // Don't clean — bin was already built
     sourcemap: true,
     external: ["better-sqlite3"],
-    banner: {
-      // bin needs shebang
-      js: "",
-    },
-    esbuildOptions(options) {
-      options.banner = {
-        js: '// Nova Orbit — AI Team Orchestration + Quality Gate',
-      };
-    },
   },
 ]);

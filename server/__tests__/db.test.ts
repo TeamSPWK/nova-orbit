@@ -1,0 +1,223 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { createDatabase, migrate } from '../db/schema.js';
+import type Database from 'better-sqlite3';
+
+function createTestDb(): Database.Database {
+  const db = createDatabase(':memory:');
+  migrate(db);
+  return db;
+}
+
+describe('createDatabase + migrate', () => {
+  it('creates database without error', () => {
+    expect(() => createTestDb()).not.toThrow();
+  });
+
+  it('creates all expected tables', () => {
+    const db = createTestDb();
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[];
+    const tableNames = tables.map((t) => t.name);
+
+    expect(tableNames).toContain('projects');
+    expect(tableNames).toContain('agents');
+    expect(tableNames).toContain('goals');
+    expect(tableNames).toContain('tasks');
+    expect(tableNames).toContain('verifications');
+    expect(tableNames).toContain('sessions');
+    expect(tableNames).toContain('activities');
+  });
+
+  it('migrate is idempotent (run twice, no error)', () => {
+    const db = createDatabase(':memory:');
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
+  });
+});
+
+describe('Project CRUD', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it('inserts a project and selects it back', () => {
+    db.prepare(
+      `INSERT INTO projects (id, name, mission, source) VALUES (?, ?, ?, ?)`
+    ).run('proj1', 'Test Project', 'Build something', 'new');
+
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get('proj1') as any;
+    expect(row.name).toBe('Test Project');
+    expect(row.mission).toBe('Build something');
+    expect(row.source).toBe('new');
+    expect(row.status).toBe('active');
+  });
+
+  it('updates a project field', () => {
+    db.prepare(
+      `INSERT INTO projects (id, name, mission, source) VALUES (?, ?, ?, ?)`
+    ).run('proj2', 'Old Name', '', 'local_import');
+
+    db.prepare(`UPDATE projects SET name = ? WHERE id = ?`).run('New Name', 'proj2');
+
+    const row = db.prepare('SELECT name FROM projects WHERE id = ?').get('proj2') as any;
+    expect(row.name).toBe('New Name');
+  });
+
+  it('deletes a project', () => {
+    db.prepare(
+      `INSERT INTO projects (id, name, mission, source) VALUES (?, ?, ?, ?)`
+    ).run('proj3', 'To Delete', '', 'new');
+
+    db.prepare(`DELETE FROM projects WHERE id = ?`).run('proj3');
+
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get('proj3');
+    expect(row).toBeUndefined();
+  });
+
+  it('rejects invalid source value', () => {
+    expect(() => {
+      db.prepare(
+        `INSERT INTO projects (id, name, mission, source) VALUES (?, ?, ?, ?)`
+      ).run('proj4', 'Bad Source', '', 'invalid_source');
+    }).toThrow();
+  });
+});
+
+describe('Agent creation with project foreign key', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+    db.prepare(
+      `INSERT INTO projects (id, name, mission, source) VALUES (?, ?, ?, ?)`
+    ).run('proj-fk', 'FK Project', '', 'new');
+  });
+
+  it('inserts an agent linked to a project', () => {
+    db.prepare(
+      `INSERT INTO agents (id, project_id, name, role) VALUES (?, ?, ?, ?)`
+    ).run('agent1', 'proj-fk', 'Developer', 'coder');
+
+    const row = db.prepare('SELECT * FROM agents WHERE id = ?').get('agent1') as any;
+    expect(row.project_id).toBe('proj-fk');
+    expect(row.role).toBe('coder');
+    expect(row.status).toBe('idle');
+  });
+
+  it('cascades delete: removing project removes its agents', () => {
+    db.prepare(
+      `INSERT INTO agents (id, project_id, name, role) VALUES (?, ?, ?, ?)`
+    ).run('agent2', 'proj-fk', 'Reviewer', 'reviewer');
+
+    db.prepare(`DELETE FROM projects WHERE id = ?`).run('proj-fk');
+
+    const row = db.prepare('SELECT * FROM agents WHERE id = ?').get('agent2');
+    expect(row).toBeUndefined();
+  });
+
+  it('rejects agent with non-existent project_id', () => {
+    expect(() => {
+      db.prepare(
+        `INSERT INTO agents (id, project_id, name, role) VALUES (?, ?, ?, ?)`
+      ).run('agent3', 'no-such-project', 'Ghost', 'coder');
+    }).toThrow();
+  });
+
+  it('rejects invalid role value', () => {
+    expect(() => {
+      db.prepare(
+        `INSERT INTO agents (id, project_id, name, role) VALUES (?, ?, ?, ?)`
+      ).run('agent4', 'proj-fk', 'X', 'hacker');
+    }).toThrow();
+  });
+});
+
+describe('Goal + Task creation with progress', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+    db.prepare(
+      `INSERT INTO projects (id, name, mission, source) VALUES (?, ?, ?, ?)`
+    ).run('proj-g', 'Goal Project', '', 'new');
+    db.prepare(
+      `INSERT INTO agents (id, project_id, name, role) VALUES (?, ?, ?, ?)`
+    ).run('agent-g', 'proj-g', 'Dev', 'coder');
+  });
+
+  it('inserts a goal with default progress 0', () => {
+    db.prepare(
+      `INSERT INTO goals (id, project_id, description) VALUES (?, ?, ?)`
+    ).run('goal1', 'proj-g', 'Launch MVP');
+
+    const row = db.prepare('SELECT * FROM goals WHERE id = ?').get('goal1') as any;
+    expect(row.description).toBe('Launch MVP');
+    expect(row.progress).toBe(0);
+    expect(row.priority).toBe('medium');
+  });
+
+  it('updates goal progress', () => {
+    db.prepare(
+      `INSERT INTO goals (id, project_id, description) VALUES (?, ?, ?)`
+    ).run('goal2', 'proj-g', 'Ship feature');
+
+    db.prepare(`UPDATE goals SET progress = ? WHERE id = ?`).run(75, 'goal2');
+
+    const row = db.prepare('SELECT progress FROM goals WHERE id = ?').get('goal2') as any;
+    expect(row.progress).toBe(75);
+  });
+
+  it('rejects progress outside 0-100', () => {
+    db.prepare(
+      `INSERT INTO goals (id, project_id, description) VALUES (?, ?, ?)`
+    ).run('goal3', 'proj-g', 'Bad progress');
+
+    expect(() => {
+      db.prepare(`UPDATE goals SET progress = ? WHERE id = ?`).run(150, 'goal3');
+    }).toThrow();
+  });
+
+  it('inserts a task linked to goal and project', () => {
+    db.prepare(
+      `INSERT INTO goals (id, project_id, description) VALUES (?, ?, ?)`
+    ).run('goal4', 'proj-g', 'Auth feature');
+
+    db.prepare(
+      `INSERT INTO tasks (id, goal_id, project_id, title, assignee_id) VALUES (?, ?, ?, ?, ?)`
+    ).run('task1', 'goal4', 'proj-g', 'Implement login', 'agent-g');
+
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get('task1') as any;
+    expect(row.title).toBe('Implement login');
+    expect(row.status).toBe('todo');
+    expect(row.assignee_id).toBe('agent-g');
+  });
+
+  it('calculates progress from task statuses', () => {
+    db.prepare(
+      `INSERT INTO goals (id, project_id, description) VALUES (?, ?, ?)`
+    ).run('goal5', 'proj-g', 'Multi-task goal');
+
+    const insertTask = db.prepare(
+      `INSERT INTO tasks (id, goal_id, project_id, title, status) VALUES (?, ?, ?, ?, ?)`
+    );
+    insertTask.run('t1', 'goal5', 'proj-g', 'Task A', 'done');
+    insertTask.run('t2', 'goal5', 'proj-g', 'Task B', 'done');
+    insertTask.run('t3', 'goal5', 'proj-g', 'Task C', 'todo');
+    insertTask.run('t4', 'goal5', 'proj-g', 'Task D', 'todo');
+
+    const { total, done } = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
+      FROM tasks WHERE goal_id = ?
+    `).get('goal5') as any;
+
+    const progress = Math.round((done / total) * 100);
+    expect(progress).toBe(50);
+  });
+});
