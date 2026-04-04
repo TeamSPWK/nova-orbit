@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 import { AgentCard } from "./AgentCard";
+import { AgentDetail } from "./AgentDetail";
 import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
 import { ActivityFeed } from "./ActivityFeed";
@@ -17,6 +18,7 @@ export function ProjectHome() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
   const [showAddAgent, setShowAddAgent] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   // Header mission inline edit state
   const [editingHeaderMission, setEditingHeaderMission] = useState(false);
@@ -140,6 +142,8 @@ export function ProjectHome() {
     if (e.key === "Escape") cancelEditHeaderMission();
   };
 
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
+
   return (
     <div className="flex-1 overflow-y-auto">
       {showAddAgent && currentProjectId && (
@@ -149,10 +153,21 @@ export function ProjectHome() {
           onClose={() => setShowAddAgent(false)}
         />
       )}
+      {selectedAgent && (
+        <AgentDetail
+          agent={selectedAgent}
+          tasks={tasks}
+          onClose={() => setSelectedAgentId(null)}
+          onKill={() => {
+            setSelectedAgentId(null);
+            loadData();
+          }}
+        />
+      )}
       <div className="max-w-4xl mx-auto py-8 px-6">
         {/* Project Header */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{project.name}</h1>
           <div className="mt-1">
             {editingHeaderMission ? (
               <div className="flex items-center gap-2">
@@ -210,15 +225,15 @@ export function ProjectHome() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-4 mb-6 border-b border-gray-200">
+        <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700">
           {(["overview", "kanban", "verification", "settings"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`pb-2 text-sm capitalize transition-colors ${
                 tab === t
-                  ? "text-gray-900 border-b-2 border-gray-900 font-medium"
-                  : "text-gray-400 hover:text-gray-600"
+                  ? "text-gray-900 dark:text-gray-100 border-b-2 border-gray-900 dark:border-gray-100 font-medium"
+                  : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               }`}
             >
               {t === "verification" ? "Verification Log" : t}
@@ -250,7 +265,13 @@ export function ProjectHome() {
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   {agents.map((agent) => (
-                    <AgentCard key={agent.id} agent={agent} tasks={tasks} onKill={loadData} />
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      tasks={tasks}
+                      onKill={loadData}
+                      onClick={() => setSelectedAgentId(agent.id)}
+                    />
                   ))}
                 </div>
               )}
