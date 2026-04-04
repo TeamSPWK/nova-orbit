@@ -50,6 +50,12 @@ export function ProjectHome() {
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
   const [queueToggling, setQueueToggling] = useState(false);
 
+  // Direct prompt state (side panel)
+  const [panelPromptMessage, setPanelPromptMessage] = useState("");
+  const [panelPromptAgentId, setPanelPromptAgentId] = useState<string>("");
+  const [panelPromptSending, setPanelPromptSending] = useState(false);
+  const [panelPromptToast, setPanelPromptToast] = useState<string | null>(null);
+
   const project = projects.find((p) => p.id === currentProjectId);
 
   const loadData = useCallback(() => {
@@ -261,12 +267,6 @@ export function ProjectHome() {
   const inProgressAgent = inProgressTask?.assignee_id
     ? agents.find((a) => a.id === inProgressTask.assignee_id) ?? null
     : null;
-
-  // Direct prompt state (side panel)
-  const [panelPromptMessage, setPanelPromptMessage] = useState("");
-  const [panelPromptAgentId, setPanelPromptAgentId] = useState<string>("");
-  const [panelPromptSending, setPanelPromptSending] = useState(false);
-  const [panelPromptToast, setPanelPromptToast] = useState<string | null>(null);
 
   return (
     <div className="flex-1 overflow-y-auto">

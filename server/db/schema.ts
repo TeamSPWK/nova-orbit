@@ -125,10 +125,63 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE sessions ADD COLUMN cost_usd REAL DEFAULT 0");
   }
 
-  // Agent hierarchy: parent_id for org structure
+  // Agent hierarchy: parent_id + expanded roles
+  // SQLite cannot ALTER CHECK constraints, so we recreate the table if needed
   const agentColumns = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
-  if (!agentColumns.some((c) => c.name === "parent_id")) {
-    db.exec("ALTER TABLE agents ADD COLUMN parent_id TEXT");
+  const hasParentId = agentColumns.some((c) => c.name === "parent_id");
+
+  if (!hasParentId) {
+    // Recreate agents table with expanded role CHECK + parent_id
+    db.exec("DROP TABLE IF EXISTS agents_new");
+    db.exec(`
+      CREATE TABLE agents_new (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
+        status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
+        system_prompt TEXT NOT NULL DEFAULT '',
+        skills_dir TEXT,
+        session_behavior TEXT NOT NULL DEFAULT 'resume-or-new',
+        current_task_id TEXT,
+        parent_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO agents_new (id, project_id, name, role, status, system_prompt, skills_dir, session_behavior, current_task_id, created_at)
+        SELECT id, project_id, name, role, status, COALESCE(system_prompt, ''), skills_dir, COALESCE(session_behavior, 'resume-or-new'), current_task_id, COALESCE(created_at, datetime('now')) FROM agents;
+      DROP TABLE agents;
+      ALTER TABLE agents_new RENAME TO agents;
+      CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
+    `);
+  } else {
+    // parent_id exists but CHECK might still be old — test by inserting a dummy
+    try {
+      db.exec("INSERT INTO agents (project_id, name, role) VALUES ('__check__', '__check__', 'cto')");
+      db.exec("DELETE FROM agents WHERE project_id = '__check__'");
+    } catch {
+      // CHECK failed — recreate
+      db.exec("DROP TABLE IF EXISTS agents_new");
+      db.exec(`
+        CREATE TABLE agents_new (
+          id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
+          status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
+          system_prompt TEXT NOT NULL DEFAULT '',
+          skills_dir TEXT,
+          session_behavior TEXT NOT NULL DEFAULT 'resume-or-new',
+          current_task_id TEXT,
+          parent_id TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO agents_new (id, project_id, name, role, status, system_prompt, skills_dir, session_behavior, current_task_id, parent_id, created_at)
+          SELECT id, project_id, name, role, status, COALESCE(system_prompt, ''), skills_dir, COALESCE(session_behavior, 'resume-or-new'), current_task_id, parent_id, COALESCE(created_at, datetime('now')) FROM agents;
+        DROP TABLE agents;
+        ALTER TABLE agents_new RENAME TO agents;
+        CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
+      `);
+    }
   }
 }
 
