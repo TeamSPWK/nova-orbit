@@ -1,7 +1,7 @@
 # Nova State
 
 ## Current
-- **Goal**: Nova Orbit v0.1.0 — Phase 1 완성 + Phase 2 보너스 완료
+- **Goal**: Nova Orbit v0.1.0 — 전체 기능 구현 + 안정화 완료
 - **Phase**: done
 - **Blocker**: none
 
@@ -9,41 +9,39 @@
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
 | Phase 0.5 스캐폴드 | done | PASS | 서버+DB+API+어댑터 |
-| Phase 1 태스크 실행/임포트/검증UI | done | PASS | |
-| Phase 1.5 GitHub/WS/에이전트 | done | PASS | |
-| Phase 2 Kanban/다크모드/설정/i18n | done | PASS | |
-| Nova Review C-1~C-6 수정 | done | PASS | 다크모드+FOUC+WS 누수 |
-| E2E Playwright 테스트 | done | PASS | 전체 흐름 정상 |
-| 온보딩 가이드 | done | PASS | Phase 2 보너스 |
-| 아바타/알림 UI | done | PASS | Phase 2 보너스 |
-| Figma 파일 생성 | done | PASS | Phase 2 보너스 |
-| 프로덕션 빌드 검증 | done | PASS | dist 3파일 확인, 44 tests PASS |
+| Phase 1 전체 기능 | done | PASS | 태스크실행/임포트/검증/거버넌스/큐 |
+| Phase 2 UX | done | PASS | Kanban/다크모드/i18n/Cmd+K/아바타/알림 |
+| 안정성 수정 | done | PASS | WS에러핸들링/타임아웃/좀비프로세스/Hooks순서 |
+| 사용성 개선 | done | PASS | 가이드/분해UX/큐상태/Activity포맷/2단계에이전트추가 |
+| 비용 추적 | done | PASS | token/cost 파싱+대시보드표시 |
+| E2E Playwright 테스트 | done | PASS | Todo App 전체 흐름 검증 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| 온보딩 가이드 + 아바타 + 알림 | 2026-04-04 | PASS | Phase 2 보너스 |
-| Figma 파일 생성 | 2026-04-04 | PASS | 디자인 시스템 |
-| 프로덕션 빌드 + 테스트 최종 검증 | 2026-04-04 | PASS | 44/44 tests, 소스 90파일 |
+| 에이전트 삭제/프롬프트편집/2단계추가 | 2026-04-04 | PASS | 55커밋 |
+| 비용 추적 (token/cost) | 2026-04-04 | PASS | stream-json 파싱 |
+| 서버 안정성 (5분 타임아웃, WS 에러) | 2026-04-04 | PASS | stuck 에이전트 방지 |
 
 ## Known Risks
 | Risk | Severity | Status |
 |------|----------|--------|
 | Claude Pro 동시 세션 rate limit 미실측 | Warning | 미해결 |
 | API 인증 없음 (localhost 바인딩으로 완화) | Warning | 완화됨 |
-| dangerouslySkipPermissions 가드 미비 | Warning | 미해결 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
 |------|-------------------|----------|
-| 자동화 E2E 테스트 | Playwright CI 파이프라인 미구성 (수동 검증만) | High |
-| npm publish | 아직 npmjs.com 미배포 | Medium |
-| 에이전트 터미널 실연동 | 실시간 출력 UI 구현됨, 실제 Claude 프로세스 연동 미검증 | Medium |
+| npm publish | npmjs.com 미배포 | Medium |
+| 자동화 E2E 테스트 | Playwright CI 파이프라인 미구성 | Medium |
+| 실시간 터미널 로그 | 에이전트 출력이 터미널처럼 보이면 좋겠다는 피드백 | Low |
 
 ## Last Activity
-- 프로덕션 빌드 검증 + 44 tests PASS + 소스 90파일 — /Users/keunsik/develop/swk/nova-orbit | 2026-04-04T06:29:00Z
+- 에이전트 삭제+2단계추가+비용추적+안정성 — 55커밋 | 2026-04-04T10:00:00Z
 
 ## Refs
 - Plan: docs/PROJECT.md
 - Design: docs/KICKOFF.md
-- Last Verification: build PASS + vitest 44/44 PASS (2026-04-04)
+- Evaluator: docs/EVALUATOR.md
+- Figma: https://www.figma.com/design/oYV8Yp8DvntGwWi2kxnrGi
+- Last Verification: Nova Review PASS + vitest 44/44 PASS
