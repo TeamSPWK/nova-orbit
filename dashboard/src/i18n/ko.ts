@@ -33,6 +33,18 @@ const ko = {
   roleDesigner: "디자이너",
   roleQa: "QA",
 
+  // Agent preset names + descriptions
+  presetCoderName: "코더",
+  presetCoderDesc: "할당된 태스크의 백엔드/프론트엔드 코드를 구현합니다.",
+  presetReviewerName: "리뷰어",
+  presetReviewerDesc: "코드 품질을 리뷰하고 Nova Quality Gate로 검증합니다.",
+  presetQaName: "QA 엔지니어",
+  presetQaDesc: "실패 경로를 분석하고 경계값을 위험 기반 우선순위로 테스트합니다.",
+  presetMarketerName: "마케터",
+  presetMarketerDesc: "SEO 최적화 콘텐츠와 성장 전략을 작성합니다.",
+  presetDesignerName: "디자이너",
+  presetDesignerDesc: "디자인 시스템 규칙을 따르는 깔끔하고 접근성 좋은 UI/UX를 만듭니다.",
+
   // AgentCard status
   statusIdle: "대기",
   statusWorking: "작업 중",

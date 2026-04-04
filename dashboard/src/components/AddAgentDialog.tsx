@@ -14,6 +14,14 @@ interface AddAgentDialogProps {
   onClose: () => void;
 }
 
+const PRESET_I18N: Record<string, { nameKey: string; descKey: string }> = {
+  coder: { nameKey: "presetCoderName", descKey: "presetCoderDesc" },
+  reviewer: { nameKey: "presetReviewerName", descKey: "presetReviewerDesc" },
+  qa: { nameKey: "presetQaName", descKey: "presetQaDesc" },
+  marketer: { nameKey: "presetMarketerName", descKey: "presetMarketerDesc" },
+  designer: { nameKey: "presetDesignerName", descKey: "presetDesignerDesc" },
+};
+
 export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialogProps) {
   const { t } = useTranslation();
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -22,8 +30,8 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
   useEffect(() => {
     api.agents.presets().then(setPresets).catch(() => {
       setPresets([
-        { name: "Developer", role: "coder", description: "Implements code" },
-        { name: "Reviewer", role: "reviewer", description: "Reviews code quality" },
+        { name: "Coder", role: "coder", description: "" },
+        { name: "Reviewer", role: "reviewer", description: "" },
       ]);
     });
   }, []);
@@ -73,8 +81,12 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
               onClick={() => handleSelectPreset(p)}
               className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50/30 dark:hover:bg-blue-900/20 transition-colors"
             >
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.name}</div>
-              <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{p.description}</div>
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                {PRESET_I18N[p.role] ? t(PRESET_I18N[p.role].nameKey) : p.name}
+              </div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                {PRESET_I18N[p.role] ? t(PRESET_I18N[p.role].descKey) : p.description}
+              </div>
             </button>
           ))}
 

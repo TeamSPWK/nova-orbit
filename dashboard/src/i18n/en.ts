@@ -33,6 +33,18 @@ const en = {
   roleDesigner: "designer",
   roleQa: "qa",
 
+  // Agent preset names + descriptions
+  presetCoderName: "Coder",
+  presetCoderDesc: "Implements backend/frontend code for assigned tasks.",
+  presetReviewerName: "Reviewer",
+  presetReviewerDesc: "Reviews code quality and performs verification using Nova Quality Gate.",
+  presetQaName: "QA Engineer",
+  presetQaDesc: "Analyzes failure paths and tests boundary values with risk-based priority.",
+  presetMarketerName: "Marketer",
+  presetMarketerDesc: "Creates SEO-optimized content and growth strategies.",
+  presetDesignerName: "Designer",
+  presetDesignerDesc: "Creates clean, accessible UI/UX following design system conventions.",
+
   // AgentCard status
   statusIdle: "idle",
   statusWorking: "working",
