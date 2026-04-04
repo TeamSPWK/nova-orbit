@@ -13,6 +13,8 @@ import { KanbanBoard } from "./KanbanBoard";
 import { ProjectSettings } from "./ProjectSettings";
 import { InputDialog } from "./InputDialog";
 import { Toast } from "./Toast";
+import { WelcomeGuide } from "./WelcomeGuide";
+import { ProjectStats } from "./ProjectStats";
 
 type Tab = "overview" | "kanban" | "verification" | "settings";
 
@@ -94,14 +96,7 @@ export function ProjectHome() {
   }, [currentProjectId]);
 
   if (!project) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-gray-400">
-        <div className="text-center">
-          <div className="text-4xl mb-4">&#x1F680;</div>
-          <p className="text-lg">{t("noProject")}</p>
-        </div>
-      </div>
-    );
+    return <WelcomeGuide />;
   }
 
   if (loading) {
@@ -306,6 +301,9 @@ export function ProjectHome() {
           </div>
         </div>
 
+        {/* Project Stats */}
+        <ProjectStats tasks={tasks} />
+
         {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700">
           {(["overview", "kanban", "verification", "settings"] as Tab[]).map((tabId) => {
@@ -349,7 +347,21 @@ export function ProjectHome() {
                 </button>
               </div>
               {agents.length === 0 ? (
-                <p className="text-sm text-gray-400">{t("noAgents")}</p>
+                <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
+                  <div className="text-3xl mb-2 opacity-40">🤖</div>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+                    {t("emptyAgentsTitle")}
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-4 max-w-xs mx-auto">
+                    {t("emptyAgentsDesc")}
+                  </p>
+                  <button
+                    onClick={handleAddAgent}
+                    className="text-xs px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors"
+                  >
+                    {t("addAgent")}
+                  </button>
+                </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   {agents.map((agent) => (
@@ -378,6 +390,23 @@ export function ProjectHome() {
                   {t("addGoal")}
                 </button>
               </div>
+              {goals.length === 0 && (
+                <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
+                  <div className="text-3xl mb-2 opacity-40">🎯</div>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+                    {t("emptyGoalsTitle")}
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+                    {t("emptyGoalsDesc")}
+                  </p>
+                  <button
+                    onClick={handleAddGoal}
+                    className="text-xs px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors"
+                  >
+                    {t("addGoal")}
+                  </button>
+                </div>
+              )}
               {goals.map((goal) => (
                 <div
                   key={goal.id}

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "./stores/useStore";
 import { useWebSocket } from "./hooks/useWebSocket";
@@ -8,10 +8,12 @@ import { ProjectHome } from "./components/ProjectHome";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { LanguageToggle } from "./components/LanguageToggle";
 import { CommandPalette, CMD_EVENTS } from "./components/CommandPalette";
+import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 
 function App() {
   const { t, i18n } = useTranslation();
   const { setProjects, setCurrentProject, connected } = useStore();
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   useWebSocket();
 
@@ -33,6 +35,17 @@ function App() {
     window.addEventListener("nova:refresh", handler);
     return () => window.removeEventListener("nova:refresh", handler);
   }, [setProjects]);
+
+  // ? key opens keyboard shortcuts help
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "?") setShowShortcuts(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // CommandPalette action handlers
   useEffect(() => {
@@ -108,6 +121,7 @@ function App() {
 
   return (
     <div className="flex h-screen bg-white dark:bg-[#1a1a2e]">
+      {showShortcuts && <KeyboardShortcuts onClose={() => setShowShortcuts(false)} />}
       <CommandPalette />
       <Sidebar />
       <main className="flex-1 flex flex-col overflow-hidden">

@@ -214,6 +214,38 @@ const ko = {
   saveLabel: "저장",
   cancelLabel: "취소",
   clickToEdit: "클릭하여 편집",
+
+  // WelcomeGuide
+  welcomeTitle: "Nova Orbit에 오신 것을 환영합니다",
+  welcomeSubtitle: "혼자서도 팀처럼 개발하세요.",
+  welcomeStep1Title: "프로젝트 생성",
+  welcomeStep1Desc: "또는 기존 프로젝트 가져오기",
+  welcomeStep2Title: "AI 에이전트 추가",
+  welcomeStep2Desc: "코더 + 리뷰어",
+  welcomeStep3Title: "목표 설정",
+  welcomeStep3Desc: "AI가 태스크로 분해",
+  welcomeStep4Title: "실행 & 검증",
+  welcomeStep4Desc: "Quality Gate 검사",
+  welcomeCmdK: "\u2318K 로 빠른 명령",
+
+  // Empty states
+  emptyAgentsTitle: "에이전트가 없습니다",
+  emptyAgentsDesc: "첫 번째 AI 에이전트를 추가하세요. 코드 구현, 품질 리뷰 등을 수행합니다.",
+  emptyGoalsTitle: "목표가 없습니다",
+  emptyGoalsDesc: "목표를 설정하면 AI가 태스크로 분해합니다.",
+  emptyTasksTitle: "태스크가 없습니다",
+  emptyTasksDesc: "직접 태스크를 추가하거나 목표에서 \"분해\"를 사용하세요.",
+
+  // ProjectStats
+  statTotalTasks: "전체 태스크",
+  statCompleted: "완료",
+  statInProgress: "진행 중",
+  statVerified: "검증됨",
+
+  // KeyboardShortcuts
+  keyboardShortcuts: "키보드 단축키",
+  shortcutCmdPalette: "명령 팔레트",
+  shortcutHelp: "이 도움말",
 } as const;
 
 export default ko;

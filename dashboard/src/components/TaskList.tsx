@@ -76,7 +76,17 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
   }, []);
 
   if (tasks.length === 0) {
-    return <p className="text-sm text-gray-400">{t("noTasks")}</p>;
+    return (
+      <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
+        <div className="text-3xl mb-2 opacity-40">📋</div>
+        <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+          {t("emptyTasksTitle")}
+        </p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          {t("emptyTasksDesc")}
+        </p>
+      </div>
+    );
   }
 
   const handleTaskClick = (e: React.MouseEvent, taskId: string) => {

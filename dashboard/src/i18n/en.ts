@@ -214,6 +214,38 @@ const en = {
   saveLabel: "Save",
   cancelLabel: "Cancel",
   clickToEdit: "Click to edit",
+
+  // WelcomeGuide
+  welcomeTitle: "Welcome to Nova Orbit",
+  welcomeSubtitle: "Build like a team, even when you're alone.",
+  welcomeStep1Title: "Create a project",
+  welcomeStep1Desc: "or import existing",
+  welcomeStep2Title: "Add AI agents",
+  welcomeStep2Desc: "Coder + Reviewer",
+  welcomeStep3Title: "Set goals",
+  welcomeStep3Desc: "AI decomposes tasks",
+  welcomeStep4Title: "Run & verify",
+  welcomeStep4Desc: "Quality Gate checks",
+  welcomeCmdK: "\u2318K for quick actions",
+
+  // Empty states
+  emptyAgentsTitle: "No agents yet",
+  emptyAgentsDesc: "Add your first AI agent to get started. They'll implement code, review quality, and more.",
+  emptyGoalsTitle: "No goals yet",
+  emptyGoalsDesc: "Set a goal and let AI decompose it into tasks.",
+  emptyTasksTitle: "No tasks yet",
+  emptyTasksDesc: "Add a task manually or use \"Decompose\" on a goal.",
+
+  // ProjectStats
+  statTotalTasks: "Total Tasks",
+  statCompleted: "Completed",
+  statInProgress: "In Progress",
+  statVerified: "Verified",
+
+  // KeyboardShortcuts
+  keyboardShortcuts: "Keyboard Shortcuts",
+  shortcutCmdPalette: "Command Palette",
+  shortcutHelp: "This help",
 } as const;
 
 export default en;
