@@ -28,6 +28,13 @@ export function useWebSocket() {
             case "task:updated":
               updateTask(msg.payload);
               break;
+            case "agent:output":
+              window.dispatchEvent(
+                new CustomEvent("nova:agent-output", {
+                  detail: { agentId: msg.payload.agentId, output: msg.payload.output },
+                })
+              );
+              break;
             case "agent:status":
             case "verification:result":
             case "project:updated":

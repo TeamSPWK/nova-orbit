@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { AgentTerminal } from "./AgentTerminal";
 
 interface Agent {
   id: string;
@@ -44,6 +46,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps) {
+  const { t } = useTranslation();
   const [promptExpanded, setPromptExpanded] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -149,6 +152,11 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
               )}
             </div>
           </section>
+
+          {/* Live Terminal — only while working */}
+          {agent.status === "working" && (
+            <AgentTerminal agentId={agent.id} />
+          )}
 
           {/* System Prompt */}
           {agent.system_prompt && (

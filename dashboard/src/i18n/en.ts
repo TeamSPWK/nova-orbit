@@ -87,6 +87,26 @@ const en = {
   // App connection status
   connected: "Connected",
   disconnected: "Disconnected",
+
+  // CommandPalette
+  cmdPlaceholder: "Type a command...",
+  cmdNewProject: "New Project",
+  cmdImportLocal: "Import Local Project",
+  cmdConnectGitHub: "Connect GitHub",
+  cmdAddAgent: "Add Agent",
+  cmdAddGoal: "Add Goal",
+  cmdSwitchToDark: "Switch to Dark Mode",
+  cmdSwitchToLight: "Switch to Light Mode",
+  cmdSwitchLang: "Switch Language (EN/KO)",
+  cmdGoKanban: "Go to Kanban",
+  cmdGoVerification: "Go to Verification Log",
+  cmdGoSettings: "Go to Settings",
+  cmdNoResults: "No results",
+
+  // AgentTerminal
+  terminalTitle: "Live Output",
+  terminalClear: "Clear",
+  terminalWaiting: "Waiting for output...",
 } as const;
 
 export default en;

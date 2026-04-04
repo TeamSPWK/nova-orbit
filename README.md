@@ -4,6 +4,20 @@
 
 "Build like a team, even when you're alone." — Orchestrate Claude Code sessions as AI agents, decompose goals into tasks, and verify every output with Nova Quality Gate.
 
+## Screenshots
+
+### Dark Mode (Korean)
+![Dark Mode Overview](docs/screenshots/dark-overview.png)
+
+### Light Mode (English)
+![Light Mode Overview](docs/screenshots/light-overview.png)
+
+### Kanban Board
+![Kanban Board](docs/screenshots/dark-kanban.png)
+
+### Verification Log (5-Dimension Score)
+![Verification Log](docs/screenshots/verification-log.png)
+
 ## Quick Start
 
 ```bash
@@ -16,10 +30,13 @@ Opens `http://localhost:3000` with a dashboard to manage your AI team.
 
 Nova Orbit turns your Claude Code CLI sessions into a team of specialized AI agents:
 
-- **Coder** — Implements features, writes production-ready code
-- **Reviewer** — Reviews code with adversarial mindset, runs Quality Gate
-- **Marketer** — Creates landing pages, blog posts, SEO content
-- **Designer** — UI/UX design, wireframes, prototypes
+| Agent | Role |
+|-------|------|
+| **Coder** | Implements features, writes production-ready code |
+| **Reviewer** | Reviews code with adversarial mindset, runs Quality Gate |
+| **QA Engineer** | Test strategy, edge case identification |
+| **Marketer** | Landing pages, blog posts, SEO content |
+| **Designer** | UI/UX design, wireframes, prototypes |
 
 ### Core Differentiator: Quality Gate
 
@@ -33,10 +50,26 @@ Every output is independently verified using Nova's Generator-Evaluator separati
 ### Key Features
 
 - `npx` one-line install — SQLite embedded, zero config
-- Dashboard to visualize agent progress, tasks, and verification logs
-- Goal decomposition — describe what you want, agents figure out the tasks
-- Real-time WebSocket streaming of agent output
-- Built on Claude Code CLI — uses your existing Claude Pro/Team subscription
+- **Kanban board** with drag-and-drop task management
+- **Project import** — analyze local directories, auto-detect tech stack, suggest agents
+- **GitHub connect** — clone repos, auto-analyze, branch strategy
+- **Goal decomposition** — describe what you want, AI breaks it into tasks
+- **Real-time** WebSocket streaming of agent output
+- **Dark/Light mode** with system detection
+- **Korean/English** i18n support
+- **Command palette** (Cmd+K) for quick actions
+- Built on Claude Code CLI — uses your existing Claude Pro/Team subscription ($0 extra)
+
+### vs Paperclip
+
+| | Paperclip | Nova Orbit |
+|---|-----------|------------|
+| Quality Gate | None | Generator-Evaluator, 5-dimension |
+| Setup | Postgres + onboarding | `npx` one-line (SQLite) |
+| Agent Runtime | Any (Claude, Codex, HTTP) | Claude Code native |
+| UX | Functional dashboard | Notion-style, Kanban, dark mode |
+| Target | "Autonomous company" (20+) | Solo founders (3-7 agents) |
+| Cost | API keys | Claude Pro subscription ($0 extra) |
 
 ## Development
 
@@ -53,6 +86,9 @@ npm run typecheck
 
 # Build for production
 npm run build
+
+# Start production server
+node dist/bin/nova-orbit.js
 ```
 
 ## Architecture
@@ -63,12 +99,15 @@ nova-orbit/
 ├── server/           # Node.js backend
 │   ├── api/          # REST routes + WebSocket
 │   ├── core/
-│   │   ├── agent/    # Claude Code session management
-│   │   ├── orchestration/  # Goal → Task pipeline
-│   │   ├── project/  # Project CRUD
-│   │   └── quality-gate/   # Nova verification engine
-│   └── db/           # SQLite schema
-├── dashboard/        # React + TailwindCSS frontend
+│   │   ├── agent/    # Claude Code CLI adapter + session management
+│   │   ├── orchestration/  # Goal → Task decomposition + execution
+│   │   ├── project/  # Import, GitHub connect, tech stack analyzer
+│   │   └── quality-gate/   # Nova 5-dimension verification engine
+│   └── db/           # SQLite schema (7 tables)
+├── dashboard/        # React + TailwindCSS + Zustand
+│   └── src/
+│       ├── components/  # 18 React components
+│       └── i18n/        # Korean + English translations
 ├── shared/           # TypeScript type definitions
 └── templates/        # Agent role presets (YAML)
 ```
@@ -77,11 +116,13 @@ nova-orbit/
 
 | Layer | Tech |
 |-------|------|
-| Frontend | React, TailwindCSS, Zustand |
+| Frontend | React, TailwindCSS v4, Zustand, @dnd-kit |
 | Backend | Node.js, Express, TypeScript |
 | Database | SQLite (better-sqlite3) |
 | Real-time | WebSocket (ws) |
-| AI Runtime | Claude Code CLI (subprocess) |
+| AI Runtime | Claude Code CLI (subprocess, Paperclip pattern) |
+| i18n | react-i18next (ko/en) |
+| Build | tsup + Vite |
 
 ## License
 

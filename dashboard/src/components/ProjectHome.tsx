@@ -55,6 +55,32 @@ export function ProjectHome() {
     return () => window.removeEventListener("nova:refresh", handler);
   }, [loadData]);
 
+  // Listen for CommandPalette navigation events
+  useEffect(() => {
+    const onGoTab = (e: Event) => {
+      const { tab } = (e as CustomEvent<{ tab: string }>).detail;
+      if (tab === "kanban" || tab === "verification" || tab === "settings" || tab === "overview") {
+        setTab(tab as Tab);
+      }
+    };
+    const onAddAgent = () => setShowAddAgent(true);
+    const onAddGoal = async () => {
+      const description = prompt("Goal description:");
+      if (!description || !currentProjectId) return;
+      const goal = await api.goals.create({ project_id: currentProjectId, description });
+      setGoals([...goals, goal]);
+    };
+
+    window.addEventListener("nova:go-tab", onGoTab);
+    window.addEventListener("nova:add-agent", onAddAgent);
+    window.addEventListener("nova:add-goal", onAddGoal);
+    return () => {
+      window.removeEventListener("nova:go-tab", onGoTab);
+      window.removeEventListener("nova:add-agent", onAddAgent);
+      window.removeEventListener("nova:add-goal", onAddGoal);
+    };
+  }, [currentProjectId, goals, setGoals]);
+
   if (!project) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400">

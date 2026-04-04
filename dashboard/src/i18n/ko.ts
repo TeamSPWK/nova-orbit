@@ -87,6 +87,26 @@ const ko = {
   // App connection status
   connected: "연결됨",
   disconnected: "연결 끊김",
+
+  // CommandPalette
+  cmdPlaceholder: "명령어를 입력하세요...",
+  cmdNewProject: "새 프로젝트",
+  cmdImportLocal: "로컬 프로젝트 가져오기",
+  cmdConnectGitHub: "GitHub 연결",
+  cmdAddAgent: "에이전트 추가",
+  cmdAddGoal: "목표 추가",
+  cmdSwitchToDark: "다크 모드로 전환",
+  cmdSwitchToLight: "라이트 모드로 전환",
+  cmdSwitchLang: "언어 전환 (EN/KO)",
+  cmdGoKanban: "칸반으로 이동",
+  cmdGoVerification: "검증 로그로 이동",
+  cmdGoSettings: "설정으로 이동",
+  cmdNoResults: "결과 없음",
+
+  // AgentTerminal
+  terminalTitle: "실시간 출력",
+  terminalClear: "지우기",
+  terminalWaiting: "출력 대기 중...",
 } as const;
 
 export default ko;
