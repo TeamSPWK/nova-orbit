@@ -131,6 +131,34 @@ export function ProjectHome() {
     return () => window.removeEventListener("nova:prompt-complete", handler);
   }, [panelPromptAgentId, t]);
 
+  // Listen for multi-prompt WebSocket events
+  useEffect(() => {
+    const onAgentDone = (e: Event) => {
+      const { agentName, result, index, total } = (e as CustomEvent).detail;
+      void agentName;
+      setMultiPromptProgress({ current: index + 1, total });
+      setMultiPromptResults((prev) => [...prev, { agentId: (e as CustomEvent).detail.agentId, agentName, result }]);
+    };
+    const onComplete = (e: Event) => {
+      const { results } = (e as CustomEvent).detail;
+      setMultiPromptResults(results);
+      setMultiPromptProgress(null);
+      setPanelPromptSending(false);
+    };
+    const onSingleComplete = () => {
+      if (!multiAgentMode) setPanelPromptSending(false);
+    };
+
+    window.addEventListener("nova:multi-agent-done", onAgentDone);
+    window.addEventListener("nova:multi-complete", onComplete);
+    window.addEventListener("nova:prompt-complete", onSingleComplete);
+    return () => {
+      window.removeEventListener("nova:multi-agent-done", onAgentDone);
+      window.removeEventListener("nova:multi-complete", onComplete);
+      window.removeEventListener("nova:prompt-complete", onSingleComplete);
+    };
+  }, [multiAgentMode]);
+
   if (!project) {
     return <WelcomeGuide />;
   }
@@ -297,34 +325,6 @@ export function ProjectHome() {
       setMultiPromptProgress(null);
     }
   };
-
-  // Listen for multi-prompt WebSocket events
-  useEffect(() => {
-    const onAgentDone = (e: Event) => {
-      const { agentId, agentName, result, index, total } = (e as CustomEvent).detail;
-      setMultiPromptProgress({ current: index + 1, total });
-      setMultiPromptResults((prev) => [...prev, { agentId, agentName, result }]);
-    };
-    const onComplete = (e: Event) => {
-      const { results } = (e as CustomEvent).detail;
-      setMultiPromptResults(results);
-      setMultiPromptProgress(null);
-      setPanelPromptSending(false);
-    };
-    // Also handle single-prompt complete to reset sending state
-    const onSingleComplete = () => {
-      if (!multiAgentMode) setPanelPromptSending(false);
-    };
-
-    window.addEventListener("nova:multi-agent-done", onAgentDone);
-    window.addEventListener("nova:multi-complete", onComplete);
-    window.addEventListener("nova:prompt-complete", onSingleComplete);
-    return () => {
-      window.removeEventListener("nova:multi-agent-done", onAgentDone);
-      window.removeEventListener("nova:multi-complete", onComplete);
-      window.removeEventListener("nova:prompt-complete", onSingleComplete);
-    };
-  }, [multiAgentMode]);
 
   const toggleMultiAgentId = (agentId: string) => {
     setMultiAgentIds((prev) =>
