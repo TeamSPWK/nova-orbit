@@ -1,10 +1,8 @@
-import { useState } from "react";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 
 export function Sidebar() {
   const { projects, currentProjectId, setCurrentProject, setProjects } = useStore();
-  const [showImport, setShowImport] = useState(false);
 
   const handleNewProject = async () => {
     const name = prompt("Project name:");

@@ -16,7 +16,6 @@ interface AddAgentDialogProps {
 export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialogProps) {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [customName, setCustomName] = useState("");
-  const [mode, setMode] = useState<"preset" | "custom">("preset");
 
   useEffect(() => {
     api.agents.presets().then(setPresets).catch(() => {

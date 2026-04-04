@@ -12,7 +12,7 @@
     "dev:dashboard": "cd dashboard && npm run dev",
     "build": "npm run build:server && npm run build:dashboard",
     "build:server": "tsup",
-    "build:dashboard": "cd dashboard && npm run build && cp -r dist ../dist/dashboard",
+    "build:dashboard": "cd dashboard && npm run build && mkdir -p ../dist/dashboard && cp -r dist/* ../dist/dashboard/",
     "postbuild": "echo '#!/usr/bin/env node' | cat - dist/bin/nova-orbit.js > dist/bin/_tmp && mv dist/bin/_tmp dist/bin/nova-orbit.js && chmod +x dist/bin/nova-orbit.js",
     "start": "node dist/bin/nova-orbit.js",
     "db:migrate": "tsx server/db/migrate.ts",
