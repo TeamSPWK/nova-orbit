@@ -24,6 +24,7 @@ export const api = {
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
+    presets: () => request<any[]>("/agents/presets"),
     create: (data: any) => request<any>("/agents", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request<any>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),

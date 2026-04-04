@@ -5,6 +5,7 @@ import { AgentCard } from "./AgentCard";
 import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
 import { ActivityFeed } from "./ActivityFeed";
+import { AddAgentDialog } from "./AddAgentDialog";
 
 type Tab = "overview" | "verification";
 
@@ -13,6 +14,7 @@ export function ProjectHome() {
     useStore();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
+  const [showAddAgent, setShowAddAgent] = useState(false);
 
   const project = projects.find((p) => p.id === currentProjectId);
 
@@ -61,17 +63,11 @@ export function ProjectHome() {
     );
   }
 
-  const handleAddAgent = async () => {
-    const name = prompt("Agent name:");
-    if (!name) return;
-    const role = prompt("Role (coder/reviewer/marketer/designer/qa):", "coder");
-    if (!role) return;
-    const agent = await api.agents.create({
-      project_id: currentProjectId,
-      name,
-      role,
-    });
+  const handleAddAgent = () => setShowAddAgent(true);
+
+  const handleAgentCreated = (agent: any) => {
     setAgents([...agents, agent]);
+    setShowAddAgent(false);
   };
 
   const handleAddGoal = async () => {
@@ -106,6 +102,13 @@ export function ProjectHome() {
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {showAddAgent && currentProjectId && (
+        <AddAgentDialog
+          projectId={currentProjectId}
+          onCreated={handleAgentCreated}
+          onClose={() => setShowAddAgent(false)}
+        />
+      )}
       <div className="max-w-4xl mx-auto py-8 px-6">
         {/* Project Header */}
         <div className="mb-6">
