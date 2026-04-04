@@ -1,7 +1,10 @@
 node_modules/
 dist/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
+.nova-orbit/
 .env
 .env.local
 .DS_Store
