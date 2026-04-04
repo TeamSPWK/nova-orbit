@@ -155,6 +155,7 @@ const ko = {
   verdict_pass: "통과",
   verdict_conditional: "조건부 통과",
   verdict_fail: "실패",
+  tasksAutoCreated: "목표+태스크 자동 생성됨",
   parentAgent: "소속 (상위 에이전트)",
   noParent: "없음 (최상위)",
   bulkApprove: "{{count}}개 전체 승인",

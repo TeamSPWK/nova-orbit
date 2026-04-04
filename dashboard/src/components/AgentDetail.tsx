@@ -112,11 +112,13 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
   };
 
   // Listen for prompt-complete events scoped to this agent
+  const [autoCreated, setAutoCreated] = useState(false);
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ agentId: string; result: string | null; error?: string }>).detail;
+      const detail = (e as CustomEvent<{ agentId: string; result: string | null; error?: string; autoCreated?: boolean }>).detail;
       if (detail.agentId !== agent.id) return;
       setIsSendingPrompt(false);
+      setAutoCreated(detail.autoCreated ?? false);
       if (detail.error) {
         setPromptError(detail.error);
       } else {
@@ -419,8 +421,13 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
               )}
               {promptResult !== null && !isSendingPrompt && (
                 <div className="text-xs bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                  <div className="px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-[10px] font-medium border-b border-green-100 dark:border-green-800/30">
+                  <div className="px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-[10px] font-medium border-b border-green-100 dark:border-green-800/30 flex items-center gap-2">
                     {t("promptComplete")}
+                    {autoCreated && (
+                      <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded text-[9px]">
+                        {t("tasksAutoCreated")}
+                      </span>
+                    )}
                   </div>
                   {promptResult && (
                     <div className="px-3 py-2 text-[11px] text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-[200px] overflow-y-auto leading-relaxed">

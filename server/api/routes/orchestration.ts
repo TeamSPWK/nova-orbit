@@ -173,15 +173,71 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
         const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");
         const parsed = parseStreamJson(result.stdout);
 
+        // If CTO agent: try to extract goal + tasks from response and auto-create
+        let autoCreated = false;
+        if (agent.role === "cto") {
+          try {
+            const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/) ??
+                              parsed.text.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
+            if (jsonMatch) {
+              const jsonStr = jsonMatch[1] ?? jsonMatch[0];
+              const data = JSON.parse(jsonStr);
+              const tasks = data.tasks ?? [];
+              if (tasks.length > 0) {
+                // Create goal from CTO's analysis
+                const goalDesc = data.goal ?? data.analysis ?? message.trim().slice(0, 200);
+                const goalResult = db.prepare(
+                  "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, 'high')",
+                ).run(project.id, goalDesc);
+                const goalId = (db.prepare("SELECT id FROM goals WHERE rowid = ?").get(goalResult.lastInsertRowid) as any)?.id;
+
+                if (goalId) {
+                  // Get project agents for role matching
+                  const projectAgents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(project.id) as any[];
+                  const ctoAgent = projectAgents.find((a: any) => a.role === "cto");
+                  const candidates = ctoAgent
+                    ? projectAgents.filter((a: any) => a.parent_id === ctoAgent.id)
+                    : projectAgents.filter((a: any) => a.role !== "cto");
+
+                  const findAgentForRole = (role: string) =>
+                    candidates.find((a: any) => a.role === role) ??
+                    candidates.find((a: any) => a.role === "coder") ??
+                    candidates[0] ?? null;
+
+                  for (const t of tasks) {
+                    if (!t.title || typeof t.title !== "string") continue;
+                    const assignee = findAgentForRole(t.role ?? "coder");
+                    db.prepare(
+                      "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id) VALUES (?, ?, ?, ?, ?)",
+                    ).run(goalId, project.id, t.title.slice(0, 200), (t.description ?? "").slice(0, 2000), assignee?.id ?? null);
+                  }
+
+                  autoCreated = true;
+                  broadcast("project:updated", { projectId: project.id });
+
+                  db.prepare(
+                    "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
+                  ).run(project.id, agentId, `CTO created goal "${goalDesc.slice(0, 50)}" with ${tasks.length} tasks`);
+                }
+              }
+            }
+          } catch {
+            // JSON parsing failed — just show text result
+          }
+        }
+
         broadcast("agent:prompt-complete", {
           agentId,
           result: parsed.text,
           exitCode: result.exitCode,
+          autoCreated,
         });
 
-        db.prepare(
-          "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
-        ).run(project.id, agentId, `Direct prompt completed`);
+        if (!autoCreated) {
+          db.prepare(
+            "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
+          ).run(project.id, agentId, `Direct prompt completed`);
+        }
       } catch (err: any) {
         broadcast("agent:prompt-complete", {
           agentId,
