@@ -34,6 +34,13 @@ export function useWebSocket() {
                 })
               );
               break;
+            case "agent:prompt-complete":
+              window.dispatchEvent(
+                new CustomEvent("nova:prompt-complete", { detail: msg.payload })
+              );
+              // Also trigger refresh to sync agent status
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
             case "task:usage":
               window.dispatchEvent(
                 new CustomEvent("nova:task-usage", { detail: msg.payload })

@@ -126,5 +126,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ scope }),
       }),
+    sendPrompt: (agentId: string, message: string) =>
+      request<{ status: string; agentId: string }>(`/orchestration/agents/${agentId}/prompt`, {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      }),
   },
 };

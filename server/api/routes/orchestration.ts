@@ -129,6 +129,72 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     }
   });
 
+  // Send a direct prompt to an agent
+  router.post("/agents/:agentId/prompt", async (req, res) => {
+    const { agentId } = req.params;
+    const { message } = req.body ?? {};
+
+    if (!message || typeof message !== "string" || message.trim() === "") {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as any;
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+
+    if (agent.status === "working") {
+      return res.status(409).json({ error: "Agent is already working" });
+    }
+
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(agent.project_id) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const workdir = project.workdir || process.cwd();
+
+    // Return immediately — run asynchronously
+    res.json({ status: "started", agentId });
+
+    (async () => {
+      // Update agent status to working
+      db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agentId);
+      broadcast("agent:status", { id: agentId, name: agent.name, status: "working" });
+
+      let session;
+      try {
+        session = sessionManager.spawnAgent(agentId, workdir);
+
+        // Stream output to WebSocket
+        session.on("output", (text: string) => {
+          broadcast("agent:output", { agentId, output: text });
+        });
+
+        const result = await session.send(message.trim());
+
+        // Parse result text for broadcast
+        const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");
+        const parsed = parseStreamJson(result.stdout);
+
+        broadcast("agent:prompt-complete", {
+          agentId,
+          result: parsed.text,
+          exitCode: result.exitCode,
+        });
+
+        db.prepare(
+          "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
+        ).run(project.id, agentId, `Direct prompt completed`);
+      } catch (err: any) {
+        broadcast("agent:prompt-complete", {
+          agentId,
+          result: null,
+          error: err.message,
+        });
+      } finally {
+        db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(agentId);
+        broadcast("agent:status", { id: agentId, name: agent.name, status: "idle" });
+      }
+    })();
+  });
+
   // Kill an agent session
   router.post("/agents/:agentId/kill", (req, res) => {
     const { agentId } = req.params;

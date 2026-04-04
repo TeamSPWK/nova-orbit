@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { AgentTerminal } from "./AgentTerminal";
@@ -48,6 +48,13 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
   const [editedPrompt, setEditedPrompt] = useState(agent.system_prompt ?? "");
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Direct prompt state
+  const [directMessage, setDirectMessage] = useState("");
+  const [isSendingPrompt, setIsSendingPrompt] = useState(false);
+  const [promptResult, setPromptResult] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const directTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const agentTasks = tasks.filter((t) => t.assignee_id === agent.id);
   const currentTask = tasks.find((t) => t.id === agent.current_task_id);
@@ -102,6 +109,52 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
   const handleCancelPromptEdit = () => {
     setEditedPrompt(agent.system_prompt ?? "");
     setIsEditingPrompt(false);
+  };
+
+  // Listen for prompt-complete events scoped to this agent
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ agentId: string; result: string | null; error?: string }>).detail;
+      if (detail.agentId !== agent.id) return;
+      setIsSendingPrompt(false);
+      if (detail.error) {
+        setPromptError(detail.error);
+      } else {
+        setPromptResult(detail.result ?? "");
+      }
+    };
+    window.addEventListener("nova:prompt-complete", handler);
+    return () => window.removeEventListener("nova:prompt-complete", handler);
+  }, [agent.id]);
+
+  const handleSendDirectPrompt = useCallback(async () => {
+    const msg = directMessage.trim();
+    if (!msg || isSendingPrompt) return;
+    setIsSendingPrompt(true);
+    setPromptResult(null);
+    setPromptError(null);
+    try {
+      await api.orchestration.sendPrompt(agent.id, msg);
+      setDirectMessage("");
+    } catch (err: any) {
+      setIsSendingPrompt(false);
+      setPromptError(err.message ?? t("promptSendError"));
+    }
+  }, [directMessage, isSendingPrompt, agent.id, t]);
+
+  const handleDirectKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      handleSendDirectPrompt();
+    }
+  };
+
+  // Auto-resize textarea
+  const handleDirectInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDirectMessage(e.target.value);
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
   };
 
   return (
@@ -331,21 +384,64 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0 space-y-2">
-          {agent.status === "working" && (
+        <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0 space-y-3">
+          {/* Direct Prompt Input */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium mb-1.5">
+              {t("directPromptTitle")}
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <textarea
+                ref={directTextareaRef}
+                value={directMessage}
+                onChange={handleDirectInput}
+                onKeyDown={handleDirectKeyDown}
+                disabled={isSendingPrompt || agent.status === "working"}
+                placeholder={t("promptPlaceholder")}
+                rows={2}
+                className="w-full text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
+                style={{ minHeight: "56px" }}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                  Cmd+Enter
+                </span>
+                <button
+                  onClick={handleSendDirectPrompt}
+                  disabled={isSendingPrompt || !directMessage.trim() || agent.status === "working"}
+                  className="px-3 py-1 text-xs font-medium bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isSendingPrompt ? t("promptRunning") : t("sendPrompt")}
+                </button>
+              </div>
+              {promptError && (
+                <p className="text-[11px] text-red-500 dark:text-red-400">{promptError}</p>
+              )}
+              {promptResult !== null && !isSendingPrompt && (
+                <div className="text-[10px] px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded border border-green-100 dark:border-green-800/30">
+                  {t("promptComplete")}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Kill / Delete buttons */}
+          <div className="space-y-2">
+            {agent.status === "working" && (
+              <button
+                onClick={() => setShowKillConfirm(true)}
+                className="w-full py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                {t("agentDetailKillSession")}
+              </button>
+            )}
             <button
-              onClick={() => setShowKillConfirm(true)}
-              className="w-full py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="w-full py-2 text-sm font-medium text-red-700 dark:text-red-500 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
             >
-              {t("agentDetailKillSession")}
+              {t("deleteAgent")}
             </button>
-          )}
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="w-full py-2 text-sm font-medium text-red-700 dark:text-red-500 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-          >
-            {t("deleteAgent")}
-          </button>
+          </div>
         </div>
       </div>
     </>

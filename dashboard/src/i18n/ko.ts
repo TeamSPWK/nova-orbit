@@ -267,6 +267,15 @@ const ko = {
   customPromptPlaceholder: "이 에이전트의 역할, 전문 분야, 가이드라인을 설명하세요...",
   customPromptTemplate: "당신은 [역할] 전문가입니다.\n전문 분야:\n- [스킬 1]\n- [스킬 2]\n\n태스크 구현 시:\n- [가이드라인 1]\n- [가이드라인 2]",
 
+  // Direct prompt
+  sendPrompt: "전송",
+  promptPlaceholder: "에이전트에게 지시할 내용을 입력하세요...",
+  promptRunning: "실행 중...",
+  promptComplete: "완료",
+  selectAgent: "에이전트 선택",
+  directPromptTitle: "직접 프롬프트",
+  promptSendError: "전송 실패",
+
   // TaskDetail modal
   taskDetail: "태스크 상세",
   closeDetail: "닫기",

@@ -267,6 +267,15 @@ const en = {
   customPromptPlaceholder: "Describe this agent's role, expertise, and guidelines...",
   customPromptTemplate: "You are a [role] specialist.\nYour expertise includes:\n- [skill 1]\n- [skill 2]\n\nWhen implementing tasks:\n- [guideline 1]\n- [guideline 2]",
 
+  // Direct prompt
+  sendPrompt: "Send",
+  promptPlaceholder: "Type instructions for the agent...",
+  promptRunning: "Running...",
+  promptComplete: "Complete",
+  selectAgent: "Select agent",
+  directPromptTitle: "Direct Prompt",
+  promptSendError: "Send failed",
+
   // TaskDetail modal
   taskDetail: "Task Detail",
   closeDetail: "Close",

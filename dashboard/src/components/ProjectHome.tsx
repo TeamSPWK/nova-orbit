@@ -242,11 +242,31 @@ export function ProjectHome() {
     }
   };
 
+  const handleSendPanelPrompt = async () => {
+    if (!panelPromptMessage.trim() || !panelPromptAgentId || panelPromptSending) return;
+    setPanelPromptSending(true);
+    try {
+      await api.orchestration.sendPrompt(panelPromptAgentId, panelPromptMessage.trim());
+      setPanelPromptMessage("");
+      setPanelPromptToast(t("promptComplete"));
+    } catch (err: any) {
+      setPanelPromptToast(err.message ?? t("promptSendError"));
+    } finally {
+      setPanelPromptSending(false);
+    }
+  };
+
   // Derive in-progress task and its assigned agent for the chat panel
   const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
   const inProgressAgent = inProgressTask?.assignee_id
     ? agents.find((a) => a.id === inProgressTask.assignee_id) ?? null
     : null;
+
+  // Direct prompt state (side panel)
+  const [panelPromptMessage, setPanelPromptMessage] = useState("");
+  const [panelPromptAgentId, setPanelPromptAgentId] = useState<string>("");
+  const [panelPromptSending, setPanelPromptSending] = useState(false);
+  const [panelPromptToast, setPanelPromptToast] = useState<string | null>(null);
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -636,6 +656,53 @@ export function ProjectHome() {
                   )}
                 </div>
               </div>
+
+              {/* Direct Prompt — only when no task is running */}
+              {!inProgressTask && agents.length > 0 && (
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                  <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                    <h2 className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                      {t("directPromptTitle")}
+                    </h2>
+                  </div>
+                  <div className="p-3 bg-white dark:bg-[#1e1e2e] space-y-2">
+                    <select
+                      value={panelPromptAgentId}
+                      onChange={(e) => setPanelPromptAgentId(e.target.value)}
+                      disabled={panelPromptSending}
+                      className="w-full text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
+                    >
+                      <option value="">{t("selectAgent")}</option>
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.role})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={panelPromptMessage}
+                        onChange={(e) => setPanelPromptMessage(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleSendPanelPrompt(); }}
+                        disabled={panelPromptSending || !panelPromptAgentId}
+                        placeholder={t("promptPlaceholder")}
+                        className="flex-1 text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
+                      />
+                      <button
+                        onClick={handleSendPanelPrompt}
+                        disabled={panelPromptSending || !panelPromptMessage.trim() || !panelPromptAgentId}
+                        className="px-3 py-1.5 text-xs font-medium bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                      >
+                        {panelPromptSending ? t("promptRunning") : t("sendPrompt")}
+                      </button>
+                    </div>
+                    {panelPromptToast && (
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400">{panelPromptToast}</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Recent Activity */}
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
