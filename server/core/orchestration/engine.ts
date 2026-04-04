@@ -64,7 +64,20 @@ export function createOrchestrationEngine(
         throw new Error("Task has no assigned agent");
       }
 
-      const session = sessionManager.spawnAgent(task.assignee_id, project.workdir || process.cwd());
+      // Validate workdir exists
+      const workdir = project.workdir || process.cwd();
+      const { existsSync } = await import("node:fs");
+      if (!existsSync(workdir)) {
+        throw new Error(`Working directory does not exist: ${workdir}`);
+      }
+
+      let session;
+      try {
+        session = sessionManager.spawnAgent(task.assignee_id, workdir);
+      } catch (spawnErr: any) {
+        log.error(`Failed to spawn agent for task "${task.title}"`, spawnErr);
+        throw new Error(`Agent spawn failed: ${spawnErr.message}`);
+      }
 
       // Stream agent output to WebSocket for real-time dashboard display
       session.on("output", (text: string) => {

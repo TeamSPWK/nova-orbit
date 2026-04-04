@@ -123,4 +123,12 @@ export async function startServer(config: ServerConfig): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // Prevent server crash on unhandled errors
+  process.on("uncaughtException", (err) => {
+    console.error("[FATAL] Uncaught exception (server kept alive):", err.message);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[FATAL] Unhandled rejection (server kept alive):", reason);
+  });
 }
