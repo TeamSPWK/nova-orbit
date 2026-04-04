@@ -436,10 +436,12 @@ export function ProjectHome() {
                         <button
                           onClick={() => handleDecomposeGoal(goal.id)}
                           disabled={decomposingGoalId !== null}
-                          className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 ${
+                          className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
                             decomposingGoalId === goal.id
-                              ? "bg-purple-100 dark:bg-purple-900/50 text-purple-400 cursor-wait"
-                              : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
+                              ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
+                              : decomposingGoalId !== null
+                                ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
+                                : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
                           }`}
                         >
                           {decomposingGoalId === goal.id ? (
