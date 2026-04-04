@@ -186,6 +186,12 @@ export function Sidebar() {
           >
             {t("connectGitHub")}
           </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("nova:show-guide"))}
+            className="w-full py-1.5 text-sm text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors text-[10px]"
+          >
+            {t("gettingStarted")}
+          </button>
         </div>
       </aside>
     </>

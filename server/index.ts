@@ -62,7 +62,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
     const message = JSON.stringify({ type: event, payload: data, timestamp: new Date().toISOString() });
     for (const client of wss.clients) {
       if (client.readyState === 1) {
-        client.send(message);
+        try { client.send(message); } catch { /* skip dead client */ }
       }
     }
   };

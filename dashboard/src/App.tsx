@@ -10,6 +10,7 @@ import { LanguageToggle } from "./components/LanguageToggle";
 import { CommandPalette, CMD_EVENTS } from "./components/CommandPalette";
 import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import { NotificationPanel } from "./components/NotificationPanel";
+import { GettingStarted } from "./components/GettingStarted";
 import { useNotifications } from "./stores/useNotifications";
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
   const { setProjects, setCurrentProject, connected } = useStore();
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [serverUp, setServerUp] = useState(true);
   const { notifications } = useNotifications();
 
@@ -27,8 +29,13 @@ function App() {
     const handler = (e: Event) => {
       setServerUp((e as CustomEvent).detail.up);
     };
+    const guideHandler = () => setShowGuide(true);
     window.addEventListener("nova:server-status", handler);
-    return () => window.removeEventListener("nova:server-status", handler);
+    window.addEventListener("nova:show-guide", guideHandler);
+    return () => {
+      window.removeEventListener("nova:server-status", handler);
+      window.removeEventListener("nova:show-guide", guideHandler);
+    };
   }, []);
 
   // Load projects on mount
@@ -185,7 +192,19 @@ function App() {
           </div>
         </header>
 
-        <ProjectHome />
+        {showGuide ? (
+          <div className="flex-1 overflow-y-auto">
+            <button
+              onClick={() => setShowGuide(false)}
+              className="absolute top-12 right-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 z-10"
+            >
+              &times; Close
+            </button>
+            <GettingStarted />
+          </div>
+        ) : (
+          <ProjectHome />
+        )}
       </main>
     </div>
   );

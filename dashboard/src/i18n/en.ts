@@ -267,6 +267,25 @@ const en = {
   noNotifications: "No notifications yet",
   clearAll: "Clear all",
   notificationBell: "Notification history",
+
+  // Getting Started Guide
+  gettingStarted: "Getting Started",
+  guideTitle: "How to Use Nova Orbit",
+  guideSubtitle: "Follow these steps to orchestrate your AI team and get things done.",
+  guideStep1Title: "Create a Project",
+  guideStep1Detail: "Click '+ New Project' in the sidebar. Enter a name, working directory (where agents will write code), and optionally a mission. If you provide a mission, domain-specialized agents are auto-created.",
+  guideStep2Title: "Add AI Agents",
+  guideStep2Detail: "Click '+ Add Agent' to add agents from presets (Coder, Reviewer, QA, etc.) or create custom agents. Each agent is a Claude Code session that works independently.",
+  guideStep3Title: "Set Goals & Create Tasks",
+  guideStep3Detail: "Add goals describing what you want to achieve. Click 'Decompose' to let AI break a goal into concrete tasks. Or add tasks manually with '+ Task'. Assign each task to an agent.",
+  guideStep4Title: "Run Tasks",
+  guideStep4Detail: "Click 'Run' on a task to execute it via Claude Code. Or click 'Run Queue' to auto-execute all assigned tasks in priority order. Watch real-time progress in the agent chat log.",
+  guideStep5Title: "Review & Verify",
+  guideStep5Detail: "Completed tasks go to 'In Review'. Click 'Approve' to accept or 'Reject' with feedback. Nova Quality Gate automatically verifies code with 5-dimension scoring (Functionality, Data Flow, Design, Craft, Edge Cases).",
+  guideTipsTitle: "Tips",
+  guideTip1: "Press Cmd+K (or Ctrl+K) to open the command palette for quick actions.",
+  guideTip2: "Press ? to see all keyboard shortcuts.",
+  guideTip3: "Use the Kanban tab for drag-and-drop task management.",
 } as const;
 
 export default en;

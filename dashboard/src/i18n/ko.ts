@@ -267,6 +267,25 @@ const ko = {
   noNotifications: "알림이 없습니다",
   clearAll: "전체 지우기",
   notificationBell: "알림 내역",
+
+  // Getting Started Guide
+  gettingStarted: "시작 가이드",
+  guideTitle: "Nova Orbit 사용법",
+  guideSubtitle: "아래 단계를 따라 AI 팀을 편성하고 작업을 진행하세요.",
+  guideStep1Title: "프로젝트 생성",
+  guideStep1Detail: "사이드바에서 '+ 새 프로젝트'를 클릭하세요. 이름, 작업 디렉토리(에이전트가 코드를 작성할 경로), 그리고 미션을 입력합니다. 미션을 입력하면 도메인 특화 에이전트가 자동 생성됩니다.",
+  guideStep2Title: "AI 에이전트 추가",
+  guideStep2Detail: "'+ 에이전트 추가'를 클릭해서 프리셋(코더, 리뷰어, QA 등)에서 선택하거나 커스텀 에이전트를 만드세요. 각 에이전트는 독립된 Claude Code 세션입니다.",
+  guideStep3Title: "목표 설정 & 태스크 생성",
+  guideStep3Detail: "달성하고 싶은 목표를 추가하세요. '분해' 버튼을 클릭하면 AI가 목표를 구체적인 태스크로 분해합니다. '+ 태스크'로 수동 추가도 가능합니다. 각 태스크에 에이전트를 할당하세요.",
+  guideStep4Title: "태스크 실행",
+  guideStep4Detail: "태스크의 '실행' 버튼을 클릭하면 Claude Code로 실행됩니다. '큐 실행'을 클릭하면 할당된 모든 태스크가 우선순위 순으로 자동 실행됩니다. 에이전트 채팅 로그에서 실시간 진행 상황을 확인하세요.",
+  guideStep5Title: "검토 & 검증",
+  guideStep5Detail: "완료된 태스크는 '검토 중' 상태가 됩니다. '승인'으로 수락하거나 '반려'로 피드백을 남기세요. Nova Quality Gate가 5차원 검증(기능, 데이터 관통, 설계, 크래프트, 경계값)으로 코드를 자동 검증합니다.",
+  guideTipsTitle: "팁",
+  guideTip1: "Cmd+K (또는 Ctrl+K)로 커맨드 팔레트를 열어 빠른 액션을 실행하세요.",
+  guideTip2: "? 키를 누르면 단축키 목록을 볼 수 있습니다.",
+  guideTip3: "칸반 탭에서 드래그 앤 드롭으로 태스크를 관리하세요.",
 } as const;
 
 export default ko;

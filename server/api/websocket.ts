@@ -1,17 +1,25 @@
 import type { WebSocketServer, WebSocket } from "ws";
 
 export function createWSHandler(wss: WebSocketServer): void {
+  // Prevent server crash on WebSocket errors
+  wss.on("error", (err) => {
+    console.error("[WS Server] Error:", err.message);
+  });
+
   wss.on("connection", (ws: WebSocket) => {
+    // Handle client errors gracefully
+    ws.on("error", (err) => {
+      console.error("[WS Client] Error:", err.message);
+    });
+
     ws.on("message", (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
 
-        // Client can subscribe to specific project events
         if (msg.type === "subscribe" && msg.projectId) {
           (ws as any).__projectId = msg.projectId;
         }
 
-        // Client can subscribe to agent output stream
         if (msg.type === "subscribe:agent" && msg.agentId) {
           if (!(ws as any).__agentIds) (ws as any).__agentIds = new Set();
           (ws as any).__agentIds.add(msg.agentId);
@@ -25,17 +33,20 @@ export function createWSHandler(wss: WebSocketServer): void {
       }
     });
 
-    ws.send(JSON.stringify({
-      type: "connected",
-      payload: { message: "Nova Orbit WebSocket connected" },
-      timestamp: new Date().toISOString(),
-    }));
+    try {
+      ws.send(JSON.stringify({
+        type: "connected",
+        payload: { message: "Nova Orbit WebSocket connected" },
+        timestamp: new Date().toISOString(),
+      }));
+    } catch {
+      // Client may have disconnected immediately
+    }
   });
 }
 
 /**
- * Send agent output to subscribed WebSocket clients.
- * This is called from the session manager when an agent produces output.
+ * Safe broadcast — skip clients that are not ready.
  */
 export function broadcastAgentOutput(
   wss: WebSocketServer,
@@ -50,9 +61,13 @@ export function broadcastAgentOutput(
 
   for (const client of wss.clients) {
     if (client.readyState !== 1) continue;
-    const ids = (client as any).__agentIds as Set<string> | undefined;
-    if (ids?.has(agentId)) {
-      client.send(message);
+    try {
+      const ids = (client as any).__agentIds as Set<string> | undefined;
+      if (ids?.has(agentId)) {
+        client.send(message);
+      }
+    } catch {
+      // Skip failed clients
     }
   }
 }
