@@ -42,6 +42,7 @@ export function ProjectHome() {
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
 
   const project = projects.find((p) => p.id === currentProjectId);
 
@@ -122,8 +123,6 @@ export function ProjectHome() {
     const goal = await api.goals.create({ project_id: currentProjectId, description });
     setGoals([...goals, goal]);
   };
-
-  const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
 
   const handleDecomposeGoal = async (goalId: string) => {
     setDecomposingGoalId(goalId);
