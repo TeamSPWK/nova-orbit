@@ -57,11 +57,11 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
   return (
     <div className="space-y-3">
       {verifications.map((v) => (
-        <div key={v.id} className="border border-gray-200 rounded-lg overflow-hidden">
+        <div key={v.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-[#25253d]">
           {/* Header */}
           <button
             onClick={() => setExpanded(expanded === v.id ? null : v.id)}
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
           >
             <div className="flex items-center gap-3">
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${VERDICT_COLORS[v.verdict]}`}>
@@ -70,26 +70,26 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
               <span className={`text-xs ${SEVERITY_COLORS[v.severity]}`}>
                 {v.severity}
               </span>
-              <span className="text-xs text-gray-400">{v.scope}</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">{v.scope}</span>
             </div>
-            <span className="text-[10px] text-gray-300">
+            <span className="text-[10px] text-gray-300 dark:text-gray-600">
               {new Date(v.created_at).toLocaleString()}
             </span>
           </button>
 
           {/* Expanded Details */}
           {expanded === v.id && (
-            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50/50">
+            <div className="border-t border-gray-100 dark:border-gray-700 px-4 py-3 bg-gray-50/50 dark:bg-gray-800/50">
               {/* 5-Dimension Score Bar */}
               <div className="mb-4">
-                <h4 className="text-xs font-medium text-gray-500 mb-2">5-Dimension Score</h4>
+                <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">5-Dimension Score</h4>
                 <div className="space-y-1.5">
                   {Object.entries(v.dimensions).map(([key, dim]) => (
                     <div key={key} className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400 w-20 shrink-0">
+                      <span className="text-[10px] text-gray-400 dark:text-gray-500 w-20 shrink-0">
                         {DIM_LABELS[key] ?? key}
                       </span>
-                      <div className="flex-1 bg-gray-200 rounded-full h-2">
+                      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                         <div
                           className={`h-2 rounded-full transition-all ${
                             dim.value >= 8
@@ -101,7 +101,7 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
                           style={{ width: `${dim.value * 10}%` }}
                         />
                       </div>
-                      <span className="text-[10px] text-gray-500 w-6 text-right">
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6 text-right">
                         {dim.value}
                       </span>
                     </div>
@@ -112,7 +112,7 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
               {/* Issues */}
               {v.issues.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-medium text-gray-500 mb-2">
+                  <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
                     Issues ({v.issues.length})
                   </h4>
                   <div className="space-y-2">
@@ -121,10 +121,10 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
                         key={i}
                         className={`text-xs p-2 rounded border-l-2 ${
                           issue.severity === "critical"
-                            ? "border-red-500 bg-red-50"
+                            ? "border-red-500 bg-red-50 dark:bg-red-900/20"
                             : issue.severity === "high"
-                              ? "border-orange-400 bg-orange-50"
-                              : "border-gray-300 bg-white"
+                              ? "border-orange-400 bg-orange-50 dark:bg-orange-900/20"
+                              : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700/50"
                         }`}
                       >
                         <div className="flex items-center gap-1.5 mb-1">
@@ -132,15 +132,15 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
                             {issue.severity}
                           </span>
                           {issue.file && (
-                            <span className="text-gray-400">
+                            <span className="text-gray-400 dark:text-gray-500">
                               {issue.file}
                               {issue.line ? `:${issue.line}` : ""}
                             </span>
                           )}
                         </div>
-                        <p className="text-gray-700">{issue.message}</p>
+                        <p className="text-gray-700 dark:text-gray-300">{issue.message}</p>
                         {issue.suggestion && (
-                          <p className="text-gray-400 mt-1">Fix: {issue.suggestion}</p>
+                          <p className="text-gray-400 dark:text-gray-500 mt-1">Fix: {issue.suggestion}</p>
                         )}
                       </div>
                     ))}

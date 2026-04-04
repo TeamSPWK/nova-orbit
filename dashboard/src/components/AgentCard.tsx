@@ -27,31 +27,36 @@ interface AgentCardProps {
   };
   tasks?: Array<{ id: string; title: string }>;
   onKill?: () => void;
+  onClick?: () => void;
 }
 
-export function AgentCard({ agent, tasks, onKill }: AgentCardProps) {
+export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
   const currentTask = tasks?.find((t) => t.id === agent.current_task_id);
 
-  const handleKill = async () => {
+  const handleKill = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!confirm(`Kill agent "${agent.name}"?`)) return;
     await api.orchestration.killAgent(agent.id);
     onKill?.();
   };
 
   return (
-    <div className="border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors">
+    <div
+      className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-[#25253d] transition-colors cursor-pointer"
+      onClick={onClick}
+    >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <span className="text-xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
           <div>
-            <div className="text-sm font-medium text-gray-800">{agent.name}</div>
-            <div className="text-xs text-gray-400 capitalize">{agent.role}</div>
+            <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{agent.name}</div>
+            <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</div>
           </div>
         </div>
         {agent.status === "working" && (
           <button
             onClick={handleKill}
-            className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
+            className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
             title="Kill session"
           >
             Stop
@@ -67,7 +72,7 @@ export function AgentCard({ agent, tasks, onKill }: AgentCardProps) {
           {agent.status.replace("_", " ")}
         </span>
         {currentTask && (
-          <span className="text-[10px] text-gray-400 truncate">
+          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
             {currentTask.title}
           </span>
         )}

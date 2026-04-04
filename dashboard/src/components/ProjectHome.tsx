@@ -6,15 +6,22 @@ import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
 import { ActivityFeed } from "./ActivityFeed";
 import { AddAgentDialog } from "./AddAgentDialog";
+import { KanbanBoard } from "./KanbanBoard";
+import { ProjectSettings } from "./ProjectSettings";
 
-type Tab = "overview" | "verification";
+type Tab = "overview" | "kanban" | "verification" | "settings";
 
 export function ProjectHome() {
-  const { currentProjectId, projects, agents, setAgents, goals, setGoals, tasks, setTasks } =
+  const { currentProjectId, projects, agents, setAgents, goals, setGoals, tasks, setTasks, updateProject } =
     useStore();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
   const [showAddAgent, setShowAddAgent] = useState(false);
+
+  // Header mission inline edit state
+  const [editingHeaderMission, setEditingHeaderMission] = useState(false);
+  const [headerMissionDraft, setHeaderMissionDraft] = useState("");
+  const [savingMission, setSavingMission] = useState(false);
 
   const project = projects.find((p) => p.id === currentProjectId);
 
@@ -100,6 +107,39 @@ export function ProjectHome() {
     setTasks([...tasks, task]);
   };
 
+  const startEditHeaderMission = () => {
+    setHeaderMissionDraft(project?.mission ?? "");
+    setEditingHeaderMission(true);
+  };
+
+  const cancelEditHeaderMission = () => {
+    setEditingHeaderMission(false);
+    setHeaderMissionDraft("");
+  };
+
+  const saveHeaderMission = async () => {
+    if (!currentProjectId || !project) return;
+    if (headerMissionDraft === project.mission) {
+      cancelEditHeaderMission();
+      return;
+    }
+    setSavingMission(true);
+    try {
+      const updated = await api.projects.update(currentProjectId, { mission: headerMissionDraft });
+      updateProject(updated);
+      setEditingHeaderMission(false);
+    } catch {
+      alert("Failed to save mission");
+    } finally {
+      setSavingMission(false);
+    }
+  };
+
+  const handleHeaderMissionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") saveHeaderMission();
+    if (e.key === "Escape") cancelEditHeaderMission();
+  };
+
   return (
     <div className="flex-1 overflow-y-auto">
       {showAddAgent && currentProjectId && (
@@ -113,9 +153,47 @@ export function ProjectHome() {
         {/* Project Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
-          {project.mission && (
-            <p className="text-gray-500 mt-1">{project.mission}</p>
-          )}
+          <div className="mt-1">
+            {editingHeaderMission ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={headerMissionDraft}
+                  onChange={(e) => setHeaderMissionDraft(e.target.value)}
+                  onKeyDown={handleHeaderMissionKeyDown}
+                  disabled={savingMission}
+                  className="flex-1 text-sm border border-blue-400 rounded px-2 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  placeholder="Project mission..."
+                />
+                <button
+                  onClick={saveHeaderMission}
+                  disabled={savingMission}
+                  className="text-xs px-2 py-0.5 bg-gray-900 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {savingMission ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={cancelEditHeaderMission}
+                  disabled={savingMission}
+                  className="text-xs px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <p
+                className="text-gray-500 cursor-pointer hover:text-gray-700 group inline-flex items-center gap-1"
+                onClick={startEditHeaderMission}
+                title="Click to edit"
+              >
+                {project.mission || <span className="italic text-gray-400">No mission — click to add</span>}
+                <span className="text-xs text-gray-300 group-hover:text-gray-400 transition-colors">
+                  Edit
+                </span>
+              </p>
+            )}
+          </div>
           <div className="flex gap-2 mt-2">
             <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">
               {project.status}
@@ -133,7 +211,7 @@ export function ProjectHome() {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-gray-200">
-          {(["overview", "verification"] as Tab[]).map((t) => (
+          {(["overview", "kanban", "verification", "settings"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -148,7 +226,9 @@ export function ProjectHome() {
           ))}
         </div>
 
-        {tab === "overview" ? (
+        {tab === "settings" ? (
+          <ProjectSettings projectId={currentProjectId!} />
+        ) : tab === "overview" ? (
           <>
             {/* Agents Section */}
             <section className="mb-8">
@@ -243,6 +323,8 @@ export function ProjectHome() {
               <ActivityFeed projectId={currentProjectId!} />
             </section>
           </>
+        ) : tab === "kanban" ? (
+          <KanbanBoard tasks={tasks} agents={agents} onUpdate={loadData} />
         ) : (
           <section>
             <VerificationLog projectId={currentProjectId!} />

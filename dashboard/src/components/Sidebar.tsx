@@ -83,28 +83,28 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-[260px] h-screen border-r border-gray-200 bg-gray-50/50 flex flex-col shrink-0">
+    <aside className="w-[260px] h-screen border-r border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-[#16162a] flex flex-col shrink-0">
       {/* Logo */}
-      <div className="px-4 py-3 border-b border-gray-200">
-        <h1 className="text-sm font-semibold text-gray-800 tracking-tight">
+      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+        <h1 className="text-sm font-semibold text-gray-800 dark:text-gray-200 tracking-tight">
           Nova Orbit
         </h1>
-        <p className="text-xs text-gray-400">AI Team Orchestration</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">AI Team Orchestration</p>
       </div>
 
       {/* Project List */}
       <nav className="flex-1 overflow-y-auto py-2">
-        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium">
           Projects
         </div>
         {projects.map((p) => (
           <button
             key={p.id}
             onClick={() => setCurrentProject(p.id)}
-            className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-gray-100 transition-colors ${
+            className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
               currentProjectId === p.id
-                ? "bg-gray-100 text-gray-900 font-medium"
-                : "text-gray-600"
+                ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium"
+                : "text-gray-600 dark:text-gray-300"
             }`}
           >
             <span className="text-base">
@@ -120,22 +120,22 @@ export function Sidebar() {
       </nav>
 
       {/* Action Buttons */}
-      <div className="p-3 border-t border-gray-200 space-y-1">
+      <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-1">
         <button
           onClick={handleNewProject}
-          className="w-full py-1.5 text-sm text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+          className="w-full py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         >
           + New Project
         </button>
         <button
           onClick={handleImportProject}
-          className="w-full py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+          className="w-full py-1.5 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         >
           Import Local
         </button>
         <button
           onClick={handleConnectGitHub}
-          className="w-full py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+          className="w-full py-1.5 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
         >
           Connect GitHub
         </button>

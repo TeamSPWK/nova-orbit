@@ -2,6 +2,29 @@
 
 :root {
   --sidebar-width: 260px;
+  --color-bg: #ffffff;
+  --color-sidebar: #f9fafb;
+  --color-card: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #6b7280;
+}
+
+.dark {
+  --color-bg: #1a1a2e;
+  --color-sidebar: #16162a;
+  --color-card: #25253d;
+  --color-text: #e4e4e7;
+  --color-muted: #9ca3af;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --color-bg: #1a1a2e;
+    --color-sidebar: #16162a;
+    --color-card: #25253d;
+    --color-text: #e4e4e7;
+    --color-muted: #9ca3af;
+  }
 }
 
 body {
@@ -10,8 +33,8 @@ body {
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
     Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #ffffff;
-  color: #1a1a1a;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 /* Notion-like scrollbar */

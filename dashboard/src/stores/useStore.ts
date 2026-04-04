@@ -1,5 +1,12 @@
 import { create } from "zustand";
 
+interface GitHubConfig {
+  repoUrl: string;
+  branch: string;
+  autoPush: boolean;
+  prMode: boolean;
+}
+
 interface Project {
   id: string;
   name: string;
@@ -8,6 +15,7 @@ interface Project {
   status: string;
   workdir: string;
   created_at: string;
+  github?: GitHubConfig;
 }
 
 interface Agent {
@@ -44,6 +52,8 @@ interface AppStore {
   currentProjectId: string | null;
   setProjects: (projects: Project[]) => void;
   setCurrentProject: (id: string | null) => void;
+  updateProject: (project: Project) => void;
+  removeProject: (id: string) => void;
 
   // Agents
   agents: Agent[];
@@ -68,6 +78,15 @@ export const useStore = create<AppStore>((set) => ({
   currentProjectId: null,
   setProjects: (projects) => set({ projects }),
   setCurrentProject: (id) => set({ currentProjectId: id }),
+  updateProject: (project) =>
+    set((state) => ({
+      projects: state.projects.map((p) => (p.id === project.id ? project : p)),
+    })),
+  removeProject: (id) =>
+    set((state) => ({
+      projects: state.projects.filter((p) => p.id !== id),
+      currentProjectId: state.currentProjectId === id ? null : state.currentProjectId,
+    })),
 
   agents: [],
   setAgents: (agents) => set({ agents }),

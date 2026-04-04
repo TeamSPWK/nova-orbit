@@ -83,10 +83,10 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
               {filtered.map((task) => (
                 <div
                   key={task.id}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors ${config.bg}`}
+                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600 transition-colors dark:bg-gray-800 ${config.bg}`}
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="text-sm text-gray-800 truncate">{task.title}</span>
+                    <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{task.title}</span>
                     {task.verification_id && (
                       <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
                         verified
@@ -97,13 +97,13 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                   <div className="flex items-center gap-1.5 shrink-0 ml-3">
                     {/* Agent assignment */}
                     {task.assignee_id && agentMap[task.assignee_id] ? (
-                      <span className="text-[10px] text-gray-400 px-1.5 py-0.5 bg-white rounded border border-gray-100">
+                      <span className="text-[10px] text-gray-400 dark:text-gray-400 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600">
                         {agentMap[task.assignee_id].name}
                       </span>
                     ) : (
                       <button
                         onClick={() => handleAssign(task.id)}
-                        className="text-[10px] text-gray-300 hover:text-gray-500 px-1.5 py-0.5 border border-dashed border-gray-200 rounded"
+                        className="text-[10px] text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 px-1.5 py-0.5 border border-dashed border-gray-200 dark:border-gray-600 rounded"
                       >
                         assign
                       </button>
@@ -113,7 +113,7 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
                     <select
                       value={task.status}
                       onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                      className="text-[10px] text-gray-400 bg-transparent border border-gray-200 rounded px-1 py-0.5 cursor-pointer"
+                      className="text-[10px] text-gray-400 dark:text-gray-400 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5 cursor-pointer"
                     >
                       {STATUSES.map((s) => (
                         <option key={s} value={s}>
