@@ -132,3 +132,14 @@ export async function startServer(config: ServerConfig): Promise<void> {
     console.error("[FATAL] Unhandled rejection (server kept alive):", reason);
   });
 }
+
+// Auto-start when run directly (dev mode: tsx watch server/index.ts)
+const isDirectRun = process.argv[1]?.endsWith("server/index.ts") ||
+                    process.argv[1]?.endsWith("server/index.js");
+if (isDirectRun) {
+  const dataDir = resolve(process.cwd(), ".nova-orbit");
+  startServer({ port: 3000, dataDir }).catch((err) => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  });
+}
