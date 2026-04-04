@@ -30,9 +30,12 @@ export function AgentTerminal({ agentId }: AgentTerminalProps) {
     setLines([]);
   }, [agentId]);
 
-  // Auto-scroll to bottom on new lines
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll within container only (not the page)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [lines]);
 
   return (
@@ -56,6 +59,7 @@ export function AgentTerminal({ agentId }: AgentTerminalProps) {
         style={{ background: "#0d1117" }}
       >
         <div
+          ref={containerRef}
           className="overflow-y-auto px-3 py-2.5 font-mono text-[11px] leading-relaxed"
           style={{ maxHeight: "260px", color: "#39d353" }}
         >
@@ -68,7 +72,6 @@ export function AgentTerminal({ agentId }: AgentTerminalProps) {
               </div>
             ))
           )}
-          <div ref={bottomRef} />
         </div>
       </div>
     </section>

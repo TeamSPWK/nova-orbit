@@ -93,13 +93,16 @@ export function AgentChatLog({ taskId, agentName, agentRole, isWorking }: AgentC
     };
   }, [taskId, agentName, agentRole, t]);
 
-  // Auto-scroll to bottom on new messages
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll within container only (not the page)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isWorking]);
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-4 py-3 space-y-3">
+    <div ref={containerRef} className="flex flex-col h-full overflow-y-auto px-4 py-3 space-y-3">
       {messages.length === 0 && !isWorking && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center pt-4">
           {t("terminalWaiting")}

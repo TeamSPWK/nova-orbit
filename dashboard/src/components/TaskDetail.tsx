@@ -128,7 +128,9 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
           <div>
             <p className="text-base font-medium text-gray-900 dark:text-gray-100">{task.title}</p>
             {task.description && (
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{task.description}</p>
+              <div className="mt-3 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-[#1a1a2e] rounded-lg p-4 whitespace-pre-wrap leading-relaxed border border-gray-100 dark:border-gray-700">
+                {task.description}
+              </div>
             )}
           </div>
 
