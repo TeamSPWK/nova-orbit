@@ -155,6 +155,8 @@ const en = {
   verdict_pass: "PASS",
   verdict_conditional: "CONDITIONAL",
   verdict_fail: "FAIL",
+  parentAgent: "Report to (parent agent)",
+  noParent: "None (top-level)",
   bulkApprove: "Approve all {{count}}",
   rateLimitTitle: "API Rate Limit Reached",
   rateLimitDesc: "Agent {{agent}} hit rate limit. Auto-retry in {{seconds}}s.",

@@ -155,6 +155,8 @@ const ko = {
   verdict_pass: "통과",
   verdict_conditional: "조건부 통과",
   verdict_fail: "실패",
+  parentAgent: "소속 (상위 에이전트)",
+  noParent: "없음 (최상위)",
   bulkApprove: "{{count}}개 전체 승인",
   rateLimitTitle: "⚠️ API 사용량 한도 도달",
   rateLimitDesc: "{{agent}} 에이전트가 Rate Limit에 도달했습니다. {{seconds}}초 후 자동 재시도합니다.",

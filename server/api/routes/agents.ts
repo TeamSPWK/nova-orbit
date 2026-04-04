@@ -132,7 +132,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
 
   // Create agent
   router.post("/", (req, res) => {
-    const { project_id, name, role, system_prompt = "", session_behavior = "resume-or-new" } = req.body;
+    const { project_id, name, role, system_prompt = "", session_behavior = "resume-or-new", parent_id } = req.body;
 
     if (!project_id || !name || !role) {
       return res.status(400).json({ error: "project_id, name, and role are required" });
@@ -145,9 +145,9 @@ export function createAgentRoutes(ctx: AppContext): Router {
 
     try {
       const result = db.prepare(`
-        INSERT INTO agents (project_id, name, role, system_prompt, session_behavior)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(project_id, name, role, system_prompt, session_behavior);
+        INSERT INTO agents (project_id, name, role, system_prompt, session_behavior, parent_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(project_id, name, role, system_prompt, session_behavior, parent_id ?? null);
 
       const agent = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
       broadcast("agent:status", agent);

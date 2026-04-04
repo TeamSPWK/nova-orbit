@@ -112,6 +112,19 @@ export function ProjectHome() {
     };
   }, [currentProjectId]);
 
+  // Listen for prompt-complete to reset sending state
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ agentId: string; error?: string }>).detail;
+      if (detail.agentId === panelPromptAgentId) {
+        setPanelPromptSending(false);
+        setPanelPromptToast(detail.error ?? t("promptComplete"));
+      }
+    };
+    window.addEventListener("nova:prompt-complete", handler);
+    return () => window.removeEventListener("nova:prompt-complete", handler);
+  }, [panelPromptAgentId, t]);
+
   if (!project) {
     return <WelcomeGuide />;
   }
@@ -251,13 +264,13 @@ export function ProjectHome() {
   const handleSendPanelPrompt = async () => {
     if (!panelPromptMessage.trim() || !panelPromptAgentId || panelPromptSending) return;
     setPanelPromptSending(true);
+    setPanelPromptToast(null);
     try {
       await api.orchestration.sendPrompt(panelPromptAgentId, panelPromptMessage.trim());
       setPanelPromptMessage("");
-      setPanelPromptToast(t("promptComplete"));
+      // Don't set sending=false here — wait for prompt-complete event
     } catch (err: any) {
       setPanelPromptToast(err.message ?? t("promptSendError"));
-    } finally {
       setPanelPromptSending(false);
     }
   };
@@ -290,6 +303,7 @@ export function ProjectHome() {
       {showAddAgent && currentProjectId && (
         <AddAgentDialog
           projectId={currentProjectId}
+          existingAgents={agents}
           onCreated={handleAgentCreated}
           onClose={() => setShowAddAgent(false)}
         />
@@ -494,9 +508,9 @@ export function ProjectHome() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {/* Leader agents (no parent) */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-2">
                       {agents.filter((a) => !a.parent_id).map((agent) => (
                         <AgentCard
                           key={agent.id}
@@ -510,8 +524,8 @@ export function ProjectHome() {
                     </div>
                     {/* Member agents (has parent) — indented */}
                     {agents.some((a) => a.parent_id) && (
-                      <div className="ml-4 pl-3 border-l-2 border-gray-200 dark:border-gray-700">
-                        <div className="grid grid-cols-2 gap-3">
+                      <div className="ml-3 pl-2 border-l-2 border-gray-200 dark:border-gray-700">
+                        <div className="grid grid-cols-3 gap-2">
                           {agents.filter((a) => a.parent_id).map((agent) => (
                             <AgentCard
                               key={agent.id}

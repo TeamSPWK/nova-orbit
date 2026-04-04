@@ -11,6 +11,7 @@ interface Preset {
 
 interface AddAgentDialogProps {
   projectId: string;
+  existingAgents?: Array<{ id: string; name: string; role: string }>;
   onCreated: (agent: any) => void;
   onClose: () => void;
 }
@@ -25,7 +26,7 @@ const PRESET_I18N: Record<string, { nameKey: string; descKey: string }> = {
 
 type Step = "select" | "preview";
 
-export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialogProps) {
+export function AddAgentDialog({ projectId, existingAgents = [], onCreated, onClose }: AddAgentDialogProps) {
   const { t } = useTranslation();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [step, setStep] = useState<Step>("select");
@@ -34,6 +35,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
   const [editablePrompt, setEditablePrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedParentId, setSelectedParentId] = useState<string>("");
 
   // Custom agent fields
   const [customName, setCustomName] = useState("");
@@ -77,6 +79,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
         name: selectedName,
         role: selectedRole,
         system_prompt: editablePrompt,
+        parent_id: selectedParentId || undefined,
       });
       onCreated(agent);
     } catch (err: any) {
@@ -165,6 +168,24 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
               <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5 italic">
                 {t("promptHint")}
               </p>
+              {/* Parent agent selection (for org hierarchy) */}
+              {existingAgents.length > 0 && (
+                <div className="mt-3">
+                  <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block font-medium">
+                    {t("parentAgent")}
+                  </label>
+                  <select
+                    value={selectedParentId}
+                    onChange={(e) => setSelectedParentId(e.target.value)}
+                    className="w-full text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-[#1a1a2e] border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="">{t("noParent")}</option>
+                    {existingAgents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {error && (
                 <p className="text-xs text-red-500 mt-2">{error}</p>
               )}

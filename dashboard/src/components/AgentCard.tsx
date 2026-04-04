@@ -152,16 +152,16 @@ export function AgentCard({ agent, tasks, onKill, onDeleted, onClick }: AgentCar
         />
       )}
       <div
-        className={`border rounded-lg p-3 bg-white dark:bg-[#25253d] transition-all cursor-pointer ${
+        className={`border rounded-lg p-2.5 bg-white dark:bg-[#25253d] transition-all cursor-pointer ${
           agent.status === "working"
             ? "border-green-400 dark:border-green-600 shadow-[0_0_12px_2px_rgba(74,222,128,0.15)] hover:border-green-500"
             : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
         }`}
         onClick={onClick}
       >
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <AgentAvatar name={agent.name} role={agent.role} size="md" />
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <AgentAvatar name={agent.name} role={agent.role} size="sm" />
             <div>
               <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{agent.name}</div>
               <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</div>
