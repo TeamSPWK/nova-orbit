@@ -33,6 +33,9 @@ export function ProjectHome() {
   // Chat log panel state
   const [chatPanelCollapsed, setChatPanelCollapsed] = useState(false);
 
+  // Queue state
+  const [queueRunning, setQueueRunning] = useState(false);
+
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
@@ -184,6 +187,21 @@ export function ProjectHome() {
   };
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
+
+  const handleToggleQueue = async () => {
+    if (!currentProjectId) return;
+    try {
+      if (queueRunning) {
+        await api.orchestration.stopQueue(currentProjectId);
+        setQueueRunning(false);
+      } else {
+        await api.orchestration.startQueue(currentProjectId);
+        setQueueRunning(true);
+      }
+    } catch {
+      setToast(queueRunning ? t("stopQueue") : t("runQueue"));
+    }
+  };
 
   // Derive in-progress task and its assigned agent for the chat panel
   const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
@@ -400,9 +418,30 @@ export function ProjectHome() {
 
             {/* Tasks Section */}
             <section className="mb-8">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                {t("tasks")}
-              </h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("tasks")}
+                </h2>
+                <button
+                  onClick={handleToggleQueue}
+                  className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    queueRunning
+                      ? "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                      : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                  }`}
+                >
+                  {queueRunning && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  )}
+                  {queueRunning ? t("stopQueue") : t("runQueue")}
+                </button>
+              </div>
+              {queueRunning && (
+                <p className="text-[10px] text-blue-500 dark:text-blue-400 flex items-center gap-1 mb-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  {t("queueRunning")}
+                </p>
+              )}
               <TaskList tasks={tasks} agents={agents} onUpdate={loadData} />
             </section>
 

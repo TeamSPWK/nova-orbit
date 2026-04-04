@@ -270,5 +270,6 @@ export function TaskList({ tasks, agents, onUpdate }: TaskListProps) {
         );
       })}
     </div>
+    </>
   );
 }

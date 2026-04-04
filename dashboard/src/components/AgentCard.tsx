@@ -80,6 +80,18 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
     onKill?.();
   };
 
+  const handlePauseClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await api.orchestration.pauseAgent(agent.id);
+    onKill?.(); // reuse refresh callback
+  };
+
+  const handleResumeClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await api.orchestration.resumeAgent(agent.id);
+    onKill?.();
+  };
+
   const statusLabelKey = STATUS_LABEL_KEYS[agent.status] ?? "statusIdle";
 
   return (
@@ -107,15 +119,33 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
               <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</div>
             </div>
           </div>
-          {agent.status === "working" && (
-            <button
-              onClick={handleKillClick}
-              className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-              title={t("confirmKillAgent")}
-            >
-              {t("stopAgent")}
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {agent.status === "working" && (
+              <>
+                <button
+                  onClick={handlePauseClick}
+                  className="text-[10px] px-1.5 py-0.5 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-900/30 rounded"
+                >
+                  {t("pauseAgent")}
+                </button>
+                <button
+                  onClick={handleKillClick}
+                  className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                  title={t("confirmKillAgent")}
+                >
+                  {t("stopAgent")}
+                </button>
+              </>
+            )}
+            {agent.status === "paused" && (
+              <button
+                onClick={handleResumeClick}
+                className="text-[10px] px-1.5 py-0.5 text-green-500 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/30 rounded"
+              >
+                {t("resumeAgent")}
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span

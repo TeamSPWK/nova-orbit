@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { Toast } from "./Toast";
 
 interface Verification {
   id: string;
@@ -47,37 +48,63 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
   const { t } = useTranslation();
   const [verifications, setVerifications] = useState<Verification[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [creatingFix, setCreatingFix] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     api.verifications.list(projectId).then(setVerifications);
   }, [projectId]);
+
+  const handleCreateFixTask = async (e: React.MouseEvent, verificationId: string) => {
+    e.stopPropagation();
+    setCreatingFix(verificationId);
+    try {
+      await api.verifications.createFixTask(verificationId);
+      setToast(t("fixTaskCreated"));
+    } finally {
+      setCreatingFix(null);
+    }
+  };
 
   if (verifications.length === 0) {
     return <p className="text-sm text-gray-400">No verifications yet.</p>;
   }
 
   return (
+    <>
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     <div className="space-y-3">
       {verifications.map((v) => (
         <div key={v.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-[#25253d]">
           {/* Header */}
-          <button
-            onClick={() => setExpanded(expanded === v.id ? null : v.id)}
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${VERDICT_COLORS[v.verdict]}`}>
+          <div className="w-full flex items-center justify-between px-4 py-3">
+            <button
+              onClick={() => setExpanded(expanded === v.id ? null : v.id)}
+              className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-80 transition-opacity text-left"
+            >
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${VERDICT_COLORS[v.verdict]}`}>
                 {v.verdict === "pass" ? t("verdictPass") : v.verdict === "conditional" ? t("verdictConditional") : t("verdictFail")}
               </span>
-              <span className={`text-xs ${SEVERITY_COLORS[v.severity]}`}>
+              <span className={`text-xs shrink-0 ${SEVERITY_COLORS[v.severity]}`}>
                 {v.severity}
               </span>
-              <span className="text-xs text-gray-400 dark:text-gray-500">{v.scope}</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{v.scope}</span>
+            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {(v.verdict === "fail" || v.verdict === "conditional") && (
+                <button
+                  onClick={(e) => handleCreateFixTask(e, v.id)}
+                  disabled={creatingFix === v.id}
+                  className="text-[10px] px-2 py-0.5 rounded font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 disabled:opacity-50"
+                >
+                  {creatingFix === v.id ? "..." : t("createFixTask")}
+                </button>
+              )}
+              <span className="text-[10px] text-gray-300 dark:text-gray-600">
+                {new Date(v.created_at).toLocaleString()}
+              </span>
             </div>
-            <span className="text-[10px] text-gray-300 dark:text-gray-600">
-              {new Date(v.created_at).toLocaleString()}
-            </span>
-          </button>
+          </div>
 
           {/* Expanded Details */}
           {expanded === v.id && (
@@ -154,5 +181,6 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
         </div>
       ))}
     </div>
+    </>
   );
 }

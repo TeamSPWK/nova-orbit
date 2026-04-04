@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { api } from "../lib/api";
+import { TaskDetail } from "./TaskDetail";
 
 const COLUMNS = [
   { id: "todo", labelKey: "statusTodo", color: "border-gray-300", bg: "bg-gray-50" },
@@ -45,7 +46,15 @@ interface KanbanBoardProps {
   onUpdate?: () => void;
 }
 
-function SortableCard({ task, agents }: { task: Task; agents: Agent[] }) {
+function SortableCard({
+  task,
+  agents,
+  onCardClick,
+}: {
+  task: Task;
+  agents: Agent[];
+  onCardClick: (taskId: string) => void;
+}) {
   const { t } = useTranslation();
   const agent = agents.find((a) => a.id === task.assignee_id);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -62,21 +71,31 @@ function SortableCard({ task, agents }: { task: Task; agents: Agent[] }) {
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
-      className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 shadow-sm hover:shadow cursor-grab active:cursor-grabbing dark:bg-gray-800 dark:border-gray-700"
+      className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 shadow-sm hover:shadow dark:bg-gray-800 dark:border-gray-700 group relative"
     >
-      <div className="text-sm text-gray-800 dark:text-gray-200 mb-1.5">{task.title}</div>
-      <div className="flex items-center gap-1.5">
-        {agent && (
-          <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-500 dark:text-gray-400">
-            {agent.name}
-          </span>
-        )}
-        {task.verification_id && (
-          <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded">
-            {t("verified")}
-          </span>
-        )}
+      {/* Drag handle area — only drag listener here */}
+      <div
+        {...listeners}
+        className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-lg"
+      />
+      {/* Clickable content above drag layer */}
+      <div
+        className="relative z-10"
+        onClick={(e) => { e.stopPropagation(); onCardClick(task.id); }}
+      >
+        <div className="text-sm text-gray-800 dark:text-gray-200 mb-1.5">{task.title}</div>
+        <div className="flex items-center gap-1.5">
+          {agent && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-500 dark:text-gray-400">
+              {agent.name}
+            </span>
+          )}
+          {task.verification_id && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded">
+              {t("verified")}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -97,6 +116,8 @@ function TaskCard({ task, agents }: { task: Task; agents: Agent[] }) {
 export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
   const { t } = useTranslation();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -136,6 +157,15 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
   };
 
   return (
+    <>
+      {selectedTask && (
+        <TaskDetail
+          task={selectedTask}
+          agents={agents}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdate={() => { setSelectedTaskId(null); onUpdate?.(); }}
+        />
+      )}
     <DndContext
       sensors={sensors}
       collisionDetection={closestCorners}
@@ -167,7 +197,12 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
               >
                 <div className="px-2 pb-2 space-y-2 min-h-[60px]">
                   {columnTasks.map((task) => (
-                    <SortableCard key={task.id} task={task} agents={agents} />
+                    <SortableCard
+                      key={task.id}
+                      task={task}
+                      agents={agents}
+                      onCardClick={setSelectedTaskId}
+                    />
                   ))}
                   {columnTasks.length === 0 && (
                     <div className="text-[10px] text-gray-300 dark:text-gray-600 text-center py-4">
@@ -185,5 +220,6 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
         {activeTask ? <TaskCard task={activeTask} agents={agents} /> : null}
       </DragOverlay>
     </DndContext>
+    </>
   );
 }
