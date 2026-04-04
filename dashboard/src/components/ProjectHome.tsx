@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 import { AgentCard } from "./AgentCard";
+import { AgentChip } from "./AgentChip";
 import { AgentChatLog } from "./AgentChatLog";
 import { AgentDetail } from "./AgentDetail";
 import { TaskList } from "./TaskList";
@@ -276,6 +277,7 @@ export function ProjectHome() {
   };
 
   // Derive in-progress task and its assigned agent for the chat panel
+  const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
   const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
   const inProgressAgent = inProgressTask?.assignee_id
     ? agents.find((a) => a.id === inProgressTask.assignee_id) ?? null
@@ -508,37 +510,31 @@ export function ProjectHome() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {/* Leader agents (no parent) */}
-                    <div className="grid grid-cols-3 gap-2">
-                      {agents.filter((a) => !a.parent_id).map((agent) => (
-                        <AgentCard
-                          key={agent.id}
-                          agent={agent}
-                          tasks={tasks}
-                          onKill={loadData}
-                          onDeleted={loadData}
-                          onClick={() => setSelectedAgentId(agent.id)}
-                        />
-                      ))}
-                    </div>
-                    {/* Member agents (has parent) — indented */}
-                    {agents.some((a) => a.parent_id) && (
-                      <div className="ml-3 pl-2 border-l-2 border-gray-200 dark:border-gray-700">
-                        <div className="grid grid-cols-3 gap-2">
-                          {agents.filter((a) => a.parent_id).map((agent) => (
-                            <AgentCard
-                              key={agent.id}
-                              agent={agent}
-                              tasks={tasks}
-                              onKill={loadData}
-                              onDeleted={loadData}
-                              onClick={() => setSelectedAgentId(agent.id)}
-                            />
-                          ))}
+                  <div className="space-y-1.5">
+                    {/* Leaders with inline children — chip tree */}
+                    {agents.filter((a) => !a.parent_id).map((leader) => {
+                      const children = agents.filter((a) => a.parent_id === leader.id);
+                      return (
+                        <div key={leader.id} className="flex items-center gap-2 flex-wrap">
+                          <AgentChip agent={leader} onClick={() => setSelectedAgentId(leader.id)} />
+                          {children.length > 0 && (
+                            <>
+                              <span className="text-gray-300 dark:text-gray-600 text-xs">──</span>
+                              {children.map((child) => (
+                                <AgentChip key={child.id} agent={child} onClick={() => setSelectedAgentId(child.id)} />
+                              ))}
+                            </>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })}
+                    {/* Orphan agents (no parent, not a leader with children) */}
+                    {(() => {
+                      const leaders = new Set(agents.filter((a) => !a.parent_id).map((a) => a.id));
+                      const orphans = agents.filter((a) => !a.parent_id && !agents.some((c) => c.parent_id === a.id));
+                      // Already rendered above in leaders loop, so skip
+                      return null;
+                    })()}
                   </div>
                 )}
               </section>
@@ -573,26 +569,25 @@ export function ProjectHome() {
                     </button>
                   </div>
                 )}
-                {goals.map((goal) => (
+                {goals.map((goal) => {
+                  const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                  const doneTasks = goalTasks.filter((tk) => tk.status === "done");
+                  const activeTasks = goalTasks.filter((tk) => tk.status !== "done");
+                  const pct = goalTasks.length > 0 ? Math.round((doneTasks.length / goalTasks.length) * 100) : 0;
+                  const isComplete = pct === 100 && goalTasks.length > 0;
+                  return (
                   <div
                     key={goal.id}
-                    className="mb-4 p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d]"
+                    className="mb-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] overflow-hidden"
                   >
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <span className="text-sm font-medium text-gray-800 dark:text-gray-100 min-w-0">
+                    <div className="flex items-center justify-between gap-3 px-3 py-2">
+                      <span className={`text-sm font-medium min-w-0 ${isComplete ? "text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-100"}`}>
                         {goal.description}
                       </span>
                       <div className="flex items-center gap-2 shrink-0">
-                        {(() => {
-                          const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
-                          const doneTasks = goalTasks.filter((tk) => tk.status === "done").length;
-                          const pct = goalTasks.length > 0 ? Math.round((doneTasks / goalTasks.length) * 100) : 0;
-                          return (
-                            <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                              {doneTasks}/{goalTasks.length} ({pct}%)
-                            </span>
-                          );
-                        })()}
+                        <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                          {doneTasks.length}/{goalTasks.length} ({pct}%)
+                        </span>
                         {tasks.some((t) => t.goal_id === goal.id) ? (
                           <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
                             {t("decomposed")}
@@ -630,21 +625,36 @@ export function ProjectHome() {
                         </button>
                       </div>
                     </div>
-                    {(() => {
-                      const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
-                      const doneTasks = goalTasks.filter((tk) => tk.status === "done").length;
-                      const pct = goalTasks.length > 0 ? Math.round((doneTasks / goalTasks.length) * 100) : 0;
-                      return (
-                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
-                          <div
-                            className="bg-blue-500 h-1.5 rounded-full transition-all"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      );
-                    })()}
+                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3">
+                      <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    {/* Inline tasks for this goal */}
+                    {activeTasks.length > 0 && (
+                      <div className="px-3 pb-2 space-y-1">
+                        {activeTasks.map((tk) => (
+                          <div key={tk.id} className="flex items-center gap-2 text-[11px] py-0.5">
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              tk.status === "in_progress" ? "bg-blue-500 animate-pulse"
+                              : tk.status === "in_review" ? "bg-purple-500"
+                              : tk.status === "blocked" ? "bg-red-500"
+                              : "bg-gray-300 dark:bg-gray-600"
+                            }`} />
+                            <span className="text-gray-700 dark:text-gray-300 truncate flex-1">{tk.title}</span>
+                            {tk.assignee_id && agentMap[tk.assignee_id] && (
+                              <span className="text-[9px] text-gray-400 dark:text-gray-500 shrink-0">{agentMap[tk.assignee_id].name}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {doneTasks.length > 0 && (
+                      <div className="px-3 pb-2">
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500">{t("doneCount", { count: doneTasks.length })}</span>
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </section>
 
               {/* Tasks Section */}

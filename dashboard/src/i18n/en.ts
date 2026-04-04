@@ -156,6 +156,7 @@ const en = {
   verdict_conditional: "CONDITIONAL",
   verdict_fail: "FAIL",
   tasksAutoCreated: "Goal + tasks auto-created",
+  doneCount: "{{count}} done",
   parentAgent: "Report to (parent agent)",
   noParent: "None (top-level)",
   bulkApprove: "Approve all {{count}}",
