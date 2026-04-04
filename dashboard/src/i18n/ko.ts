@@ -236,6 +236,7 @@ const ko = {
   settingsDangerZone: "위험 구역",
   settingsDeleteProject: "프로젝트 삭제",
   settingsDeleteDesc: "이 프로젝트와 모든 관련 데이터를 영구적으로 삭제합니다.",
+  settingsDeleteDirNote: "프로젝트 데이터만 삭제됩니다. 작업 디렉토리의 코드 파일은 유지됩니다.",
   settingsDeleteConfirm: "정말로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
   settingsDelete: "삭제",
   settingsYesDelete: "예, 삭제합니다",

@@ -12,6 +12,7 @@ import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { GettingStarted } from "./components/GettingStarted";
 import { RateLimitBanner } from "./components/RateLimitBanner";
+import { StatusBar } from "./components/StatusBar";
 import { useNotifications } from "./stores/useNotifications";
 
 function App() {
@@ -44,7 +45,9 @@ function App() {
     api.projects.list().then((projects) => {
       setProjects(projects);
       if (projects.length > 0) {
-        setCurrentProject(projects[0].id);
+        const saved = localStorage.getItem("nova-current-project");
+        const found = saved ? projects.find((p) => p.id === saved) : null;
+        setCurrentProject(found ? found.id : projects[0].id);
       }
     });
   }, [setProjects, setCurrentProject]);
@@ -159,7 +162,8 @@ function App() {
         {/* Rate limit warning */}
         <RateLimitBanner />
         {/* Top bar */}
-        <header className="h-10 border-b border-gray-200 dark:border-gray-700 flex items-center justify-end px-4 shrink-0 bg-white dark:bg-[#1a1a2e]">
+        <header className="h-10 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 shrink-0 bg-white dark:bg-[#1a1a2e]">
+          <StatusBar />
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <ThemeToggle />

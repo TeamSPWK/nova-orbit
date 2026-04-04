@@ -179,16 +179,19 @@ export function ProjectSettings({ projectId }: Props) {
         </h2>
         <div className="p-4 border border-red-100 dark:border-red-900/50 rounded-lg bg-white dark:bg-[#25253d]">
           {confirmDelete ? (
-            <div className="flex items-center gap-3">
-              <p className="text-sm text-red-600 dark:text-red-400 flex-1">{t("settingsDeleteConfirm")}</p>
-              <button onClick={handleDelete} disabled={deleting}
-                className="text-xs px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50">
-                {deleting ? t("settingsDeleting") : t("settingsYesDelete")}
-              </button>
-              <button onClick={() => setConfirmDelete(false)} disabled={deleting}
-                className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                {t("settingsCancel")}
-              </button>
+            <div className="space-y-3">
+              <p className="text-sm text-red-600 dark:text-red-400">{t("settingsDeleteConfirm")}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{t("settingsDeleteDirNote")}</p>
+              <div className="flex items-center gap-3">
+                <button onClick={handleDelete} disabled={deleting}
+                  className="text-xs px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50">
+                  {deleting ? t("settingsDeleting") : t("settingsYesDelete")}
+                </button>
+                <button onClick={() => setConfirmDelete(false)} disabled={deleting}
+                  className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+                  {t("settingsCancel")}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-between">

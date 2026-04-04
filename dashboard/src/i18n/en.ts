@@ -236,6 +236,7 @@ const en = {
   settingsDangerZone: "Danger Zone",
   settingsDeleteProject: "Delete Project",
   settingsDeleteDesc: "Permanently remove this project and all associated data.",
+  settingsDeleteDirNote: "Only project data will be deleted. Code files in the working directory will be preserved.",
   settingsDeleteConfirm: "Are you sure? This action cannot be undone.",
   settingsDelete: "Delete",
   settingsYesDelete: "Yes, delete",

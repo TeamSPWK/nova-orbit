@@ -77,7 +77,12 @@ export const useStore = create<AppStore>((set) => ({
   projects: [],
   currentProjectId: null,
   setProjects: (projects) => set({ projects }),
-  setCurrentProject: (id) => set({ currentProjectId: id }),
+  setCurrentProject: (id) => {
+    if (id !== null) {
+      localStorage.setItem("nova-current-project", id);
+    }
+    set({ currentProjectId: id });
+  },
   updateProject: (project) =>
     set((state) => ({
       projects: state.projects.map((p) => (p.id === project.id ? project : p)),

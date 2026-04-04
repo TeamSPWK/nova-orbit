@@ -511,15 +511,15 @@ export function ProjectHome() {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    {/* Leaders with inline children — chip tree */}
+                    {/* Leaders with inline children — chip tree (horizontal scroll) */}
                     {agents.filter((a) => !a.parent_id).map((leader) => {
                       const children = agents.filter((a) => a.parent_id === leader.id);
                       return (
-                        <div key={leader.id} className="flex items-center gap-2 flex-wrap">
+                        <div key={leader.id} className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-0.5 scrollbar-thin">
                           <AgentChip agent={leader} onClick={() => setSelectedAgentId(leader.id)} />
                           {children.length > 0 && (
                             <>
-                              <span className="text-gray-300 dark:text-gray-600 text-xs">──</span>
+                              <span className="text-gray-300 dark:text-gray-600 text-xs shrink-0">──</span>
                               {children.map((child) => (
                                 <AgentChip key={child.id} agent={child} onClick={() => setSelectedAgentId(child.id)} />
                               ))}
@@ -691,7 +691,7 @@ export function ProjectHome() {
             </div>
 
             {/* Side panel — sticky, fixed width, scrollable within */}
-            <div className="w-[360px] max-w-[calc(100vw-2rem)] shrink-0 sticky top-0 self-start max-h-[calc(100vh-200px)] overflow-y-auto space-y-4">
+            <div className="w-[360px] max-w-[calc(100vw-2rem)] shrink-0 sticky top-0 self-start max-h-[calc(100vh-140px)] overflow-y-auto space-y-4">
               {/* Agent Output */}
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                 <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -709,7 +709,7 @@ export function ProjectHome() {
                     </span>
                   )}
                 </div>
-                <div className="h-[300px] bg-white dark:bg-[#1e1e2e]">
+                <div className={`${inProgressTask ? "h-[260px]" : "h-[120px]"} bg-white dark:bg-[#1e1e2e] transition-all`}>
                   {inProgressTask ? (
                     <AgentChatLog
                       taskId={inProgressTask.id}
