@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { AgentTerminal } from "./AgentTerminal";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AgentAvatar } from "./AgentAvatar";
 
 interface Agent {
   id: string;
@@ -28,15 +29,6 @@ interface AgentDetailProps {
   onClose: () => void;
   onKill: () => void;
 }
-
-const ROLE_ICONS: Record<string, string> = {
-  coder: "\uD83D\uDCBB",
-  reviewer: "\uD83D\uDD0D",
-  marketer: "\uD83D\uDCE3",
-  designer: "\uD83C\uDFA8",
-  qa: "\uD83E\uDDEA",
-  custom: "\u2699\uFE0F",
-};
 
 const STATUS_COLORS: Record<string, string> = {
   idle: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
@@ -106,7 +98,7 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
+            <AgentAvatar name={agent.name} role={agent.role} size="lg" />
             <div>
               <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                 {agent.name}

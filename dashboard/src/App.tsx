@@ -9,11 +9,15 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { LanguageToggle } from "./components/LanguageToggle";
 import { CommandPalette, CMD_EVENTS } from "./components/CommandPalette";
 import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
+import { NotificationPanel } from "./components/NotificationPanel";
+import { useNotifications } from "./stores/useNotifications";
 
 function App() {
   const { t, i18n } = useTranslation();
   const { setProjects, setCurrentProject, connected } = useStore();
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const { notifications } = useNotifications();
 
   useWebSocket();
 
@@ -122,6 +126,9 @@ function App() {
   return (
     <div className="flex h-screen bg-white dark:bg-[#1a1a2e]">
       {showShortcuts && <KeyboardShortcuts onClose={() => setShowShortcuts(false)} />}
+      {showNotifications && (
+        <NotificationPanel onClose={() => setShowNotifications(false)} />
+      )}
       <CommandPalette />
       <Sidebar />
       <main className="flex-1 flex flex-col overflow-hidden">
@@ -130,6 +137,25 @@ function App() {
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <ThemeToggle />
+
+            {/* Bell button */}
+            <button
+              onClick={() => setShowNotifications((v) => !v)}
+              className="relative w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 transition-colors"
+              aria-label={t("notificationBell")}
+              title={t("notificationBell")}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              {notifications.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none">
+                  {notifications.length > 9 ? "9+" : notifications.length}
+                </span>
+              )}
+            </button>
+
             <div className="flex items-center gap-2">
               <span
                 className={`w-2 h-2 rounded-full ${

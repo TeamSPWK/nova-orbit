@@ -2,15 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
-
-const ROLE_ICONS: Record<string, string> = {
-  coder: "\uD83D\uDCBB",
-  reviewer: "\uD83D\uDD0D",
-  marketer: "\uD83D\uDCE3",
-  designer: "\uD83C\uDFA8",
-  qa: "\uD83E\uDDEA",
-  custom: "\u2699\uFE0F",
-};
+import { AgentAvatar } from "./AgentAvatar";
 
 const STATUS_COLORS: Record<string, string> = {
   idle: "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400",
@@ -113,7 +105,7 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
       >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <span className="text-xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
+            <AgentAvatar name={agent.name} role={agent.role} size="md" />
             <div>
               <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{agent.name}</div>
               <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</div>

@@ -246,6 +246,12 @@ const ko = {
   keyboardShortcuts: "키보드 단축키",
   shortcutCmdPalette: "명령 팔레트",
   shortcutHelp: "이 도움말",
+
+  // NotificationPanel
+  notifications: "알림",
+  noNotifications: "알림이 없습니다",
+  clearAll: "전체 지우기",
+  notificationBell: "알림 내역",
 } as const;
 
 export default ko;

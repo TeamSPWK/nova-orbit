@@ -1,16 +1,23 @@
 import { useEffect } from "react";
+import { useNotifications, NotificationType } from "../stores/useNotifications";
 
 interface ToastProps {
   message: string;
+  type?: NotificationType;
   onDismiss: () => void;
   durationMs?: number;
 }
 
-export function Toast({ message, onDismiss, durationMs = 3500 }: ToastProps) {
+export function Toast({ message, type = "info", onDismiss, durationMs = 3500 }: ToastProps) {
+  const { addNotification } = useNotifications();
+
   useEffect(() => {
+    addNotification(message, type);
     const timer = setTimeout(onDismiss, durationMs);
     return () => clearTimeout(timer);
-  }, [onDismiss, durationMs]);
+  // addNotification은 zustand 함수라 레퍼런스 안정적. message/type은 초기 표시 시점에만 기록하면 됨.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div

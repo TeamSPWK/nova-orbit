@@ -246,6 +246,12 @@ const en = {
   keyboardShortcuts: "Keyboard Shortcuts",
   shortcutCmdPalette: "Command Palette",
   shortcutHelp: "This help",
+
+  // NotificationPanel
+  notifications: "Notifications",
+  noNotifications: "No notifications yet",
+  clearAll: "Clear all",
+  notificationBell: "Notification history",
 } as const;
 
 export default en;

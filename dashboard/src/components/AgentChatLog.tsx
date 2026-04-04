@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AgentAvatar } from "./AgentAvatar";
 
 type MessageType = "agent" | "system-success" | "system-error" | "system-info";
 
@@ -19,15 +20,6 @@ interface AgentChatLogProps {
   isWorking: boolean;
 }
 
-const ROLE_ICONS: Record<string, string> = {
-  coder: "💻",
-  reviewer: "🔍",
-  marketer: "📣",
-  designer: "🎨",
-  qa: "🧪",
-  custom: "⚙️",
-};
-
 function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -42,7 +34,8 @@ export function AgentChatLog({ taskId, agentName, agentRole, isWorking }: AgentC
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const roleIcon = ROLE_ICONS[agentRole ?? "custom"] ?? "⚙️";
+  const resolvedRole = agentRole ?? "custom";
+  const resolvedName = agentName ?? "Agent";
 
   useEffect(() => {
     const handleAgentOutput = (e: Event) => {
@@ -117,12 +110,15 @@ export function AgentChatLog({ taskId, agentName, agentRole, isWorking }: AgentC
         if (msg.type === "agent") {
           return (
             <div key={msg.id} className="flex items-start gap-2">
-              <div className="shrink-0 w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-sm">
-                {roleIcon}
-              </div>
+              <AgentAvatar
+                name={msg.agentName ?? resolvedName}
+                role={msg.agentRole ?? resolvedRole}
+                size="sm"
+                showBadge={false}
+              />
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">
-                  {msg.agentName ?? agentName ?? "Agent"}
+                  {msg.agentName ?? resolvedName}
                 </div>
                 <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
                   {msg.text}
@@ -164,12 +160,10 @@ export function AgentChatLog({ taskId, agentName, agentRole, isWorking }: AgentC
       {/* Thinking animation — shown when working but no recent message */}
       {isWorking && (
         <div className="flex items-start gap-2">
-          <div className="shrink-0 w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-sm">
-            {roleIcon}
-          </div>
+          <AgentAvatar name={resolvedName} role={resolvedRole} size="sm" showBadge={false} />
           <div className="flex-1">
             <div className="text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">
-              {agentName ?? "Agent"}
+              {resolvedName}
             </div>
             <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-3 py-2 inline-flex items-center gap-1">
               <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">{t("thinking")}</span>
