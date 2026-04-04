@@ -418,8 +418,15 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
                 <p className="text-[11px] text-red-500 dark:text-red-400">{promptError}</p>
               )}
               {promptResult !== null && !isSendingPrompt && (
-                <div className="text-[10px] px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded border border-green-100 dark:border-green-800/30">
-                  {t("promptComplete")}
+                <div className="text-xs bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <div className="px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-[10px] font-medium border-b border-green-100 dark:border-green-800/30">
+                    {t("promptComplete")}
+                  </div>
+                  {promptResult && (
+                    <div className="px-3 py-2 text-[11px] text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-[200px] overflow-y-auto leading-relaxed">
+                      {promptResult}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

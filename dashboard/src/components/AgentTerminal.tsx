@@ -9,6 +9,38 @@ interface AgentTerminalProps {
   agentId: string;
 }
 
+function parseStreamLine(raw: string): string | null {
+  // Try to parse stream-json lines and extract readable text
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      // Assistant text blocks
+      if (parsed.type === "assistant" && parsed.message?.content) {
+        const texts = parsed.message.content
+          .filter((b: any) => b.type === "text")
+          .map((b: any) => b.text);
+        if (texts.length > 0) return texts.join("");
+      }
+      // Result text
+      if (parsed.type === "result" && parsed.result) {
+        return parsed.result;
+      }
+      // Tool use (show name only)
+      if (parsed.type === "tool_use" || parsed.subtype === "tool_use") {
+        const name = parsed.name ?? parsed.tool_name ?? "";
+        return name ? `[tool] ${name}` : null;
+      }
+      return null; // Skip system, tool_result, etc.
+    } catch {
+      // Not JSON — show as-is
+      return trimmed || null;
+    }
+  }
+  return null;
+}
+
 export function AgentTerminal({ agentId }: AgentTerminalProps) {
   const { t } = useTranslation();
   const [lines, setLines] = useState<string[]>([]);
@@ -17,7 +49,8 @@ export function AgentTerminal({ agentId }: AgentTerminalProps) {
     const handler = (e: Event) => {
       const { agentId: id, output } = (e as AgentOutputEvent).detail;
       if (id !== agentId) return;
-      setLines((prev) => [...prev, output]);
+      const parsed = parseStreamLine(output);
+      if (parsed) setLines((prev) => [...prev, parsed]);
     };
 
     window.addEventListener("nova:agent-output", handler);
