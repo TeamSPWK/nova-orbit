@@ -36,23 +36,22 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     }
   });
 
-  // Decompose a goal into tasks
+  // Decompose a goal into tasks (waits for completion)
   router.post("/goals/:goalId/decompose", async (req, res) => {
     const { goalId } = req.params;
 
     const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
     if (!goal) return res.status(404).json({ error: "Goal not found" });
 
-    res.json({ status: "started", goalId });
-
     try {
       await engine.decomposeGoal(goalId);
       broadcast("project:updated", { projectId: goal.project_id });
+
+      const tasks = db.prepare("SELECT * FROM tasks WHERE goal_id = ?").all(goalId);
+      res.json({ status: "completed", goalId, taskCount: tasks.length });
     } catch (err: any) {
-      broadcast("project:updated", {
-        projectId: goal.project_id,
-        error: err.message,
-      });
+      broadcast("project:updated", { projectId: goal.project_id, error: err.message });
+      res.status(500).json({ error: err.message });
     }
   });
 

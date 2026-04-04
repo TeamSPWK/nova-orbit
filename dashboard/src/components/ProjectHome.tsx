@@ -435,7 +435,7 @@ export function ProjectHome() {
                         </span>
                         <button
                           onClick={() => handleDecomposeGoal(goal.id)}
-                          disabled={decomposingGoalId === goal.id}
+                          disabled={decomposingGoalId !== null}
                           className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 ${
                             decomposingGoalId === goal.id
                               ? "bg-purple-100 dark:bg-purple-900/50 text-purple-400 cursor-wait"
