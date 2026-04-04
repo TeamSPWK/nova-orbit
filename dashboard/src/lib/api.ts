@@ -45,4 +45,17 @@ export const api = {
     list: (projectId: string) => request<any[]>(`/verifications?projectId=${projectId}`),
     listByTask: (taskId: string) => request<any[]>(`/verifications?taskId=${taskId}`),
   },
+  orchestration: {
+    executeTask: (taskId: string, scope = "standard") =>
+      request<any>(`/orchestration/tasks/${taskId}/execute`, {
+        method: "POST",
+        body: JSON.stringify({ verificationScope: scope }),
+      }),
+    decomposeGoal: (goalId: string) =>
+      request<any>(`/orchestration/goals/${goalId}/decompose`, { method: "POST" }),
+    killAgent: (agentId: string) =>
+      request<any>(`/orchestration/agents/${agentId}/kill`, { method: "POST" }),
+    killAll: () =>
+      request<any>("/orchestration/sessions/kill-all", { method: "POST" }),
+  },
 };

@@ -1,5 +1,7 @@
 import { Router } from "express";
+import { existsSync } from "node:fs";
 import type { AppContext } from "../../index.js";
+import { analyzeProject } from "../../core/project/analyzer.js";
 
 export function createProjectRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -70,6 +72,59 @@ export function createProjectRoutes(ctx: AppContext): Router {
     const updated = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
     broadcast("project:updated", updated);
     res.json(updated);
+  });
+
+  // Analyze a local directory (for project import)
+  router.post("/analyze", (req, res) => {
+    const { path } = req.body;
+    if (!path) return res.status(400).json({ error: "path is required" });
+    if (!existsSync(path)) return res.status(400).json({ error: "Directory not found" });
+
+    try {
+      const analysis = analyzeProject(path);
+      res.json(analysis);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Import a local project (analyze + create + suggest agents)
+  router.post("/import", (req, res) => {
+    const { path: dirPath, name } = req.body;
+    if (!dirPath) return res.status(400).json({ error: "path is required" });
+    if (!existsSync(dirPath)) return res.status(400).json({ error: "Directory not found" });
+
+    try {
+      const analysis = analyzeProject(dirPath);
+      const projectName = name || dirPath.split("/").pop() || "Imported Project";
+
+      // Create project
+      const result = db.prepare(`
+        INSERT INTO projects (name, source, workdir, tech_stack)
+        VALUES (?, 'local_import', ?, ?)
+      `).run(projectName, dirPath, JSON.stringify(analysis.techStack));
+
+      const project = db.prepare("SELECT * FROM projects WHERE rowid = ?").get(result.lastInsertRowid) as any;
+
+      // Create suggested agents
+      for (const agent of analysis.suggestedAgents) {
+        db.prepare(`
+          INSERT INTO agents (project_id, name, role)
+          VALUES (?, ?, ?)
+        `).run(project.id, agent.name, agent.role);
+      }
+
+      const agents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(project.id);
+
+      broadcast("project:updated", project);
+      res.status(201).json({
+        project,
+        agents,
+        analysis,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Delete project

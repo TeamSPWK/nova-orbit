@@ -8,6 +8,7 @@ import { createAgentRoutes } from "./api/routes/agents.js";
 import { createTaskRoutes } from "./api/routes/tasks.js";
 import { createVerificationRoutes } from "./api/routes/verification.js";
 import { createGoalRoutes } from "./api/routes/goals.js";
+import { createOrchestrationRoutes } from "./api/routes/orchestration.js";
 import { createWSHandler } from "./api/websocket.js";
 import type { Database } from "better-sqlite3";
 
@@ -75,6 +76,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
   app.use("/api/goals", createGoalRoutes(ctx));
   app.use("/api/tasks", createTaskRoutes(ctx));
   app.use("/api/verifications", createVerificationRoutes(ctx));
+  app.use("/api/orchestration", createOrchestrationRoutes(ctx));
 
   // Health check
   app.get("/api/health", (_req, res) => {

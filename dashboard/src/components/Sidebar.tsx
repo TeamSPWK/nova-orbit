@@ -1,15 +1,54 @@
+import { useState } from "react";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 
 export function Sidebar() {
   const { projects, currentProjectId, setCurrentProject, setProjects } = useStore();
+  const [showImport, setShowImport] = useState(false);
 
   const handleNewProject = async () => {
     const name = prompt("Project name:");
     if (!name) return;
-    const project = await api.projects.create({ name, source: "new" });
+    const mission = prompt("Mission (what are you building?):");
+    const project = await api.projects.create({ name, mission: mission ?? "", source: "new" });
     setProjects([...projects, project]);
     setCurrentProject(project.id);
+  };
+
+  const handleImportProject = async () => {
+    const path = prompt("Local project path (e.g., ~/projects/my-app):");
+    if (!path) return;
+
+    try {
+      const result = await api.projects.create({}) as any;
+      // Actually use the import endpoint
+      const res = await fetch("/api/projects/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, name: path.split("/").pop() }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Import failed: ${err.error}`);
+        return;
+      }
+
+      const data = await res.json();
+      // Reload projects
+      const updatedProjects = await api.projects.list();
+      setProjects(updatedProjects);
+      setCurrentProject(data.project.id);
+
+      const agentNames = data.agents.map((a: any) => `${a.name} (${a.role})`).join(", ");
+      alert(
+        `Imported! Tech: ${data.analysis.techStack.languages.join(", ")}\n` +
+          `Frameworks: ${data.analysis.techStack.frameworks.join(", ") || "none"}\n` +
+          `Suggested agents: ${agentNames}`,
+      );
+    } catch (err: any) {
+      alert(`Import failed: ${err.message}`);
+    }
   };
 
   return (
@@ -38,20 +77,30 @@ export function Sidebar() {
             }`}
           >
             <span className="text-base">
-              {p.source === "github" ? "\uD83D\uDD17" : "\uD83D\uDCC1"}
+              {p.source === "github"
+                ? "\uD83D\uDD17"
+                : p.source === "local_import"
+                  ? "\uD83D\uDCC2"
+                  : "\uD83D\uDCC1"}
             </span>
             <span className="truncate">{p.name}</span>
           </button>
         ))}
       </nav>
 
-      {/* New Project Button */}
-      <div className="p-3 border-t border-gray-200">
+      {/* Action Buttons */}
+      <div className="p-3 border-t border-gray-200 space-y-1">
         <button
           onClick={handleNewProject}
           className="w-full py-1.5 text-sm text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
         >
           + New Project
+        </button>
+        <button
+          onClick={handleImportProject}
+          className="w-full py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+        >
+          Import Local
         </button>
       </div>
     </aside>
