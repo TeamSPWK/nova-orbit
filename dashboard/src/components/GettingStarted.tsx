@@ -1,10 +1,22 @@
 import { useTranslation } from "react-i18next";
 
-export function GettingStarted() {
+interface GettingStartedProps {
+  onClose?: () => void;
+}
+
+export function GettingStarted({ onClose }: GettingStartedProps) {
   const { t } = useTranslation();
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-6">
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 mb-6 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+        >
+          {t("backToProject")}
+        </button>
+      )}
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
         {t("guideTitle")}
       </h1>

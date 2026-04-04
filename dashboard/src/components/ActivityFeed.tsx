@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
@@ -27,10 +27,48 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatWsMessage(
+  type: string,
+  payload: unknown,
+  t: (key: string, opts?: Record<string, string>) => string,
+): string {
+  const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, string>;
+
+  switch (type) {
+    case "agent:status":
+      return t("activityAgentStatus", { name: p.name ?? "", status: p.status ?? "" });
+    case "task:updated":
+      return t("activityTaskUpdated", { title: p.title ?? "", status: p.status ?? "" });
+    case "task:started":
+      return t("activityTaskStarted", { title: p.title ?? "" });
+    case "task:completed":
+      return t("activityTaskCompleted", { title: p.title ?? "" });
+    case "verification:result": {
+      const verdict = p.verdict ?? (p.passed === "true" ? "PASS" : p.passed === "false" ? "FAIL" : "");
+      return t("activityVerification", { verdict });
+    }
+    case "project:updated":
+      return t("activityProjectUpdated");
+    default:
+      return t("activityUnknown", { type });
+  }
+}
+
 export function ActivityFeed({ projectId }: ActivityFeedProps) {
   const { t } = useTranslation();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const buildWsActivity = useCallback(
+    (detail: { type: string; payload?: unknown }): Activity => ({
+      id: Date.now(),
+      type: detail.type,
+      message: formatWsMessage(detail.type, detail.payload, t),
+      agent_id: (detail.payload as Record<string, string> | null)?.agent_id ?? null,
+      created_at: new Date().toISOString(),
+    }),
+    [t],
+  );
 
   // Initial load from REST API
   useEffect(() => {
@@ -54,23 +92,12 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (!detail?.type) return;
-
-      const newActivity: Activity = {
-        id: Date.now(),
-        type: detail.type,
-        message: typeof detail.payload === "string"
-          ? detail.payload
-          : (detail.payload?.message ?? JSON.stringify(detail.payload).slice(0, 120)),
-        agent_id: detail.payload?.agent_id ?? null,
-        created_at: new Date().toISOString(),
-      };
-
-      setActivities((prev) => [newActivity, ...prev].slice(0, 50));
+      setActivities((prev) => [buildWsActivity(detail), ...prev].slice(0, 50));
     };
 
     window.addEventListener("nova:refresh", handler);
     return () => window.removeEventListener("nova:refresh", handler);
-  }, []);
+  }, [buildWsActivity]);
 
   if (loading) {
     return <p className="text-xs text-gray-400 italic">{t("loadingActivity")}</p>;

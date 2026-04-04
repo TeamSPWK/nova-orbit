@@ -104,6 +104,13 @@ const ko = {
   // ActivityFeed
   noActivity: "아직 활동이 없습니다. 에이전트가 태스크를 실행하면 여기에 표시됩니다.",
   loadingActivity: "활동 로딩 중...",
+  activityAgentStatus: "에이전트 {{name}}이(가) {{status}} 상태입니다",
+  activityTaskUpdated: "태스크 '{{title}}'이(가) {{status}}(으)로 변경되었습니다",
+  activityTaskStarted: "태스크 시작됨: {{title}}",
+  activityTaskCompleted: "태스크 완료됨: {{title}}",
+  activityVerification: "검증: {{verdict}}",
+  activityProjectUpdated: "프로젝트 업데이트됨",
+  activityUnknown: "{{type}}",
 
   // ThemeToggle
   switchToDark: "다크 모드로 전환",
@@ -267,6 +274,9 @@ const ko = {
   noNotifications: "알림이 없습니다",
   clearAll: "전체 지우기",
   notificationBell: "알림 내역",
+
+  // GettingStarted back button
+  backToProject: "← 프로젝트로 돌아가기",
 
   // Getting Started Guide
   gettingStarted: "시작 가이드",

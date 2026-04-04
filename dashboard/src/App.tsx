@@ -194,13 +194,7 @@ function App() {
 
         {showGuide ? (
           <div className="flex-1 overflow-y-auto">
-            <button
-              onClick={() => setShowGuide(false)}
-              className="absolute top-12 right-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 z-10"
-            >
-              &times; Close
-            </button>
-            <GettingStarted />
+            <GettingStarted onClose={() => setShowGuide(false)} />
           </div>
         ) : (
           <ProjectHome />

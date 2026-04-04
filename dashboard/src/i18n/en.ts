@@ -104,6 +104,13 @@ const en = {
   // ActivityFeed
   noActivity: "No activity yet. Activity will appear here when agents run tasks.",
   loadingActivity: "Loading activity...",
+  activityAgentStatus: "Agent {{name}} is now {{status}}",
+  activityTaskUpdated: "Task '{{title}}' → {{status}}",
+  activityTaskStarted: "Task started: {{title}}",
+  activityTaskCompleted: "Task completed: {{title}}",
+  activityVerification: "Verification: {{verdict}}",
+  activityProjectUpdated: "Project updated",
+  activityUnknown: "{{type}}",
 
   // ThemeToggle
   switchToDark: "Switch to dark mode",
@@ -267,6 +274,9 @@ const en = {
   noNotifications: "No notifications yet",
   clearAll: "Clear all",
   notificationBell: "Notification history",
+
+  // GettingStarted back button
+  backToProject: "← Back to project",
 
   // Getting Started Guide
   gettingStarted: "Getting Started",
