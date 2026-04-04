@@ -1,0 +1,329 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import {
+  mkdirSync, mkdtempSync, writeFileSync, symlinkSync,
+  existsSync, rmSync, readdirSync,
+} from "node:fs";
+import { join, resolve as resolvePath } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { createLogger } from "../../../utils/logger.js";
+
+const log = createLogger("claude-code-adapter");
+
+export interface ClaudeCodeConfig {
+  workdir: string;
+  systemPrompt: string;
+  skillsDir?: string;
+  sessionBehavior: "resume-or-new" | "new";
+  resumeSessionId?: string | null;
+  model?: string;
+  allowedTools?: string[];
+  maxTurns?: number;
+  dangerouslySkipPermissions?: boolean;
+}
+
+export interface RunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  sessionId: string | null;
+}
+
+export interface ClaudeCodeSession extends EventEmitter {
+  id: string;
+  process: ChildProcess | null;
+  status: "idle" | "working" | "completed" | "failed";
+  lastSessionId: string | null;
+  send: (message: string) => Promise<RunResult>;
+  kill: () => void;
+  cleanup: () => void;
+}
+
+/**
+ * Claude Code CLI Adapter
+ *
+ * Based on Paperclip's claude_local adapter (validated in production):
+ *
+ * Key patterns from Paperclip analysis:
+ * 1. child_process.spawn with `--print -` + `--output-format stream-json`
+ * 2. Prompt passed via stdin (stdin.write → stdin.end)
+ * 3. `--add-dir` flag with temp dir containing `.claude/skills/` symlinks
+ * 4. `--append-system-prompt-file` for long system prompts (not --system-prompt)
+ * 5. `--resume <sessionId>` for session persistence
+ * 6. Auto-retry with fresh session if resume fails ("unknown session" error)
+ * 7. Temp directory cleanup after run
+ *
+ * @see /Users/keunsik/develop/swk/paperclip/packages/adapters/claude-local/src/server/execute.ts
+ */
+export function createClaudeCodeAdapter() {
+  return {
+    spawn(config: ClaudeCodeConfig): ClaudeCodeSession {
+      const session = new EventEmitter() as ClaudeCodeSession;
+      session.id = randomUUID().slice(0, 16);
+      session.process = null;
+      session.status = "idle";
+      session.lastSessionId = config.resumeSessionId ?? null;
+
+      // Build temp directory with skills + system prompt file
+      const tempDir = buildTempDir(config);
+
+      /**
+       * Send a message to Claude Code CLI.
+       *
+       * Paperclip pattern: prompt goes via stdin, NOT as CLI argument.
+       * This avoids shell escaping issues with long/complex prompts.
+       */
+      session.send = async (message: string): Promise<RunResult> => {
+        const runAttempt = (resumeId: string | null): Promise<RunResult> => {
+          return new Promise((resolve, reject) => {
+            session.status = "working";
+            session.emit("status", "working");
+
+            const args = buildArgs(config, tempDir, resumeId);
+
+            log.info("Spawning Claude Code CLI", {
+              workdir: config.workdir,
+              resume: resumeId ?? "new",
+            });
+
+            const proc: ChildProcess = spawn("claude", args, {
+              cwd: resolvePath(config.workdir),
+              stdio: ["pipe", "pipe", "pipe"] as const,
+              env: {
+                ...process.env,
+                BROWSER: "none",
+                NOVA_ORBIT_AGENT_ID: session.id,
+              },
+            });
+
+            session.process = proc;
+            let stdout = "";
+            let stderr = "";
+
+            proc.stdout!.on("data", (chunk: Buffer) => {
+              const text = chunk.toString();
+              stdout += text;
+              session.emit("output", text);
+            });
+
+            proc.stderr!.on("data", (chunk: Buffer) => {
+              const text = chunk.toString();
+              stderr += text;
+              session.emit("stderr", text);
+            });
+
+            // Paperclip pattern: write prompt to stdin, then close
+            proc.stdin!.write(message);
+            proc.stdin!.end();
+
+            proc.on("close", (code: number | null) => {
+              session.process = null;
+
+              // Try to extract sessionId from stream-json output
+              const extractedSessionId = extractSessionId(stdout);
+              if (extractedSessionId) {
+                session.lastSessionId = extractedSessionId;
+              }
+
+              if (code === 0) {
+                session.status = "completed";
+                session.emit("status", "completed");
+              } else {
+                session.status = "failed";
+                session.emit("status", "failed");
+                log.error(`Claude Code exited with code ${code}`, {
+                  stderr: stderr.slice(0, 500),
+                });
+              }
+
+              resolve({ stdout: stdout.trim(), stderr, exitCode: code, sessionId: session.lastSessionId });
+            });
+
+            proc.on("error", (err: Error) => {
+              session.process = null;
+              session.status = "failed";
+              session.emit("status", "failed");
+              log.error("Failed to spawn Claude Code", err);
+              reject(err);
+            });
+          });
+        };
+
+        // Paperclip pattern: attempt resume, fallback to fresh session
+        const resumeId =
+          config.sessionBehavior === "resume-or-new"
+            ? session.lastSessionId
+            : null;
+
+        const result = await runAttempt(resumeId);
+
+        // If resume failed with "unknown session" error, retry fresh
+        if (
+          resumeId &&
+          result.exitCode !== 0 &&
+          isUnknownSessionError(result.stderr)
+        ) {
+          log.info(
+            `Session "${resumeId}" unavailable, retrying with fresh session`,
+          );
+          session.lastSessionId = null;
+          return runAttempt(null);
+        }
+
+        return result;
+      };
+
+      session.kill = () => {
+        if (session.process) {
+          session.process.kill("SIGTERM");
+          session.process = null;
+          session.status = "idle";
+          session.emit("status", "idle");
+        }
+      };
+
+      session.cleanup = () => {
+        session.kill();
+        // Cleanup temp directory (Paperclip pattern)
+        if (tempDir && existsSync(tempDir)) {
+          rmSync(tempDir, { recursive: true, force: true });
+          log.debug(`Cleaned up temp dir: ${tempDir}`);
+        }
+      };
+
+      return session;
+    },
+  };
+}
+
+/**
+ * Build CLI arguments.
+ *
+ * Paperclip uses: --print - --output-format stream-json --verbose
+ * Plus: --append-system-prompt-file, --add-dir, --resume, --model, etc.
+ */
+function buildArgs(
+  config: ClaudeCodeConfig,
+  tempDir: string | null,
+  resumeSessionId: string | null,
+): string[] {
+  // Core flags (Paperclip pattern)
+  const args = ["--print", "-", "--output-format", "stream-json", "--verbose"];
+
+  // Session resume
+  if (resumeSessionId) {
+    args.push("--resume", resumeSessionId);
+  }
+
+  // Model selection
+  if (config.model) {
+    args.push("--model", config.model);
+  }
+
+  // Max turns limit
+  if (config.maxTurns && config.maxTurns > 0) {
+    args.push("--max-turns", String(config.maxTurns));
+  }
+
+  // System prompt via file (Paperclip uses --append-system-prompt-file for long prompts)
+  if (tempDir) {
+    const promptFile = join(tempDir, ".nova-system-prompt");
+    if (existsSync(promptFile)) {
+      args.push("--append-system-prompt-file", promptFile);
+    }
+  }
+
+  // Skills directory injection
+  if (tempDir) {
+    args.push("--add-dir", tempDir);
+  }
+
+  // Allowed tools
+  if (config.allowedTools?.length) {
+    args.push("--allowedTools", config.allowedTools.join(","));
+  }
+
+  // Skip permissions (use with caution)
+  if (config.dangerouslySkipPermissions) {
+    args.push("--dangerously-skip-permissions");
+  }
+
+  return args;
+}
+
+/**
+ * Build temp directory with skills and system prompt.
+ *
+ * Mirrors Paperclip's structure:
+ * - Creates temp dir
+ * - Writes system prompt to file (for --append-system-prompt-file)
+ * - Creates `.claude/skills/` subdirectory
+ * - Symlinks each skill into it
+ */
+function buildTempDir(config: ClaudeCodeConfig): string | null {
+  const tempDir = mkdtempSync(join(tmpdir(), "nova-orbit-"));
+
+  // Write system prompt to file
+  if (config.systemPrompt) {
+    writeFileSync(join(tempDir, ".nova-system-prompt"), config.systemPrompt);
+  }
+
+  // Create .claude/skills/ structure and symlink skills
+  if (config.skillsDir && existsSync(config.skillsDir)) {
+    const skillsTarget = join(tempDir, ".claude", "skills");
+    mkdirSync(skillsTarget, { recursive: true });
+
+    try {
+      const entries = readdirSync(config.skillsDir);
+      for (const entry of entries) {
+        const source = join(config.skillsDir, entry);
+        const link = join(skillsTarget, entry);
+        symlinkSync(source, link);
+      }
+      log.debug(`Linked ${entries.length} skills to ${skillsTarget}`);
+    } catch (err) {
+      log.warn("Failed to symlink skills", err);
+    }
+  }
+
+  // Write a CLAUDE.md for the agent context
+  writeFileSync(
+    join(tempDir, "CLAUDE.md"),
+    `# Nova Orbit Agent\n\nThis agent is managed by Nova Orbit. Follow quality gate rules.\n`,
+  );
+
+  return tempDir;
+}
+
+/**
+ * Extract Claude session ID from stream-json output.
+ * Paperclip parses the JSON stream to get the session ID for resume.
+ */
+function extractSessionId(output: string): string | null {
+  try {
+    // stream-json output has one JSON object per line
+    const lines = output.split("\n").filter(Boolean);
+    for (const line of lines) {
+      const parsed = JSON.parse(line);
+      if (parsed.session_id) return parsed.session_id;
+      if (parsed.sessionId) return parsed.sessionId;
+    }
+  } catch {
+    // Not JSON or no session info
+  }
+  return null;
+}
+
+/**
+ * Check if error indicates an unknown/expired session.
+ * Paperclip auto-retries with fresh session in this case.
+ */
+function isUnknownSessionError(stderr: string): boolean {
+  const lower = stderr.toLowerCase();
+  return (
+    lower.includes("unknown session") ||
+    lower.includes("session not found") ||
+    lower.includes("invalid session")
+  );
+}

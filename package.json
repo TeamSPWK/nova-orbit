@@ -1,0 +1,52 @@
+{
+  "name": "nova-orbit",
+  "version": "0.1.0",
+  "description": "AI Team Orchestration + Quality Gate for Solo Founders",
+  "type": "module",
+  "bin": {
+    "nova-orbit": "./dist/bin/nova-orbit.js"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:dashboard\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:dashboard": "cd dashboard && npm run dev",
+    "build": "npm run build:server && npm run build:dashboard",
+    "build:server": "tsup server/index.ts --out-dir dist/server --format esm --dts",
+    "build:dashboard": "cd dashboard && npm run build",
+    "build:bin": "tsup bin/nova-orbit.ts --out-dir dist/bin --format esm",
+    "start": "node dist/bin/nova-orbit.js",
+    "db:migrate": "tsx server/db/migrate.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "orchestration",
+    "quality-gate",
+    "claude-code",
+    "nova"
+  ],
+  "author": "TeamSPWK",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.2.1",
+    "ws": "^8.20.0",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.2",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  }
+}
