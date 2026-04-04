@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface NewProjectDialogProps {
-  onSubmit: (name: string, mission: string, workdir: string) => void;
+  onSubmit: (name: string, mission: string, workdir: string, autoAgents: boolean) => void;
   onCancel: () => void;
 }
 
@@ -11,6 +11,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
   const [name, setName] = useState("");
   const [mission, setMission] = useState("");
   const [workdir, setWorkdir] = useState("");
+  const [autoAgents, setAutoAgents] = useState(true);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -18,7 +19,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
   }, []);
 
   const handleSubmit = () => {
-    if (name.trim() && workdir.trim()) onSubmit(name.trim(), mission.trim(), workdir.trim());
+    if (name.trim() && workdir.trim()) onSubmit(name.trim(), mission.trim(), workdir.trim(), autoAgents);
   };
 
   return (
@@ -80,6 +81,18 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
               className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
             />
           </div>
+          {/* Auto-create agents toggle */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoAgents}
+              onChange={(e) => setAutoAgents(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {t("autoCreateAgents")}
+            </span>
+          </label>
         </div>
         <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-2">
           <button

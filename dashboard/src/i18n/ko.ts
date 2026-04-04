@@ -34,6 +34,8 @@ const ko = {
   roleQa: "QA",
 
   // Agent preset names + descriptions
+  autoCreateAgents: "미션 기반 도메인 특화 에이전트 자동 생성",
+
   presetCoderName: "코더",
   presetCoderDesc: "할당된 태스크의 백엔드/프론트엔드 코드를 구현합니다.",
   presetReviewerName: "리뷰어",

@@ -43,6 +43,13 @@ export const api = {
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
     presets: () => request<any[]>("/agents/presets"),
+    suggest: (mission: string, techStack?: any) =>
+      request<any[]>("/agents/suggest", { method: "POST", body: JSON.stringify({ mission, techStack }) }),
+    suggestAndCreate: (projectId: string, mission: string, techStack?: any) =>
+      request<any>("/agents/suggest-and-create", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, mission, techStack }),
+      }),
     create: (data: any) => request<any>("/agents", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request<any>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),

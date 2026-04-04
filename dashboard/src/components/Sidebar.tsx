@@ -30,11 +30,20 @@ export function Sidebar() {
 
   const showToast = (msg: string) => setToast(msg);
 
-  const handleNewProject = async (name: string, mission: string, workdir: string) => {
+  const handleNewProject = async (name: string, mission: string, workdir: string, autoAgents: boolean) => {
     setShowDialog(null);
     const project = await api.projects.create({ name, mission, workdir, source: "new" });
     setProjects([...projects, project]);
     setCurrentProject(project.id);
+
+    // Auto-create domain-specialized agents based on mission
+    if (autoAgents && mission) {
+      try {
+        await api.agents.suggestAndCreate(project.id, mission);
+      } catch {
+        // Silently fail — user can add agents manually
+      }
+    }
   };
 
   const handleImportProject = async (path: string) => {

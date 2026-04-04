@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { AppContext } from "../../index.js";
 import { getAgentPresets } from "../../core/agent/roles.js";
+import { suggestAgentsFromMission } from "../../core/agent/suggest.js";
 
 export function createAgentRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -18,6 +19,38 @@ export function createAgentRoutes(ctx: AppContext): Router {
   // List available agent role presets loaded from templates/agents/*.yaml
   router.get("/presets", (_req, res) => {
     res.json(getAgentPresets());
+  });
+
+  // Suggest domain-specialized agents based on mission + tech stack
+  router.post("/suggest", (req, res) => {
+    const { mission, techStack } = req.body;
+    if (!mission) return res.status(400).json({ error: "mission is required" });
+    const suggestions = suggestAgentsFromMission(mission, techStack);
+    res.json(suggestions);
+  });
+
+  // Auto-create suggested agents for a project
+  router.post("/suggest-and-create", (req, res) => {
+    const { project_id, mission, techStack } = req.body;
+    if (!project_id || !mission) {
+      return res.status(400).json({ error: "project_id and mission are required" });
+    }
+
+    const suggestions = suggestAgentsFromMission(mission, techStack);
+    const created = [];
+
+    for (const agent of suggestions) {
+      const result = db.prepare(`
+        INSERT INTO agents (project_id, name, role, system_prompt)
+        VALUES (?, ?, ?, ?)
+      `).run(project_id, agent.name, agent.role, agent.systemPrompt);
+
+      const row = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
+      created.push(row);
+    }
+
+    broadcast("project:updated", { projectId: project_id });
+    res.status(201).json({ suggestions, created, count: created.length });
   });
 
   // Get single agent

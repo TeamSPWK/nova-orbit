@@ -34,6 +34,8 @@ const en = {
   roleQa: "qa",
 
   // Agent preset names + descriptions
+  autoCreateAgents: "Auto-create domain-specialized agents based on mission",
+
   presetCoderName: "Coder",
   presetCoderDesc: "Implements backend/frontend code for assigned tasks.",
   presetReviewerName: "Reviewer",
