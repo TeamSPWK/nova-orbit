@@ -1,3 +1,5 @@
+import { api } from "../lib/api";
+
 const ROLE_ICONS: Record<string, string> = {
   coder: "\uD83D\uDCBB",
   reviewer: "\uD83D\uDD0D",
@@ -9,7 +11,7 @@ const ROLE_ICONS: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   idle: "bg-gray-100 text-gray-500",
-  working: "bg-green-100 text-green-600",
+  working: "bg-green-100 text-green-600 animate-pulse",
   waiting_approval: "bg-yellow-100 text-yellow-600",
   paused: "bg-orange-100 text-orange-600",
   terminated: "bg-red-100 text-red-500",
@@ -23,17 +25,38 @@ interface AgentCardProps {
     status: string;
     current_task_id: string | null;
   };
+  tasks?: Array<{ id: string; title: string }>;
+  onKill?: () => void;
 }
 
-export function AgentCard({ agent }: AgentCardProps) {
+export function AgentCard({ agent, tasks, onKill }: AgentCardProps) {
+  const currentTask = tasks?.find((t) => t.id === agent.current_task_id);
+
+  const handleKill = async () => {
+    if (!confirm(`Kill agent "${agent.name}"?`)) return;
+    await api.orchestration.killAgent(agent.id);
+    onKill?.();
+  };
+
   return (
     <div className="border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
-        <div>
-          <div className="text-sm font-medium text-gray-800">{agent.name}</div>
-          <div className="text-xs text-gray-400 capitalize">{agent.role}</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">{ROLE_ICONS[agent.role] ?? "\u2699\uFE0F"}</span>
+          <div>
+            <div className="text-sm font-medium text-gray-800">{agent.name}</div>
+            <div className="text-xs text-gray-400 capitalize">{agent.role}</div>
+          </div>
         </div>
+        {agent.status === "working" && (
+          <button
+            onClick={handleKill}
+            className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
+            title="Kill session"
+          >
+            Stop
+          </button>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <span
@@ -43,9 +66,9 @@ export function AgentCard({ agent }: AgentCardProps) {
         >
           {agent.status.replace("_", " ")}
         </span>
-        {agent.current_task_id && (
+        {currentTask && (
           <span className="text-[10px] text-gray-400 truncate">
-            Working on task...
+            {currentTask.title}
           </span>
         )}
       </div>

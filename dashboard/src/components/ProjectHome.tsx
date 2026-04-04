@@ -166,7 +166,7 @@ export function ProjectHome() {
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   {agents.map((agent) => (
-                    <AgentCard key={agent.id} agent={agent} />
+                    <AgentCard key={agent.id} agent={agent} tasks={tasks} onKill={loadData} />
                   ))}
                 </div>
               )}
