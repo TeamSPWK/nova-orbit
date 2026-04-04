@@ -43,6 +43,7 @@ export function ProjectHome() {
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
+  const [queueToggling, setQueueToggling] = useState(false);
 
   const project = projects.find((p) => p.id === currentProjectId);
 
@@ -190,8 +191,6 @@ export function ProjectHome() {
   };
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
-
-  const [queueToggling, setQueueToggling] = useState(false);
 
   const handleToggleQueue = async () => {
     if (!currentProjectId || queueToggling) return;
