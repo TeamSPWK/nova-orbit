@@ -433,29 +433,35 @@ export function ProjectHome() {
                         <span className="text-xs text-gray-400 dark:text-gray-500">
                           {goal.progress}%
                         </span>
-                        <button
-                          onClick={() => handleDecomposeGoal(goal.id)}
-                          disabled={decomposingGoalId !== null}
-                          className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
-                            decomposingGoalId === goal.id
-                              ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
-                              : decomposingGoalId !== null
-                                ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
-                                : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
-                          }`}
-                        >
-                          {decomposingGoalId === goal.id ? (
-                            <>
-                              <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                              </svg>
-                              {t("decomposing")}
-                            </>
-                          ) : (
-                            t("decompose")
-                          )}
-                        </button>
+                        {tasks.some((t) => t.goal_id === goal.id) ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">
+                            {t("decomposed")}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleDecomposeGoal(goal.id)}
+                            disabled={decomposingGoalId !== null}
+                            className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
+                              decomposingGoalId === goal.id
+                                ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
+                                : decomposingGoalId !== null
+                                  ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
+                                  : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
+                            }`}
+                          >
+                            {decomposingGoalId === goal.id ? (
+                              <>
+                                <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                </svg>
+                                {t("decomposing")}
+                              </>
+                            ) : (
+                              t("decompose")
+                            )}
+                          </button>
+                        )}
                         <button
                           onClick={() => handleAddTask(goal.id)}
                           className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"

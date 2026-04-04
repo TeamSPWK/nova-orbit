@@ -20,6 +20,7 @@ const en = {
   addGoal: "+ Add Goal",
   tasks: "Tasks",
   decompose: "Decompose",
+  decomposed: "Decomposed",
   decomposing: "Decomposing...",
   decomposeSuccess: "Goal decomposed into tasks!",
   decomposeFailed: "Failed to decompose goal. Please try again.",

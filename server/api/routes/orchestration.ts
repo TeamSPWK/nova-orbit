@@ -43,6 +43,12 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
     if (!goal) return res.status(404).json({ error: "Goal not found" });
 
+    // Prevent duplicate decomposition
+    const existingTasks = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?").get(goalId) as any;
+    if (existingTasks.count > 0) {
+      return res.status(409).json({ error: "Goal already has tasks. Delete existing tasks first to re-decompose." });
+    }
+
     try {
       await engine.decomposeGoal(goalId);
       broadcast("project:updated", { projectId: goal.project_id });

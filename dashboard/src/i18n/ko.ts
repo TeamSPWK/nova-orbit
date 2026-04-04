@@ -20,6 +20,7 @@ const ko = {
   addGoal: "+ 목표 추가",
   tasks: "태스크",
   decompose: "분해",
+  decomposed: "분해됨",
   decomposing: "분해 중...",
   decomposeSuccess: "목표가 태스크로 분해되었습니다!",
   decomposeFailed: "목표 분해에 실패했습니다. 다시 시도해주세요.",

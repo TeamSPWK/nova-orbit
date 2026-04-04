@@ -239,11 +239,22 @@ Respond in this EXACT JSON format:
         const decomposed = JSON.parse(jsonMatch[1]);
         const tasks = decomposed.tasks ?? [];
 
+        // Auto-assign agents by role
+        const projectAgents = db.prepare(
+          "SELECT * FROM agents WHERE project_id = ?",
+        ).all(goal.project_id) as any[];
+
+        const findAgent = (role: string) =>
+          projectAgents.find((a) => a.role === role) ??
+          projectAgents.find((a) => a.role === "coder") ??
+          projectAgents[0] ?? null;
+
         for (const t of tasks) {
+          const agent = findAgent(t.role ?? "coder");
           db.prepare(`
-            INSERT INTO tasks (goal_id, project_id, title, description)
-            VALUES (?, ?, ?, ?)
-          `).run(goal.id, goal.project_id, t.title, t.description ?? "");
+            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(goal.id, goal.project_id, t.title, t.description ?? "", agent?.id ?? null);
         }
 
         log.info(`Created ${tasks.length} tasks from goal decomposition`);
