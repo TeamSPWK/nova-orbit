@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useNotifications, NotificationType } from "../stores/useNotifications";
+import { useNotifications } from "../stores/useNotifications";
+import type { NotificationType } from "../stores/useNotifications";
 
 interface NotificationPanelProps {
   onClose: () => void;

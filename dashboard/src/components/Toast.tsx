@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { useNotifications, NotificationType } from "../stores/useNotifications";
+import { useNotifications } from "../stores/useNotifications";
+import type { NotificationType } from "../stores/useNotifications";
 
 interface ToastProps {
   message: string;
