@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 import { AgentCard } from "./AgentCard";
+import { AgentChatLog } from "./AgentChatLog";
 import { AgentDetail } from "./AgentDetail";
 import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
@@ -28,6 +29,9 @@ export function ProjectHome() {
   const [editingHeaderMission, setEditingHeaderMission] = useState(false);
   const [headerMissionDraft, setHeaderMissionDraft] = useState("");
   const [savingMission, setSavingMission] = useState(false);
+
+  // Chat log panel state
+  const [chatPanelCollapsed, setChatPanelCollapsed] = useState(false);
 
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
@@ -180,6 +184,12 @@ export function ProjectHome() {
   };
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
+
+  // Derive in-progress task and its assigned agent for the chat panel
+  const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
+  const inProgressAgent = inProgressTask?.assignee_id
+    ? agents.find((a) => a.id === inProgressTask.assignee_id) ?? null
+    : null;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -395,6 +405,46 @@ export function ProjectHome() {
               </h2>
               <TaskList tasks={tasks} agents={agents} onUpdate={loadData} />
             </section>
+
+            {/* Agent Chat Log Panel — visible when a task is in_progress */}
+            {inProgressTask && (
+              <section className="mb-8">
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                  {/* Panel header */}
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                        {t("agentOutput")}
+                      </span>
+                      {inProgressTask && (
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate max-w-[200px]">
+                          — {inProgressTask.title}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setChatPanelCollapsed((v) => !v)}
+                      className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 px-2 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      {chatPanelCollapsed ? t("expandPanel") : t("collapsePanel")}
+                    </button>
+                  </div>
+
+                  {/* Panel body */}
+                  {!chatPanelCollapsed && (
+                    <div className="h-[300px] bg-white dark:bg-[#1e1e2e]">
+                      <AgentChatLog
+                        taskId={inProgressTask.id}
+                        agentName={inProgressAgent?.name}
+                        agentRole={inProgressAgent?.role}
+                        isWorking={inProgressAgent?.status === "working"}
+                      />
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
 
             {/* Recent Activity Section */}
             <section>

@@ -66,10 +66,16 @@ export function createOrchestrationEngine(
 
       const session = sessionManager.spawnAgent(task.assignee_id, project.workdir || process.cwd());
 
+      // Stream agent output to WebSocket for real-time dashboard display
+      session.on("output", (text: string) => {
+        broadcast("agent:output", { agentId: task.assignee_id, output: text, taskId });
+      });
+
       // Update agent status
       db.prepare("UPDATE agents SET status = 'working', current_task_id = ? WHERE id = ?")
         .run(taskId, task.assignee_id);
-      broadcast("agent:status", { id: task.assignee_id, status: "working" });
+      broadcast("agent:status", { id: task.assignee_id, status: "working", taskId });
+      broadcast("task:started", { taskId, agentId: task.assignee_id, startedAt: new Date().toISOString() });
 
       try {
         const implementationPrompt = `
@@ -86,8 +92,15 @@ Implement this task. Focus on:
 When complete, provide a summary of changes made.
 `;
 
-        await session.send(implementationPrompt);
+        const implResult = await session.send(implementationPrompt);
         log.info(`Implementation complete for task "${task.title}"`);
+
+        // Broadcast completion
+        broadcast("task:completed", {
+          taskId,
+          agentId: task.assignee_id,
+          completedAt: new Date().toISOString(),
+        });
 
         // Log activity
         db.prepare(`

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -44,7 +44,30 @@ interface AgentCardProps {
 export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
   const { t } = useTranslation();
   const [showConfirm, setShowConfirm] = useState(false);
+  const [workingSeconds, setWorkingSeconds] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentTask = tasks?.find((task) => task.id === agent.current_task_id);
+
+  useEffect(() => {
+    if (agent.status === "working") {
+      setWorkingSeconds(0);
+      intervalRef.current = setInterval(() => {
+        setWorkingSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      setWorkingSeconds(0);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [agent.status]);
 
   const handleKillClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -69,7 +92,11 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
         />
       )}
       <div
-        className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-[#25253d] transition-colors cursor-pointer"
+        className={`border rounded-lg p-3 bg-white dark:bg-[#25253d] transition-all cursor-pointer ${
+          agent.status === "working"
+            ? "border-green-400 dark:border-green-600 shadow-[0_0_12px_2px_rgba(74,222,128,0.15)] hover:border-green-500"
+            : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+        }`}
         onClick={onClick}
       >
         <div className="flex items-center justify-between mb-2">
@@ -90,7 +117,7 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span
             className={`text-[10px] px-1.5 py-0.5 rounded ${
               STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle
@@ -98,6 +125,18 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
           >
             {t(statusLabelKey)}
           </span>
+          {agent.status === "working" && (
+            <span className="flex items-center gap-0.5">
+              <span className="w-1 h-1 rounded-full bg-green-400 dark:bg-green-500 animate-bounce [animation-delay:0ms]" />
+              <span className="w-1 h-1 rounded-full bg-green-400 dark:bg-green-500 animate-bounce [animation-delay:150ms]" />
+              <span className="w-1 h-1 rounded-full bg-green-400 dark:bg-green-500 animate-bounce [animation-delay:300ms]" />
+            </span>
+          )}
+          {agent.status === "working" && workingSeconds > 0 && (
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">
+              {workingSeconds}s
+            </span>
+          )}
           {currentTask && (
             <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
               {currentTask.title}
