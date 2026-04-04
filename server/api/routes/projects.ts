@@ -2,6 +2,7 @@ import { Router } from "express";
 import { existsSync } from "node:fs";
 import type { AppContext } from "../../index.js";
 import { analyzeProject } from "../../core/project/analyzer.js";
+import { connectGitHub } from "../../core/project/github.js";
 
 export function createProjectRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -122,6 +123,44 @@ export function createProjectRoutes(ctx: AppContext): Router {
         agents,
         analysis,
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Connect GitHub repo (clone + analyze + create project + agents)
+  router.post("/github", (req, res) => {
+    const { url, name } = req.body;
+    if (!url) return res.status(400).json({ error: "url is required" });
+
+    try {
+      const dataDir = process.env.NOVA_ORBIT_DATA_DIR || ".nova-orbit";
+      const result = connectGitHub(url, dataDir);
+      const projectName = name || url.split("/").pop()?.replace(/\.git$/, "") || "GitHub Project";
+
+      // Create project
+      const dbResult = db.prepare(`
+        INSERT INTO projects (name, source, workdir, github_config, tech_stack)
+        VALUES (?, 'github', ?, ?, ?)
+      `).run(
+        projectName,
+        result.localPath,
+        JSON.stringify({ repoUrl: result.repoUrl, branch: result.branch, autoPush: false, prMode: true }),
+        JSON.stringify(result.analysis.techStack),
+      );
+
+      const project = db.prepare("SELECT * FROM projects WHERE rowid = ?").get(dbResult.lastInsertRowid) as any;
+
+      // Create suggested agents
+      for (const agent of result.analysis.suggestedAgents) {
+        db.prepare("INSERT INTO agents (project_id, name, role) VALUES (?, ?, ?)")
+          .run(project.id, agent.name, agent.role);
+      }
+
+      const agents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(project.id);
+
+      broadcast("project:updated", project);
+      res.status(201).json({ project, agents, analysis: result.analysis, branch: result.branch });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -20,8 +20,6 @@ export function Sidebar() {
     if (!path) return;
 
     try {
-      const result = await api.projects.create({}) as any;
-      // Actually use the import endpoint
       const res = await fetch("/api/projects/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -48,6 +46,39 @@ export function Sidebar() {
       );
     } catch (err: any) {
       alert(`Import failed: ${err.message}`);
+    }
+  };
+
+  const handleConnectGitHub = async () => {
+    const url = prompt("GitHub repo URL or owner/repo (e.g., user/my-app):");
+    if (!url) return;
+
+    try {
+      const res = await fetch("/api/projects/github", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`GitHub connect failed: ${err.error}`);
+        return;
+      }
+
+      const data = await res.json();
+      const updatedProjects = await api.projects.list();
+      setProjects(updatedProjects);
+      setCurrentProject(data.project.id);
+
+      const agentNames = data.agents.map((a: any) => `${a.name} (${a.role})`).join(", ");
+      alert(
+        `Connected! Branch: ${data.branch}\n` +
+          `Tech: ${data.analysis.techStack.languages.join(", ")}\n` +
+          `Agents: ${agentNames}`,
+      );
+    } catch (err: any) {
+      alert(`GitHub connect failed: ${err.message}`);
     }
   };
 
@@ -101,6 +132,12 @@ export function Sidebar() {
           className="w-full py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
         >
           Import Local
+        </button>
+        <button
+          onClick={handleConnectGitHub}
+          className="w-full py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+        >
+          Connect GitHub
         </button>
       </div>
     </aside>
