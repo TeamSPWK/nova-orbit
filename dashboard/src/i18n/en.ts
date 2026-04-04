@@ -294,7 +294,6 @@ const en = {
   multiPromptComplete: "Multi-prompt complete",
   multiAgentMode: "Multi-agent",
   singleAgentMode: "Single agent",
-  addAgent: "Add",
   removeAgent: "Remove",
   agentOrder: "Execution order",
   multiPromptAutoCreated: "{{count}} tasks auto-created",

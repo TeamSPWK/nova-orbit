@@ -6,12 +6,7 @@ interface Task {
   verification_id?: string | null;
 }
 
-interface UsagePayload {
-  taskId: string;
-  agentId: string;
-  totalTokens: number;
-  costUsd: number;
-}
+
 
 interface ProjectStatsProps {
   tasks: Task[];

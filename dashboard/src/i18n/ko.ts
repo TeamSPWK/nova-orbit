@@ -294,7 +294,6 @@ const ko = {
   multiPromptComplete: "멀티 프롬프트 완료",
   multiAgentMode: "멀티 에이전트",
   singleAgentMode: "단일 에이전트",
-  addAgent: "추가",
   removeAgent: "제거",
   agentOrder: "실행 순서",
   multiPromptAutoCreated: "태스크 {{count}}개 자동 생성됨",

@@ -14,18 +14,9 @@ interface Agent {
   session_id?: string;
 }
 
-interface Task {
-  id: string;
-  title: string;
-  status: string;
-  assignee_id: string | null;
-  goal_id: string | null;
-  verification_id: string | null;
-}
-
 interface OrgChartProps {
-  agents: Agent[];
-  tasks: Task[];
+  agents: any[];
+  tasks: any[];
   onAddAgent: () => void;
   onAgentDeleted: () => void;
   onAgentKilled: () => void;
@@ -61,7 +52,7 @@ interface NodeProps {
   isLast: boolean;
 }
 
-function OrgNode({ agent, agents, selectedId, onSelect, depth, isLast }: NodeProps) {
+function OrgNode({ agent, agents, selectedId, onSelect, depth }: NodeProps) {
   const children = getChildren(agents, agent.id);
   const isSelected = selectedId === agent.id;
 
