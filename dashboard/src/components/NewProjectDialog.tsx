@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface NewProjectDialogProps {
-  onSubmit: (name: string, mission: string) => void;
+  onSubmit: (name: string, mission: string, workdir: string) => void;
   onCancel: () => void;
 }
 
@@ -10,6 +10,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [mission, setMission] = useState("");
+  const [workdir, setWorkdir] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -17,7 +18,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
   }, []);
 
   const handleSubmit = () => {
-    if (name.trim()) onSubmit(name.trim(), mission.trim());
+    if (name.trim() && workdir.trim()) onSubmit(name.trim(), mission.trim(), workdir.trim());
   };
 
   return (
@@ -26,7 +27,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
       onClick={onCancel}
     >
       <div
-        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[420px] overflow-hidden"
+        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[460px] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 space-y-3">
@@ -35,19 +36,33 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
           </h3>
           <div>
             <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
-              {t("promptProjectName")}
+              {t("promptProjectName")} *
             </label>
             <input
               ref={nameRef}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") onCancel();
-              }}
+              onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
               placeholder={t("promptProjectNameHint")}
               className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
             />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
+              {t("promptWorkdir")} *
+            </label>
+            <input
+              type="text"
+              value={workdir}
+              onChange={(e) => setWorkdir(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+              placeholder={t("promptWorkdirHint")}
+              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+            />
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+              {t("promptWorkdirDesc")}
+            </p>
           </div>
           <div>
             <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
@@ -75,7 +90,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!name.trim()}
+            disabled={!name.trim() || !workdir.trim()}
             className="text-xs px-4 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-40"
           >
             {t("create")}

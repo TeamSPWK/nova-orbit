@@ -111,7 +111,10 @@ const ko = {
   // Prompt dialogs
   promptProjectName: "프로젝트 이름",
   promptProjectNameHint: "프로젝트 이름을 입력하세요...",
-  promptMission: "미션",
+  promptWorkdir: "작업 디렉토리",
+  promptWorkdirHint: "예: ~/projects/my-app",
+  promptWorkdirDesc: "에이전트가 코드를 작성할 디렉토리입니다. 실제 경로여야 합니다.",
+  promptMission: "미션 (선택)",
   promptMissionHint: "무엇을 만드시나요?",
   promptLocalPath: "로컬 경로",
   promptLocalPathHint: "예: ~/projects/my-app",

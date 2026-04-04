@@ -30,9 +30,9 @@ export function Sidebar() {
 
   const showToast = (msg: string) => setToast(msg);
 
-  const handleNewProject = async (name: string, mission: string) => {
+  const handleNewProject = async (name: string, mission: string, workdir: string) => {
     setShowDialog(null);
-    const project = await api.projects.create({ name, mission, source: "new" });
+    const project = await api.projects.create({ name, mission, workdir, source: "new" });
     setProjects([...projects, project]);
     setCurrentProject(project.id);
   };

@@ -111,7 +111,10 @@ const en = {
   // Prompt dialogs
   promptProjectName: "Project Name",
   promptProjectNameHint: "Enter project name...",
-  promptMission: "Mission",
+  promptWorkdir: "Working Directory",
+  promptWorkdirHint: "e.g., ~/projects/my-app",
+  promptWorkdirDesc: "The directory where agents will write code. Must exist on disk.",
+  promptMission: "Mission (optional)",
   promptMissionHint: "What are you building?",
   promptLocalPath: "Local Path",
   promptLocalPathHint: "e.g., ~/projects/my-app",
