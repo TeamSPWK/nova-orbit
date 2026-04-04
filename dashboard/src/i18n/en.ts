@@ -217,6 +217,14 @@ const en = {
   agentDetailTaskHistory: "Task History",
   agentDetailNoTasks: "No tasks assigned yet.",
   agentDetailKillSession: "Kill Session",
+  deleteAgent: "Delete Agent",
+  deleteAgentConfirm: "Are you sure you want to delete this agent?",
+  systemPrompt: "System Prompt",
+  editPrompt: "Edit",
+  savePrompt: "Save",
+  promptHint: "This prompt is injected into every Claude Code session for this agent.",
+  customPromptPlaceholder: "Describe this agent's role, expertise, and guidelines...",
+  customPromptTemplate: "You are a [role] specialist.\nYour expertise includes:\n- [skill 1]\n- [skill 2]\n\nWhen implementing tasks:\n- [guideline 1]\n- [guideline 2]",
 
   // TaskDetail modal
   taskDetail: "Task Detail",

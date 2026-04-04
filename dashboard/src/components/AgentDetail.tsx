@@ -28,6 +28,7 @@ interface AgentDetailProps {
   tasks: Task[];
   onClose: () => void;
   onKill: () => void;
+  onDeleted?: () => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -38,10 +39,14 @@ const STATUS_COLORS: Record<string, string> = {
   terminated: "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400",
 };
 
-export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps) {
+export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentDetailProps) {
   const { t } = useTranslation();
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showKillConfirm, setShowKillConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState(agent.system_prompt ?? "");
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const agentTasks = tasks.filter((t) => t.assignee_id === agent.id);
@@ -77,6 +82,28 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
     onKill();
   };
 
+  const handleDeleteConfirm = async () => {
+    setShowDeleteConfirm(false);
+    await api.agents.delete(agent.id);
+    onDeleted?.();
+    onClose();
+  };
+
+  const handleSavePrompt = async () => {
+    setIsSavingPrompt(true);
+    try {
+      await api.agents.update(agent.id, { system_prompt: editedPrompt });
+      setIsEditingPrompt(false);
+    } finally {
+      setIsSavingPrompt(false);
+    }
+  };
+
+  const handleCancelPromptEdit = () => {
+    setEditedPrompt(agent.system_prompt ?? "");
+    setIsEditingPrompt(false);
+  };
+
   return (
     <>
       {showKillConfirm && (
@@ -84,6 +111,13 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
           message={t("confirmKillAgent")}
           onConfirm={handleKillConfirm}
           onCancel={() => setShowKillConfirm(false)}
+        />
+      )}
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          message={t("deleteAgentConfirm")}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
 
@@ -161,13 +195,13 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
           )}
 
           {/* System Prompt */}
-          {agent.system_prompt && (
-            <section>
+          <section>
+            <div className="flex items-center justify-between mb-2">
               <button
                 onClick={() => setPromptExpanded((v) => !v)}
-                className="w-full flex items-center justify-between text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium mb-2 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               >
-                <span>{t("agentDetailSystemPrompt")}</span>
+                <span>{t("systemPrompt")}</span>
                 <svg
                   width="12"
                   height="12"
@@ -182,13 +216,52 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
-              {promptExpanded && (
-                <pre className="text-[11px] text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed border border-gray-100 dark:border-gray-700">
-                  {agent.system_prompt}
-                </pre>
+              {!isEditingPrompt && (
+                <button
+                  onClick={() => { setPromptExpanded(true); setIsEditingPrompt(true); }}
+                  className="text-[10px] text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                >
+                  {t("editPrompt")}
+                </button>
               )}
-            </section>
-          )}
+            </div>
+            {promptExpanded && (
+              <>
+                {isEditingPrompt ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editedPrompt}
+                      onChange={(e) => setEditedPrompt(e.target.value)}
+                      rows={8}
+                      className="w-full text-[11px] text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 font-mono leading-relaxed border border-blue-300 dark:border-blue-600 focus:outline-none focus:border-blue-400 resize-y"
+                    />
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+                      {t("promptHint")}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSavePrompt}
+                        disabled={isSavingPrompt}
+                        className="px-3 py-1 text-[11px] bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                      >
+                        {t("savePrompt")}
+                      </button>
+                      <button
+                        onClick={handleCancelPromptEdit}
+                        className="px-3 py-1 text-[11px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                      >
+                        {t("cancel")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <pre className="text-[11px] text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed border border-gray-100 dark:border-gray-700">
+                    {editedPrompt || <span className="text-gray-300 dark:text-gray-600 italic">—</span>}
+                  </pre>
+                )}
+              </>
+            )}
+          </section>
 
           {/* Verification Stats */}
           <section>
@@ -252,16 +325,22 @@ export function AgentDetail({ agent, tasks, onClose, onKill }: AgentDetailProps)
         </div>
 
         {/* Footer */}
-        {agent.status === "working" && (
-          <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0">
+        <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0 space-y-2">
+          {agent.status === "working" && (
             <button
               onClick={() => setShowKillConfirm(true)}
               className="w-full py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
             >
               {t("agentDetailKillSession")}
             </button>
-          </div>
-        )}
+          )}
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="w-full py-2 text-sm font-medium text-red-700 dark:text-red-500 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            {t("deleteAgent")}
+          </button>
+        </div>
       </div>
     </>
   );

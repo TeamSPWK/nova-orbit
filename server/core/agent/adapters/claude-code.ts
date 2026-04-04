@@ -87,6 +87,8 @@ export function createClaudeCodeAdapter() {
               resume: resumeId ?? "new",
             });
 
+            const TIMEOUT_MS = 5 * 60 * 1000; // 5 min timeout per task
+
             const proc: ChildProcess = spawn("claude", args, {
               cwd: resolvePath(config.workdir),
               stdio: ["pipe", "pipe", "pipe"] as const,
@@ -98,6 +100,14 @@ export function createClaudeCodeAdapter() {
             });
 
             session.process = proc;
+
+            // Kill process after timeout
+            const timeout = setTimeout(() => {
+              if (session.process) {
+                log.warn(`Session ${session.id} timed out after ${TIMEOUT_MS / 1000}s, killing`);
+                session.process.kill("SIGTERM");
+              }
+            }, TIMEOUT_MS);
             let stdout = "";
             let stderr = "";
 
@@ -118,6 +128,7 @@ export function createClaudeCodeAdapter() {
             proc.stdin!.end();
 
             proc.on("close", (code: number | null) => {
+              clearTimeout(timeout);
               session.process = null;
 
               // Try to extract sessionId from stream-json output

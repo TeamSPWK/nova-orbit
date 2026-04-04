@@ -217,6 +217,14 @@ const ko = {
   agentDetailTaskHistory: "태스크 이력",
   agentDetailNoTasks: "아직 할당된 태스크가 없습니다.",
   agentDetailKillSession: "세션 종료",
+  deleteAgent: "에이전트 삭제",
+  deleteAgentConfirm: "이 에이전트를 삭제하시겠습니까?",
+  systemPrompt: "시스템 프롬프트",
+  editPrompt: "편집",
+  savePrompt: "저장",
+  promptHint: "이 프롬프트는 이 에이전트의 모든 Claude Code 세션에 주입됩니다.",
+  customPromptPlaceholder: "이 에이전트의 역할, 전문 분야, 가이드라인을 설명하세요...",
+  customPromptTemplate: "당신은 [역할] 전문가입니다.\n전문 분야:\n- [스킬 1]\n- [스킬 2]\n\n태스크 구현 시:\n- [가이드라인 1]\n- [가이드라인 2]",
 
   // TaskDetail modal
   taskDetail: "태스크 상세",

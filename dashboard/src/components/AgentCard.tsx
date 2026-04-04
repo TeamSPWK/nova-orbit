@@ -36,12 +36,14 @@ interface AgentCardProps {
   };
   tasks?: Array<{ id: string; title: string }>;
   onKill?: () => void;
+  onDeleted?: () => void;
   onClick?: () => void;
 }
 
-export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
+export function AgentCard({ agent, tasks, onKill, onDeleted, onClick }: AgentCardProps) {
   const { t } = useTranslation();
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [workingSeconds, setWorkingSeconds] = useState(0);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,6 +115,17 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
     onKill?.();
   };
 
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    setShowDeleteConfirm(false);
+    await api.agents.delete(agent.id);
+    onDeleted?.();
+  };
+
   const statusLabelKey = STATUS_LABEL_KEYS[agent.status] ?? "statusIdle";
 
   return (
@@ -122,6 +135,13 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
           message={t("confirmKillAgent")}
           onConfirm={handleKillConfirm}
           onCancel={() => setShowConfirm(false)}
+        />
+      )}
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          message={t("deleteAgentConfirm")}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
       <div
@@ -166,6 +186,18 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
                 {t("resumeAgent")}
               </button>
             )}
+            <button
+              onClick={handleDeleteClick}
+              title={t("deleteAgent")}
+              className="w-5 h-5 flex items-center justify-center text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

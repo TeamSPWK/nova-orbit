@@ -26,6 +26,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
   const { t } = useTranslation();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [customName, setCustomName] = useState("");
+  const [customPrompt, setCustomPrompt] = useState("");
 
   useEffect(() => {
     api.agents.presets().then(setPresets).catch(() => {
@@ -51,11 +52,15 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
 
   const handleCreateCustom = async () => {
     if (!customName.trim()) return;
+    const systemPrompt = customPrompt.trim()
+      ? customPrompt.trim()
+      : `You are a ${customName.trim()}. Implement assigned tasks following best practices.`;
     try {
       const agent = await api.agents.create({
         project_id: projectId,
         name: customName,
         role: "custom",
+        system_prompt: systemPrompt,
       });
       onCreated(agent);
     } catch {
@@ -90,7 +95,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
             </button>
           ))}
 
-          <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+          <div className="pt-3 border-t border-gray-100 dark:border-gray-700 space-y-2">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -108,6 +113,16 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
                 {t("create")}
               </button>
             </div>
+            <textarea
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder={t("customPromptTemplate")}
+              rows={6}
+              className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-700 dark:text-gray-300 focus:outline-none focus:border-blue-400 font-mono resize-y"
+            />
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+              {t("promptHint")}
+            </p>
           </div>
         </div>
 
