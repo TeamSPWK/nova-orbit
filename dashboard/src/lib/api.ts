@@ -95,6 +95,8 @@ export const api = {
       request<any>(`/orchestration/agents/${agentId}/kill`, { method: "POST" }),
     killAll: () =>
       request<any>("/orchestration/sessions/kill-all", { method: "POST" }),
+    queueStatus: (projectId: string) =>
+      request<{ running: boolean }>(`/orchestration/projects/${projectId}/queue-status`),
     startQueue: (projectId: string) =>
       request<any>(`/orchestration/projects/${projectId}/run-queue`, { method: "POST" }),
     stopQueue: (projectId: string) =>

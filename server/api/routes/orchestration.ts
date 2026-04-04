@@ -93,6 +93,12 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     }
   });
 
+  // Check queue status for a project
+  router.get("/projects/:projectId/queue-status", (req, res) => {
+    const { projectId } = req.params;
+    res.json({ running: scheduler.isRunning(projectId), projectId });
+  });
+
   // Start priority queue for a project
   router.post("/projects/:projectId/run-queue", (req, res) => {
     const { projectId } = req.params;

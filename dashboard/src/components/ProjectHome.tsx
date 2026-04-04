@@ -52,10 +52,12 @@ export function ProjectHome() {
       api.agents.list(currentProjectId),
       api.goals.list(currentProjectId),
       api.tasks.list(currentProjectId),
-    ]).then(([a, g, t]) => {
+      api.orchestration.queueStatus(currentProjectId).catch(() => ({ running: false })),
+    ]).then(([a, g, t, qs]) => {
       setAgents(a);
       setGoals(g);
       setTasks(t);
+      setQueueRunning(qs.running);
       setLoading(false);
     });
   }, [currentProjectId, setAgents, setGoals, setTasks]);
