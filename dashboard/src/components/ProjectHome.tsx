@@ -454,33 +454,77 @@ export function ProjectHome() {
                   </button>
                 </div>
                 {agents.length === 0 ? (
-                  <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
-                    <div className="text-3xl mb-2 opacity-40">🤖</div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
-                      {t("emptyAgentsTitle")}
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-4 max-w-xs mx-auto">
-                      {t("emptyAgentsDesc")}
-                    </p>
+                  <div className="py-6 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center space-y-4">
+                    <div>
+                      <div className="text-3xl mb-2 opacity-40">🤖</div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+                        {t("emptyAgentsTitle")}
+                      </p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500 max-w-xs mx-auto">
+                        {t("emptyAgentsDesc")}
+                      </p>
+                    </div>
+                    {/* Team preset buttons */}
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      {[
+                        { id: "solo", label: "Solo Founder", desc: "Dev + Reviewer" },
+                        { id: "fullstack", label: "Full Stack", desc: "CTO → BE + FE + QA" },
+                        { id: "product", label: "Product", desc: "CTO → FE + UX + QA" },
+                        { id: "startup", label: "Startup", desc: "CTO → Full Team" },
+                      ].map((preset) => (
+                        <button
+                          key={preset.id}
+                          onClick={async () => {
+                            if (!currentProjectId) return;
+                            await api.agents.createTeam(currentProjectId, preset.id);
+                            loadData();
+                          }}
+                          className="text-left px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/30 dark:hover:bg-blue-900/20 transition-colors"
+                        >
+                          <div className="text-xs font-medium text-gray-700 dark:text-gray-200">{preset.label}</div>
+                          <div className="text-[10px] text-gray-400 dark:text-gray-500">{preset.desc}</div>
+                        </button>
+                      ))}
+                    </div>
                     <button
                       onClick={handleAddAgent}
-                      className="text-xs px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors"
+                      className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                     >
                       {t("addAgent")}
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    {agents.map((agent) => (
-                      <AgentCard
-                        key={agent.id}
-                        agent={agent}
-                        tasks={tasks}
-                        onKill={loadData}
-                        onDeleted={loadData}
-                        onClick={() => setSelectedAgentId(agent.id)}
-                      />
-                    ))}
+                  <div className="space-y-3">
+                    {/* Leader agents (no parent) */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {agents.filter((a) => !a.parent_id).map((agent) => (
+                        <AgentCard
+                          key={agent.id}
+                          agent={agent}
+                          tasks={tasks}
+                          onKill={loadData}
+                          onDeleted={loadData}
+                          onClick={() => setSelectedAgentId(agent.id)}
+                        />
+                      ))}
+                    </div>
+                    {/* Member agents (has parent) — indented */}
+                    {agents.some((a) => a.parent_id) && (
+                      <div className="ml-4 pl-3 border-l-2 border-gray-200 dark:border-gray-700">
+                        <div className="grid grid-cols-2 gap-3">
+                          {agents.filter((a) => a.parent_id).map((agent) => (
+                            <AgentCard
+                              key={agent.id}
+                              agent={agent}
+                              tasks={tasks}
+                              onKill={loadData}
+                              onDeleted={loadData}
+                              onClick={() => setSelectedAgentId(agent.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

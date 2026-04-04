@@ -32,7 +32,7 @@ export function migrate(db: Database.Database): void {
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom')),
+      role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
       status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
       system_prompt TEXT NOT NULL DEFAULT '',
       skills_dir TEXT,
@@ -123,6 +123,12 @@ export function migrate(db: Database.Database): void {
   }
   if (!hasCostUsd) {
     db.exec("ALTER TABLE sessions ADD COLUMN cost_usd REAL DEFAULT 0");
+  }
+
+  // Agent hierarchy: parent_id for org structure
+  const agentColumns = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
+  if (!agentColumns.some((c) => c.name === "parent_id")) {
+    db.exec("ALTER TABLE agents ADD COLUMN parent_id TEXT");
   }
 }
 

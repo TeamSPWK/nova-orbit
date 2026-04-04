@@ -51,6 +51,12 @@ export const api = {
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
     presets: () => request<any[]>("/agents/presets"),
+    teamPresets: () => request<any[]>("/agents/team-presets"),
+    createTeam: (projectId: string, presetId: string) =>
+      request<any>("/agents/create-team", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, preset_id: presetId }),
+      }),
     suggest: (mission: string, techStack?: any) =>
       request<any[]>("/agents/suggest", { method: "POST", body: JSON.stringify({ mission, techStack }) }),
     suggestAndCreate: (projectId: string, mission: string, techStack?: any) =>

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { AppContext } from "../../index.js";
 import { getAgentPresets } from "../../core/agent/roles.js";
-import { suggestAgentsFromMission } from "../../core/agent/suggest.js";
+import { suggestAgentsFromMission, getTeamPresets } from "../../core/agent/suggest.js";
 
 export function createAgentRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -19,6 +19,54 @@ export function createAgentRoutes(ctx: AppContext): Router {
   // List available agent role presets loaded from templates/agents/*.yaml
   router.get("/presets", (_req, res) => {
     res.json(getAgentPresets());
+  });
+
+  // List team presets (org structures)
+  router.get("/team-presets", (_req, res) => {
+    res.json(getTeamPresets());
+  });
+
+  // Create a team from a preset
+  router.post("/create-team", (req, res) => {
+    const { project_id, preset_id } = req.body;
+    if (!project_id || !preset_id) {
+      return res.status(400).json({ error: "project_id and preset_id are required" });
+    }
+
+    const presets = getTeamPresets();
+    const preset = presets.find((p) => p.id === preset_id);
+    if (!preset) return res.status(400).json({ error: `Unknown preset: ${preset_id}` });
+
+    try {
+      const created: any[] = [];
+      const idMap = new Map<string, string>(); // role → agent id
+
+      // First pass: create all agents
+      for (const a of preset.agents) {
+        const result = db.prepare(
+          "INSERT INTO agents (project_id, name, role) VALUES (?, ?, ?)",
+        ).run(project_id, a.name, a.role);
+        const row = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid) as any;
+        created.push(row);
+        idMap.set(a.role, row.id);
+      }
+
+      // Second pass: set parent_id for hierarchy
+      for (const a of preset.agents) {
+        if (a.parentRole) {
+          const parentId = idMap.get(a.parentRole);
+          const childId = idMap.get(a.role);
+          if (parentId && childId) {
+            db.prepare("UPDATE agents SET parent_id = ? WHERE id = ?").run(parentId, childId);
+          }
+        }
+      }
+
+      broadcast("project:updated", { projectId: project_id });
+      res.status(201).json({ preset: preset.name, created, count: created.length });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // Suggest domain-specialized agents based on mission + tech stack
@@ -90,7 +138,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: "project_id, name, and role are required" });
     }
 
-    const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom"];
+    const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "backend", "frontend", "ux", "devops"];
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
     }

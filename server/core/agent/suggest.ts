@@ -150,3 +150,59 @@ export function suggestAgentsFromMission(
 
   return agents;
 }
+
+export interface TeamPreset {
+  id: string;
+  name: string;
+  description: string;
+  agents: Array<{ name: string; role: string; parentRole?: string }>;
+}
+
+export function getTeamPresets(): TeamPreset[] {
+  return [
+    {
+      id: "solo",
+      name: "Solo Founder",
+      description: "Developer + Reviewer (기본)",
+      agents: [
+        { name: "Developer", role: "coder" },
+        { name: "Code Reviewer", role: "reviewer" },
+      ],
+    },
+    {
+      id: "fullstack",
+      name: "Full Stack Team",
+      description: "CTO → Backend + Frontend + QA",
+      agents: [
+        { name: "CTO", role: "cto" },
+        { name: "Backend Developer", role: "backend", parentRole: "cto" },
+        { name: "Frontend Developer", role: "frontend", parentRole: "cto" },
+        { name: "QA Engineer", role: "qa", parentRole: "cto" },
+      ],
+    },
+    {
+      id: "product",
+      name: "Product Team",
+      description: "CTO → Frontend + UX + QA",
+      agents: [
+        { name: "CTO", role: "cto" },
+        { name: "Frontend Developer", role: "frontend", parentRole: "cto" },
+        { name: "UX Designer", role: "ux", parentRole: "cto" },
+        { name: "QA Engineer", role: "qa", parentRole: "cto" },
+      ],
+    },
+    {
+      id: "startup",
+      name: "Startup Team",
+      description: "CTO → Backend + Frontend + UX + QA + Reviewer",
+      agents: [
+        { name: "CTO", role: "cto" },
+        { name: "Backend Developer", role: "backend", parentRole: "cto" },
+        { name: "Frontend Developer", role: "frontend", parentRole: "cto" },
+        { name: "UX Designer", role: "ux", parentRole: "cto" },
+        { name: "QA Engineer", role: "qa", parentRole: "cto" },
+        { name: "Code Reviewer", role: "reviewer", parentRole: "cto" },
+      ],
+    },
+  ];
+}
