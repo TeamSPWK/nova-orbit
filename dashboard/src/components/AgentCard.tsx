@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 const ROLE_ICONS: Record<string, string> = {
@@ -17,6 +18,14 @@ const STATUS_COLORS: Record<string, string> = {
   terminated: "bg-red-100 dark:bg-red-900/40 text-red-500 dark:text-red-400",
 };
 
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  idle: "statusIdle",
+  working: "statusWorking",
+  waiting_approval: "statusWaitingApproval",
+  paused: "statusPaused",
+  terminated: "statusTerminated",
+};
+
 interface AgentCardProps {
   agent: {
     id: string;
@@ -31,7 +40,8 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
-  const currentTask = tasks?.find((t) => t.id === agent.current_task_id);
+  const { t } = useTranslation();
+  const currentTask = tasks?.find((task) => task.id === agent.current_task_id);
 
   const handleKill = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -39,6 +49,8 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
     await api.orchestration.killAgent(agent.id);
     onKill?.();
   };
+
+  const statusLabelKey = STATUS_LABEL_KEYS[agent.status] ?? "statusIdle";
 
   return (
     <div
@@ -59,7 +71,7 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
             className="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
             title="Kill session"
           >
-            Stop
+            {t("stopAgent")}
           </button>
         )}
       </div>
@@ -69,7 +81,7 @@ export function AgentCard({ agent, tasks, onKill, onClick }: AgentCardProps) {
             STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle
           }`}
         >
-          {agent.status.replace("_", " ")}
+          {t(statusLabelKey)}
         </span>
         {currentTask && (
           <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   DndContext,
   DragOverlay,
@@ -18,11 +19,11 @@ import { CSS } from "@dnd-kit/utilities";
 import { api } from "../lib/api";
 
 const COLUMNS = [
-  { id: "todo", label: "Todo", color: "border-gray-300", bg: "bg-gray-50" },
-  { id: "in_progress", label: "In Progress", color: "border-blue-400", bg: "bg-blue-50/50" },
-  { id: "in_review", label: "In Review", color: "border-purple-400", bg: "bg-purple-50/50" },
-  { id: "done", label: "Done", color: "border-green-400", bg: "bg-green-50/50" },
-  { id: "blocked", label: "Blocked", color: "border-red-400", bg: "bg-red-50/50" },
+  { id: "todo", labelKey: "statusTodo", color: "border-gray-300", bg: "bg-gray-50" },
+  { id: "in_progress", labelKey: "statusInProgress", color: "border-blue-400", bg: "bg-blue-50/50" },
+  { id: "in_review", labelKey: "statusInReview", color: "border-purple-400", bg: "bg-purple-50/50" },
+  { id: "done", labelKey: "statusDone", color: "border-green-400", bg: "bg-green-50/50" },
+  { id: "blocked", labelKey: "statusBlocked", color: "border-red-400", bg: "bg-red-50/50" },
 ] as const;
 
 interface Task {
@@ -45,6 +46,7 @@ interface KanbanBoardProps {
 }
 
 function SortableCard({ task, agents }: { task: Task; agents: Agent[] }) {
+  const { t } = useTranslation();
   const agent = agents.find((a) => a.id === task.assignee_id);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: task.id, data: { task } });
@@ -72,7 +74,7 @@ function SortableCard({ task, agents }: { task: Task; agents: Agent[] }) {
         )}
         {task.verification_id && (
           <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded">
-            verified
+            {t("verified")}
           </span>
         )}
       </div>
@@ -93,6 +95,7 @@ function TaskCard({ task, agents }: { task: Task; agents: Agent[] }) {
 }
 
 export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
+  const { t } = useTranslation();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
 
   const sensors = useSensors(
@@ -150,7 +153,7 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
             >
               <div className="px-3 py-2 flex items-center justify-between">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                  {col.label}
+                  {t(col.labelKey)}
                 </span>
                 <span className="text-[10px] text-gray-300 dark:text-gray-600">
                   {columnTasks.length}
@@ -168,7 +171,7 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
                   ))}
                   {columnTasks.length === 0 && (
                     <div className="text-[10px] text-gray-300 dark:text-gray-600 text-center py-4">
-                      Drop here
+                      {t("dropHere")}
                     </div>
                   )}
                 </div>

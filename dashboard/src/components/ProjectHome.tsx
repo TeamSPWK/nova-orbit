@@ -204,9 +204,9 @@ export function ProjectHome() {
                 onClick={startEditHeaderMission}
                 title="Click to edit"
               >
-                {project.mission || <span className="italic text-gray-400">No mission — click to add</span>}
+                {project.mission || <span className="italic text-gray-400">{t("noMission")}</span>}
                 <span className="text-xs text-gray-300 group-hover:text-gray-400 transition-colors">
-                  Edit
+                  {t("edit")}
                 </span>
               </p>
             )}
@@ -318,13 +318,13 @@ export function ProjectHome() {
                         className="text-[10px] px-2 py-0.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100"
                         title="AI Decompose: Break goal into tasks"
                       >
-                        Decompose
+                        {t("decompose")}
                       </button>
                       <button
                         onClick={() => handleAddTask(goal.id)}
                         className="text-[10px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded hover:bg-gray-200"
                       >
-                        + Task
+                        {t("addTask")}
                       </button>
                     </div>
                   </div>
@@ -341,7 +341,7 @@ export function ProjectHome() {
             {/* Tasks Section */}
             <section className="mb-8">
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                Tasks
+                {t("tasks")}
               </h2>
               <TaskList tasks={tasks} agents={agents} onUpdate={loadData} />
             </section>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface Preset {
@@ -14,6 +15,7 @@ interface AddAgentDialogProps {
 }
 
 export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialogProps) {
+  const { t } = useTranslation();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [customName, setCustomName] = useState("");
 
@@ -60,8 +62,8 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Add Agent</h3>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Choose a role preset or create custom</p>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("addAgentTitle")}</h3>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{t("addAgentSubtitle")}</p>
         </div>
 
         <div className="p-5 space-y-2">
@@ -82,7 +84,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
                 type="text"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Custom agent name..."
+                placeholder={t("customAgentPlaceholder")}
                 className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400"
                 onKeyDown={(e) => e.key === "Enter" && handleCreateCustom()}
               />
@@ -91,7 +93,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
                 disabled={!customName.trim()}
                 className="px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40"
               >
-                Create
+                {t("create")}
               </button>
             </div>
           </div>
@@ -102,7 +104,7 @@ export function AddAgentDialog({ projectId, onCreated, onClose }: AddAgentDialog
             onClick={onClose}
             className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
           >
-            Cancel
+            {t("cancel")}
           </button>
         </div>
       </div>

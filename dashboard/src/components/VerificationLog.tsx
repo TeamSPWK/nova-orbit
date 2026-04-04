@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface Verification {
@@ -34,15 +35,16 @@ const SEVERITY_COLORS: Record<string, string> = {
   "hard-block": "text-red-600 font-semibold",
 };
 
-const DIM_LABELS: Record<string, string> = {
-  functionality: "Functionality",
-  dataFlow: "Data Flow",
-  designAlignment: "Design",
-  craft: "Craft",
-  edgeCases: "Edge Cases",
+const DIM_LABEL_KEYS: Record<string, string> = {
+  functionality: "dimFunctionality",
+  dataFlow: "dimDataFlow",
+  designAlignment: "dimDesignAlignment",
+  craft: "dimCraft",
+  edgeCases: "dimEdgeCases",
 };
 
 export function VerificationLog({ projectId }: VerificationLogProps) {
+  const { t } = useTranslation();
   const [verifications, setVerifications] = useState<Verification[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -65,7 +67,7 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
           >
             <div className="flex items-center gap-3">
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${VERDICT_COLORS[v.verdict]}`}>
-                {v.verdict.toUpperCase()}
+                {v.verdict === "pass" ? t("verdictPass") : v.verdict === "conditional" ? t("verdictConditional") : t("verdictFail")}
               </span>
               <span className={`text-xs ${SEVERITY_COLORS[v.severity]}`}>
                 {v.severity}
@@ -82,12 +84,12 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
             <div className="border-t border-gray-100 dark:border-gray-700 px-4 py-3 bg-gray-50/50 dark:bg-gray-800/50">
               {/* 5-Dimension Score Bar */}
               <div className="mb-4">
-                <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">5-Dimension Score</h4>
+                <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">{t("dimensionScore")}</h4>
                 <div className="space-y-1.5">
                   {Object.entries(v.dimensions).map(([key, dim]) => (
                     <div key={key} className="flex items-center gap-2">
                       <span className="text-[10px] text-gray-400 dark:text-gray-500 w-20 shrink-0">
-                        {DIM_LABELS[key] ?? key}
+                        {DIM_LABEL_KEYS[key] ? t(DIM_LABEL_KEYS[key]) : key}
                       </span>
                       <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                         <div
@@ -113,7 +115,7 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
               {v.issues.length > 0 && (
                 <div>
                   <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
-                    Issues ({v.issues.length})
+                    {t("issues")} ({v.issues.length})
                   </h4>
                   <div className="space-y-2">
                     {v.issues.map((issue, i) => (
