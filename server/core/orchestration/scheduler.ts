@@ -380,7 +380,9 @@ export function createScheduler(
       if (isRateLimit) {
         handleRateLimit(projectId);
       } else {
-        broadcast("task:updated", { taskId: task.id, status: "blocked", error: err.message });
+        // Read actual DB state — engine may have set status to 'todo' (rate-limit) or 'blocked'
+        const actual = db.prepare("SELECT * FROM tasks WHERE id = ?").get(task.id);
+        broadcast("task:updated", actual ?? { taskId: task.id, status: "blocked", error: err.message });
         log.error(`Scheduler: task "${task.title}" failed`, err);
 
         if (task.parent_task_id) {

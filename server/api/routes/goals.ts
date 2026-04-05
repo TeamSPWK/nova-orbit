@@ -72,10 +72,20 @@ export function createGoalRoutes(ctx: AppContext): Router {
     }
   });
 
-  // Delete goal
+  // Delete goal — kill sessions for in-progress tasks before CASCADE delete
   router.delete("/:id", (req, res) => {
-    const result = db.prepare("DELETE FROM goals WHERE id = ?").run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ error: "Goal not found" });
+    const goalId = req.params.id;
+    const goal = db.prepare("SELECT project_id FROM goals WHERE id = ?").get(goalId) as { project_id: string } | undefined;
+    if (!goal) return res.status(404).json({ error: "Goal not found" });
+    // Kill sessions for any in-progress tasks under this goal
+    const activeTasks = db.prepare(
+      "SELECT assignee_id FROM tasks WHERE goal_id = ? AND status IN ('in_progress', 'in_review') AND assignee_id IS NOT NULL",
+    ).all(goalId) as { assignee_id: string }[];
+    for (const t of activeTasks) {
+      ctx.sessionManager?.killSession(t.assignee_id);
+    }
+    db.prepare("DELETE FROM goals WHERE id = ?").run(goalId);
+    broadcast("project:updated", { projectId: goal.project_id });
     res.json({ success: true });
   });
 

@@ -294,8 +294,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
     }
 
     if (role) {
-      const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "pm", "backend", "frontend", "ux", "devops"];
-      if (!VALID_ROLES.includes(role)) {
+      if (!(VALID_ROLES as readonly string[]).includes(role)) {
         return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
       }
     }

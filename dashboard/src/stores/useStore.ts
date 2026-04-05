@@ -103,9 +103,14 @@ export const useStore = create<AppStore>((set) => ({
   tasks: [],
   setTasks: (tasks) => set({ tasks }),
   updateTask: (task) =>
-    set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === task.id ? task : t)),
-    })),
+    set((state) => {
+      const exists = state.tasks.some((t) => t.id === task.id);
+      return {
+        tasks: exists
+          ? state.tasks.map((t) => (t.id === task.id ? task : t))
+          : [...state.tasks, task],
+      };
+    }),
 
   connected: false,
   setConnected: (connected) => set({ connected }),

@@ -66,7 +66,7 @@ export function broadcastTaskUsage(
   });
 
   for (const client of wss.clients) {
-    if (client.readyState !== 1) continue;
+    if (client.readyState !== 1 || !(client as any).__authenticated) continue;
     try {
       client.send(message);
     } catch {
@@ -76,7 +76,7 @@ export function broadcastTaskUsage(
 }
 
 /**
- * Safe broadcast — skip clients that are not ready.
+ * Safe broadcast — skip clients that are not ready or not authenticated.
  */
 export function broadcastAgentOutput(
   wss: WebSocketServer,
@@ -90,7 +90,7 @@ export function broadcastAgentOutput(
   });
 
   for (const client of wss.clients) {
-    if (client.readyState !== 1) continue;
+    if (client.readyState !== 1 || !(client as any).__authenticated) continue;
     try {
       const ids = (client as any).__agentIds as Set<string> | undefined;
       if (ids?.has(agentId)) {

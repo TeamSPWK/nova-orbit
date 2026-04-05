@@ -243,12 +243,20 @@ export function createProjectRoutes(ctx: AppContext): Router {
     }
   });
 
-  // Delete project
+  // Delete project — stop scheduler queue + dev server before CASCADE delete
   router.delete("/:id", (req, res) => {
-    const result = db.prepare("DELETE FROM projects WHERE id = ?").run(req.params.id);
+    const projectId = req.params.id;
+    // Stop scheduler queue first to prevent accessing deleted resources
+    ctx.scheduler?.stopQueue(projectId);
+    // Kill any running agent sessions for this project
+    const agents = db.prepare("SELECT id FROM agents WHERE project_id = ?").all(projectId) as { id: string }[];
+    for (const a of agents) {
+      ctx.sessionManager?.killSession(a.id);
+    }
+    const result = db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
     if (result.changes === 0) return res.status(404).json({ error: "Project not found" });
-    ctx.devServerManager.stop(req.params.id);
-    broadcast("project:updated", { id: req.params.id, deleted: true });
+    ctx.devServerManager.stop(projectId);
+    broadcast("project:updated", { id: projectId, deleted: true });
     res.json({ success: true });
   });
 

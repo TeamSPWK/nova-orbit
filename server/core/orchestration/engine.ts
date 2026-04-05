@@ -194,9 +194,20 @@ When complete, provide a summary of changes made.
 `;
 
         const implResult = await session.send(implementationPrompt);
+        const implParsed = parseStreamJson(implResult.stdout);
+
+        // Update session token usage BEFORE killSession (which sets status='killed')
+        if (implParsed.usage) {
+          db.prepare(
+            "UPDATE sessions SET token_usage = token_usage + ? WHERE agent_id = ? AND status = 'active'",
+          ).run(
+            implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens,
+            task.assignee_id,
+          );
+        }
+
         // 구현 세션 즉시 정리 — verification에서 같은 agentId 충돌 방지
         sessionManager.killSession(task.assignee_id);
-        const implParsed = parseStreamJson(implResult.stdout);
         log.info(`Implementation complete for task "${task.title}"`, {
           cost: implParsed.usage?.totalCostUsd,
           tokens: implParsed.usage ? implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens : 0,
@@ -225,14 +236,6 @@ When complete, provide a summary of changes made.
             agentId: task.assignee_id,
             usage: implParsed.usage,
           });
-
-          // Update session token usage in DB
-          db.prepare(
-            "UPDATE sessions SET token_usage = token_usage + ? WHERE agent_id = ? AND status = 'active'",
-          ).run(
-            implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens,
-            task.assignee_id,
-          );
         }
 
         // Broadcast completion

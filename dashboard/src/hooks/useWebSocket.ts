@@ -14,6 +14,8 @@ export function useWebSocket() {
 
     let destroyed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_DELAY = 30000;
 
     function connect() {
       // API 키가 없으면 연결 지연 — initAuth() 완료 대기
@@ -27,6 +29,7 @@ export function useWebSocket() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        reconnectAttempts = 0; // Reset on successful connection
         useStore.getState().setConnected(true);
       };
 
@@ -134,7 +137,10 @@ export function useWebSocket() {
       ws.onclose = () => {
         useStore.getState().setConnected(false);
         if (!destroyed) {
-          reconnectTimer = setTimeout(connect, 3000);
+          // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 30s
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+          reconnectAttempts++;
+          reconnectTimer = setTimeout(connect, delay);
         }
       };
 

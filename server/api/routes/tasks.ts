@@ -172,9 +172,9 @@ export function createTaskRoutes(ctx: AppContext): Router {
     res.json(updated);
   });
 
-  // Bulk approve all in_review tasks for a project
+  // Bulk approve all in_review tasks for a project (only verified tasks unless force=true)
   router.post("/bulk-approve", (req, res) => {
-    const { projectId } = req.body;
+    const { projectId, force = false } = req.body;
     if (!projectId) return res.status(400).json({ error: "projectId is required" });
 
     const tasks = db.prepare(
@@ -182,7 +182,13 @@ export function createTaskRoutes(ctx: AppContext): Router {
     ).all(projectId) as any[];
 
     let approved = 0;
+    let skipped = 0;
     for (const task of tasks) {
+      // Skip unverified tasks unless force override
+      if (!task.verification_id && !force) {
+        skipped++;
+        continue;
+      }
       db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
         .run(task.id);
       updateGoalProgress(db, task.goal_id);
@@ -195,7 +201,7 @@ export function createTaskRoutes(ctx: AppContext): Router {
       "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
     ).run(projectId, `Bulk approved ${approved} tasks`);
 
-    res.json({ approved, total: tasks.length });
+    res.json({ approved, skipped, total: tasks.length });
   });
 
   // Reject task (governance gate: in_review → todo with feedback)
