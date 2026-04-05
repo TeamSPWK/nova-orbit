@@ -83,6 +83,7 @@ export const api = {
     create: (data: any) => request<any>("/goals", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request<any>(`/goals/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    delete: (id: string) => request<any>(`/goals/${id}`, { method: "DELETE" }),
   },
   tasks: {
     list: (projectId: string) => request<any[]>(`/tasks?projectId=${projectId}`),

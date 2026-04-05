@@ -459,6 +459,20 @@ const ko = {
   guideTip1: "Cmd+K (또는 Ctrl+K)로 커맨드 팔레트를 열어 빠른 액션을 실행하세요.",
   guideTip2: "? 키를 누르면 단축키 목록을 볼 수 있습니다.",
   guideTip3: "칸반 탭에서 드래그 앤 드롭으로 태스크를 관리하세요.",
+
+  // UX improvements (6-pack)
+  evaluationFailed: "평가 실패 — 검증 결과를 파싱하지 못했습니다",
+  retryVerification: "재검증",
+  deleteGoal: "목표 삭제",
+  deleteGoalConfirm: "이 목표와 관련 태스크를 삭제하시겠습니까?",
+  showMoreDone: "완료 {{count}}개 더보기",
+  showLessDone: "접기",
+  filterAll: "전체",
+  filterPass: "통과",
+  filterConditional: "조건부",
+  filterFail: "실패",
+  missionPlaceholderDetailed: "프로젝트 미션을 상세히 입력하세요...\n예: 기술 스택, 목표, 제약 조건, 타겟 사용자 등",
+  viewGuide: "가이드",
 } as const;
 
 export default ko;

@@ -459,6 +459,20 @@ const en = {
   guideTip1: "Press Cmd+K (or Ctrl+K) to open the command palette for quick actions.",
   guideTip2: "Press ? to see all keyboard shortcuts.",
   guideTip3: "Use the Kanban tab for drag-and-drop task management.",
+
+  // UX improvements (6-pack)
+  evaluationFailed: "Evaluation failed — could not parse verification result",
+  retryVerification: "Re-verify",
+  deleteGoal: "Delete goal",
+  deleteGoalConfirm: "Delete this goal and its related tasks?",
+  showMoreDone: "Show {{count}} more done",
+  showLessDone: "Collapse",
+  filterAll: "All",
+  filterPass: "Pass",
+  filterConditional: "Conditional",
+  filterFail: "Fail",
+  missionPlaceholderDetailed: "Describe the project mission in detail...\nE.g. tech stack, goals, constraints, target users",
+  viewGuide: "Guide",
 } as const;
 
 export default en;

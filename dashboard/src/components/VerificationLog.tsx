@@ -44,12 +44,27 @@ const DIM_LABEL_KEYS: Record<string, string> = {
   edgeCases: "dimEdgeCases",
 };
 
+const FILTER_OPTIONS = [
+  { key: "all", labelKey: "filterAll" },
+  { key: "pass", labelKey: "filterPass" },
+  { key: "conditional", labelKey: "filterConditional" },
+  { key: "fail", labelKey: "filterFail" },
+] as const;
+
+const FILTER_CHIP_COLORS: Record<string, string> = {
+  all: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600",
+  pass: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700",
+  conditional: "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-700",
+  fail: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-300 dark:border-red-700",
+};
+
 export function VerificationLog({ projectId }: VerificationLogProps) {
   const { t } = useTranslation();
   const [verifications, setVerifications] = useState<Verification[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creatingFix, setCreatingFix] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>("all");
 
   useEffect(() => {
     api.verifications.list(projectId).then(setVerifications);
@@ -66,6 +81,8 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
     }
   };
 
+  const filtered = filter === "all" ? verifications : verifications.filter((v) => v.verdict === filter);
+
   if (verifications.length === 0) {
     return (
       <div className="py-6 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
@@ -77,9 +94,35 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
   return (
     <>
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+      {/* Filter chips */}
+      <div className="flex gap-1.5 mb-3 flex-wrap">
+        {FILTER_OPTIONS.map((opt) => (
+          <button
+            key={opt.key}
+            onClick={() => setFilter(opt.key)}
+            className={`text-[11px] px-2.5 py-0.5 rounded-full border font-medium transition-colors ${
+              filter === opt.key
+                ? FILTER_CHIP_COLORS[opt.key]
+                : "bg-transparent text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+            }`}
+          >
+            {t(opt.labelKey)}
+          </button>
+        ))}
+      </div>
     <div className="space-y-3">
-      {verifications.map((v) => (
+      {filtered.map((v) => {
+        const allZero = Object.values(v.dimensions).every((d) => d.value === 0);
+        return (
         <div key={v.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-[#25253d]">
+          {/* Parse failure warning banner */}
+          {allZero && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
+              <span className="text-yellow-600 dark:text-yellow-400 text-xs font-medium">
+                ⚠ {t("evaluationFailed")}
+              </span>
+            </div>
+          )}
           {/* Header */}
           <div className="w-full flex items-center justify-between px-4 py-3">
             <button
@@ -183,7 +226,8 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
     </>
   );

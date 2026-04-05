@@ -98,7 +98,17 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
 
         const runResult = await session.send(evaluationPrompt);
         const parsed = parseStreamJson(runResult.stdout);
-        const result = parseVerificationResult(taskId, parsed.text, opts.scope, evaluatorId);
+        let result = parseVerificationResult(taskId, parsed.text, opts.scope, evaluatorId);
+
+        // Retry once if parse failed (all dimensions score 0)
+        const allZero = Object.values(result.dimensions).every((d) => d.value === 0);
+        if (allZero && result.verdict === "fail") {
+          log.info("Parse failed, retrying with explicit JSON reminder...");
+          const retryPrompt = `이전 응답에서 JSON을 파싱하지 못했습니다. 반드시 \`\`\`json 블록으로만 응답하세요.\n\n${evaluationPrompt}`;
+          const retryResult = await session.send(retryPrompt);
+          const retryParsed = parseStreamJson(retryResult.stdout);
+          result = parseVerificationResult(taskId, retryParsed.text, opts.scope, evaluatorId);
+        }
 
         // Store result
         db.prepare(`
@@ -159,35 +169,34 @@ Score each dimension 0-10 with notes:
 
 ## Output Format
 
-Respond in this EXACT JSON format:
+CRITICAL: Your response MUST contain a valid JSON block wrapped in \`\`\`json ... \`\`\`.
+Do NOT include any text outside the JSON block.
+If you cannot evaluate a dimension, score it 0 and explain why in the notes field.
+
 \`\`\`json
 {
-  "verdict": "pass" | "conditional" | "fail",
-  "severity": "auto-resolve" | "soft-block" | "hard-block",
+  "verdict": "pass",
+  "severity": "auto-resolve",
   "dimensions": {
-    "functionality": { "value": 0-10, "notes": "..." },
-    "dataFlow": { "value": 0-10, "notes": "..." },
-    "designAlignment": { "value": 0-10, "notes": "..." },
-    "craft": { "value": 0-10, "notes": "..." },
-    "edgeCases": { "value": 0-10, "notes": "..." }
+    "functionality": { "value": 8, "notes": "Implementation matches requirements" },
+    "dataFlow": { "value": 7, "notes": "Data pipeline is complete" },
+    "designAlignment": { "value": 9, "notes": "Follows existing patterns" },
+    "craft": { "value": 8, "notes": "Good error handling" },
+    "edgeCases": { "value": 6, "notes": "Most edge cases handled" }
   },
-  "issues": [
-    {
-      "severity": "critical" | "high" | "warning" | "info",
-      "file": "path/to/file.ts",
-      "line": 42,
-      "message": "Description of issue",
-      "suggestion": "How to fix"
-    }
-  ]
+  "issues": []
 }
 \`\`\`
+
+Replace the example values above with your actual evaluation. Use this exact structure.
 
 Rules:
 - "Don't pass it — find the problem"
 - Any data loss / security / irreversible issue = hard-block
 - Failing tests or broken build = fail
 - If you cannot execute Layer 3 verification, issue "conditional" (not "pass")
+- verdict must be exactly one of: "pass", "conditional", "fail"
+- severity must be exactly one of: "auto-resolve", "soft-block", "hard-block"
 `;
 }
 
@@ -197,11 +206,17 @@ function parseVerificationResult(
   scope: VerificationScope,
   evaluatorSessionId: string,
 ): VerificationResult {
-  const defaultScore: Score = { value: 5, notes: "Could not evaluate" };
+  const defaultScore: Score = { value: 0, notes: "Evaluation failed — could not parse result" };
+  const parseErrorIssue: VerificationIssue = {
+    id: "issue-parse-error",
+    severity: "high",
+    message: "Evaluation parse error — the evaluator did not return valid JSON",
+    suggestion: "Re-run verification to get a proper evaluation result",
+  };
   const defaultResult: VerificationResult = {
     id: "",
     taskId,
-    verdict: "conditional" as Verdict,
+    verdict: "fail" as Verdict,
     scope,
     dimensions: {
       functionality: defaultScore,
@@ -210,7 +225,7 @@ function parseVerificationResult(
       craft: defaultScore,
       edgeCases: defaultScore,
     },
-    issues: [],
+    issues: [parseErrorIssue],
     severity: "soft-block" as Severity,
     evaluatorSessionId,
     createdAt: new Date().toISOString(),
@@ -222,7 +237,7 @@ function parseVerificationResult(
                       rawOutput.match(/\{[\s\S]*"verdict"[\s\S]*\}/);
 
     if (!jsonMatch) {
-      log.warn("Could not parse verification JSON, returning conditional");
+      log.warn("Could not parse verification JSON, returning fail");
       return defaultResult;
     }
 
@@ -231,7 +246,7 @@ function parseVerificationResult(
 
     return {
       ...defaultResult,
-      verdict: parsed.verdict ?? "conditional",
+      verdict: parsed.verdict ?? "fail",
       severity: parsed.severity ?? "soft-block",
       dimensions: {
         functionality: parsed.dimensions?.functionality ?? defaultScore,

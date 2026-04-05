@@ -36,6 +36,8 @@ interface TaskListProps {
   onUpdate?: () => void;
 }
 
+const DONE_PREVIEW_COUNT = 5;
+
 export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) {
   const { t } = useTranslation();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
@@ -45,6 +47,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [rejectingTask, setRejectingTask] = useState<{ id: string; title: string } | null>(null);
   const [taskUsage, setTaskUsage] = useState<Map<string, { costUsd: number; totalTokens: number }>>(new Map());
+  const [showAllDone, setShowAllDone] = useState(false);
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
@@ -188,6 +191,13 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
         const config = STATUS_COLORS[status];
         const labelKey = STATUS_LABEL_KEYS[status];
 
+        // done 상태: 5개 초과 시 접기
+        const isDone = status === "done";
+        const visibleTasks = isDone && !showAllDone && filtered.length > DONE_PREVIEW_COUNT
+          ? filtered.slice(0, DONE_PREVIEW_COUNT)
+          : filtered;
+        const hiddenCount = filtered.length - visibleTasks.length;
+
         return (
           <div key={status}>
             <div className="flex items-center gap-2 mb-2">
@@ -206,7 +216,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
               )}
             </div>
             <div className="space-y-1">
-              {filtered.map((task) => {
+              {visibleTasks.map((task) => {
                 const isRunning = runningTasks.has(task.id);
                 const seconds = elapsedSeconds[task.id] ?? 0;
                 const usage = taskUsage.get(task.id);
@@ -374,6 +384,16 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
                 );
               })}
             </div>
+            {isDone && filtered.length > DONE_PREVIEW_COUNT && (
+              <button
+                onClick={() => setShowAllDone((v) => !v)}
+                className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              >
+                {showAllDone
+                  ? t("showLessDone")
+                  : t("showMoreDone", { count: hiddenCount })}
+              </button>
+            )}
           </div>
         );
       })}

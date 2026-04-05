@@ -113,10 +113,13 @@ function TaskCard({ task, agents }: { task: Task; agents: Agent[] }) {
   );
 }
 
+const KANBAN_DONE_PREVIEW = 5;
+
 export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
   const { t } = useTranslation();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [showAllDone, setShowAllDone] = useState(false);
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
   const sensors = useSensors(
@@ -175,6 +178,11 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
       <div className="flex gap-3 overflow-x-auto pb-4">
         {COLUMNS.map((col) => {
           const columnTasks = tasks.filter((t) => t.status === col.id);
+          const isDone = col.id === "done";
+          const visibleTasks = isDone && !showAllDone && columnTasks.length > KANBAN_DONE_PREVIEW
+            ? columnTasks.slice(0, KANBAN_DONE_PREVIEW)
+            : columnTasks;
+          const hiddenCount = columnTasks.length - visibleTasks.length;
 
           return (
             <div
@@ -192,11 +200,11 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
 
               <SortableContext
                 id={col.id}
-                items={columnTasks.map((t) => t.id)}
+                items={visibleTasks.map((t) => t.id)}
                 strategy={verticalListSortingStrategy}
               >
                 <div className="px-2 pb-2 space-y-2 min-h-[60px]">
-                  {columnTasks.map((task) => (
+                  {visibleTasks.map((task) => (
                     <SortableCard
                       key={task.id}
                       task={task}
@@ -208,6 +216,16 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
                     <div className="text-[10px] text-gray-300 dark:text-gray-600 text-center py-4">
                       {t("dropHere")}
                     </div>
+                  )}
+                  {isDone && columnTasks.length > KANBAN_DONE_PREVIEW && (
+                    <button
+                      onClick={() => setShowAllDone((v) => !v)}
+                      className="w-full text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 py-1 text-center transition-colors"
+                    >
+                      {showAllDone
+                        ? t("showLessDone")
+                        : t("showMoreDone", { count: hiddenCount })}
+                    </button>
                   )}
                 </div>
               </SortableContext>

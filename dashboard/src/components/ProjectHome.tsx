@@ -205,6 +205,12 @@ export function ProjectHome() {
     setShowDialog("addTask");
   };
 
+  const handleDeleteGoal = async (goalId: string) => {
+    if (!window.confirm(t("deleteGoalConfirm"))) return;
+    await api.goals.delete(goalId);
+    loadData();
+  };
+
   const handleAddTaskSubmit = async (title: string) => {
     setShowDialog(null);
     if (!addTaskGoalId) return;
@@ -245,8 +251,11 @@ export function ProjectHome() {
     }
   };
 
-  const handleHeaderMissionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") saveHeaderMission();
+  const handleHeaderMissionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      saveHeaderMission();
+    }
     if (e.key === "Escape") cancelEditHeaderMission();
   };
 
@@ -385,16 +394,16 @@ export function ProjectHome() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{project.name}</h1>
           <div className="mt-1">
             {editingHeaderMission ? (
-              <div className="flex items-center gap-2">
-                <input
+              <div className="flex items-start gap-2">
+                <textarea
                   autoFocus
-                  type="text"
+                  rows={3}
                   value={headerMissionDraft}
                   onChange={(e) => setHeaderMissionDraft(e.target.value)}
                   onKeyDown={handleHeaderMissionKeyDown}
                   disabled={savingMission}
-                  className="flex-1 text-sm border border-blue-400 rounded px-2 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  placeholder={t("projectMissionPlaceholder")}
+                  className="flex-1 text-sm border border-blue-400 rounded px-2 py-1 text-gray-700 dark:text-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
+                  placeholder={t("missionPlaceholderDetailed")}
                 />
                 <button
                   onClick={saveHeaderMission}
@@ -484,7 +493,7 @@ export function ProjectHome() {
         <ProjectStats tasks={tasks} projectId={currentProjectId ?? undefined} />
 
         {/* Tabs */}
-        <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700 items-center">
           {(["overview", "agents", "kanban", "verification", "settings"] as Tab[]).map((tabId) => {
             const tabLabel: Record<Tab, string> = {
               overview: t("tabOverview"),
@@ -507,6 +516,13 @@ export function ProjectHome() {
               </button>
             );
           })}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("nova:show-guide"))}
+            title={t("viewGuide")}
+            className="ml-auto mb-2 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors text-sm font-medium w-5 h-5 flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500"
+          >
+            ?
+          </button>
         </div>
 
         {tab === "settings" ? (
@@ -604,6 +620,15 @@ export function ProjectHome() {
                         <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
                           {doneTasks.length}/{goalTasks.length} ({pct}%)
                         </span>
+                        <button
+                          onClick={() => handleDeleteGoal(goal.id)}
+                          title={t("deleteGoal")}
+                          className="text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 transition-colors p-0.5"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
+                        </button>
                         {tasks.some((t) => t.goal_id === goal.id) ? (
                           <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
                             {t("decomposed")}
