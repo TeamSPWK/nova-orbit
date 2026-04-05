@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
-const STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
+const STATUSES = ["pending_approval", "todo", "in_progress", "in_review", "done", "blocked"];
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
+  pending_approval: "statusPendingApproval",
   todo: "statusTodo",
   in_progress: "statusInProgress",
   in_review: "statusInReview",
@@ -25,6 +26,7 @@ interface Task {
   title: string;
   description?: string;
   status: string;
+  project_id?: string;
   assignee_id: string | null;
   verification_id: string | null;
 }
@@ -62,6 +64,10 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
   const [verification, setVerification] = useState<Verification | null>(null);
   const [status, setStatus] = useState(task.status);
   const [assigneeId, setAssigneeId] = useState<string>(task.assignee_id ?? "");
+  const [rejectReason, setRejectReason] = useState("");
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Load verification data if task has one
@@ -96,6 +102,36 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
     setAssigneeId(newAgentId);
     await api.tasks.update(task.id, { assignee_id: newAgentId || null });
     onUpdate?.();
+  };
+
+  const handleApprove = async () => {
+    setApproving(true);
+    try {
+      if (task.project_id) {
+        await api.orchestration.approveTask(task.project_id, task.id);
+      } else {
+        await api.tasks.approve(task.id);
+      }
+      onUpdate?.();
+      onClose();
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setRejecting(true);
+    try {
+      if (task.project_id) {
+        await api.orchestration.rejectTask(task.project_id, task.id, rejectReason || undefined);
+      } else {
+        await api.tasks.reject(task.id, rejectReason || undefined);
+      }
+      onUpdate?.();
+      onClose();
+    } finally {
+      setRejecting(false);
+    }
   };
 
   const VERDICT_COLORS: Record<string, string> = {
@@ -169,6 +205,51 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
               </select>
             </div>
           </div>
+
+          {/* Approval Gate — pending_approval 상태일 때만 표시 */}
+          {task.status === "pending_approval" && (
+            <div className="border border-amber-200 dark:border-amber-800 rounded-lg p-4 bg-amber-50 dark:bg-amber-900/20 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                  {t("approvalRequired")}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleApprove}
+                  disabled={approving || rejecting}
+                  className="flex-1 px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {approving ? t("approving") : t("approve")}
+                </button>
+                <button
+                  onClick={() => setShowRejectInput((v) => !v)}
+                  disabled={approving || rejecting}
+                  className="flex-1 px-3 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {t("reject")}
+                </button>
+              </div>
+              {showRejectInput && (
+                <div className="space-y-2">
+                  <textarea
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder={t("rejectFeedbackPlaceholder")}
+                    rows={3}
+                    className="w-full text-sm px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+                  />
+                  <button
+                    onClick={handleReject}
+                    disabled={rejecting || approving}
+                    className="w-full px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {rejecting ? t("rejecting") : t("rejectConfirm")}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Verification results */}
           {!verification && (

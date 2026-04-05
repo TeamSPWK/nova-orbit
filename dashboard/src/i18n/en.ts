@@ -75,6 +75,7 @@ const en = {
   stopAgent: "Stop",
 
   // TaskList status labels
+  statusPendingApproval: "Pending Approval",
   statusTodo: "Todo",
   statusInProgress: "In Progress",
   statusInReview: "In Review",
@@ -175,6 +176,10 @@ const en = {
   parentAgent: "Report to (parent agent)",
   noParent: "None (top-level)",
   bulkApprove: "Approve all {{count}}",
+  approveAll: "Approve All ({{count}})",
+  approvalRequired: "Approval Required",
+  approving: "Approving...",
+  rejecting: "Rejecting...",
   rateLimitTitle: "API Rate Limit Reached",
   rateLimitDesc: "Agent {{agent}} hit rate limit. Auto-retry in {{seconds}}s.",
 
@@ -517,6 +522,14 @@ const en = {
   dateGroupThisWeek: "This week",
   dateGroupOlder: "Older",
   showMoreLogs: "Show {{count}} more",
+
+  // Sprint 3: Transparency
+  systemErrorGeneric: "A system error occurred",
+  activitySystemError: "Error: {{message}}",
+  activityGitEvent: "Git event",
+  gitCommitted: "Committed {{count}} files",
+  gitPushed: "Pushed",
+  gitPrCreated: "PR created",
 } as const;
 
 export default en;

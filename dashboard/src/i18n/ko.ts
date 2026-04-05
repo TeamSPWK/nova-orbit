@@ -75,6 +75,7 @@ const ko = {
   stopAgent: "중지",
 
   // TaskList status labels
+  statusPendingApproval: "승인 대기",
   statusTodo: "할 일",
   statusInProgress: "진행 중",
   statusInReview: "검토 중",
@@ -175,6 +176,10 @@ const ko = {
   parentAgent: "소속 (상위 에이전트)",
   noParent: "없음 (최상위)",
   bulkApprove: "{{count}}개 전체 승인",
+  approveAll: "전체 승인 ({{count}})",
+  approvalRequired: "승인 필요",
+  approving: "승인 중...",
+  rejecting: "반려 중...",
   rateLimitTitle: "⚠️ API 사용량 한도 도달",
   rateLimitDesc: "{{agent}} 에이전트가 Rate Limit에 도달했습니다. {{seconds}}초 후 자동 재시도합니다.",
 
@@ -517,6 +522,14 @@ const ko = {
   dateGroupThisWeek: "이번 주",
   dateGroupOlder: "이전",
   showMoreLogs: "{{count}}개 더보기",
+
+  // Sprint 3: Transparency
+  systemErrorGeneric: "시스템 오류가 발생했습니다",
+  activitySystemError: "오류: {{message}}",
+  activityGitEvent: "Git 이벤트",
+  gitCommitted: "{{count}}개 파일 커밋",
+  gitPushed: "푸시 완료",
+  gitPrCreated: "PR 생성됨",
 } as const;
 
 export default ko;

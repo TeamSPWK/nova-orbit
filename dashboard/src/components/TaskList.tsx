@@ -4,9 +4,10 @@ import { api } from "../lib/api";
 import { TaskDetail } from "./TaskDetail";
 import { RejectDialog } from "./RejectDialog";
 
-const STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
+const STATUSES = ["pending_approval", "todo", "in_progress", "in_review", "done", "blocked"];
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
+  pending_approval: "statusPendingApproval",
   todo: "statusTodo",
   in_progress: "statusInProgress",
   in_review: "statusInReview",
@@ -15,6 +16,7 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, { color: string; bg: string }> = {
+  pending_approval: { color: "text-amber-600", bg: "bg-amber-50" },
   todo: { color: "text-gray-500", bg: "bg-gray-50" },
   in_progress: { color: "text-blue-600", bg: "bg-blue-50" },
   in_review: { color: "text-purple-600", bg: "bg-purple-50" },
@@ -177,7 +179,12 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
 
   const handleReject = async (taskId: string, feedback: string, autoRerun: boolean) => {
     setRejectingTask(null);
-    await api.tasks.reject(taskId, feedback || undefined);
+    const targetTask = tasks.find((t) => t.id === taskId);
+    if (targetTask?.status === "pending_approval" && projectId) {
+      await api.orchestration.rejectTask(projectId, taskId, feedback || undefined);
+    } else {
+      await api.tasks.reject(taskId, feedback || undefined);
+    }
     onUpdate?.();
 
     if (autoRerun) {
@@ -286,6 +293,32 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
               </option>
             ))}
           </select>
+
+          {/* Approval Gate: Approve/Reject for pending_approval tasks */}
+          {task.status === "pending_approval" && (
+            <>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (projectId) {
+                    await api.orchestration.approveTask(projectId, task.id);
+                  } else {
+                    await api.tasks.approve(task.id);
+                  }
+                  onUpdate?.();
+                }}
+                className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"
+              >
+                {t("approve")}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setRejectingTask({ id: task.id, title: task.title }); }}
+                className="text-[10px] px-2 py-0.5 rounded font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
+              >
+                {t("reject")}
+              </button>
+            </>
+          )}
 
           {/* Governance: Verify → Approve/Reject for in_review tasks */}
           {task.status === "in_review" && (
@@ -471,6 +504,17 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
                         onUpdate?.();
                       }}
                       className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600 ml-auto"
+                    >
+                      {t("bulkApprove", { count: filtered.length })}
+                    </button>
+                  )}
+                  {status === "pending_approval" && filtered.length > 1 && projectId && (
+                    <button
+                      onClick={async () => {
+                        await api.orchestration.approveAll(projectId);
+                        onUpdate?.();
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500 text-white hover:bg-amber-600 ml-auto"
                     >
                       {t("bulkApprove", { count: filtered.length })}
                     </button>

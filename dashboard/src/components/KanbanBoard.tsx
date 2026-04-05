@@ -20,11 +20,12 @@ import { api } from "../lib/api";
 import { TaskDetail } from "./TaskDetail";
 
 const COLUMNS = [
-  { id: "todo", labelKey: "statusTodo", color: "border-gray-300", bg: "bg-gray-50" },
-  { id: "in_progress", labelKey: "statusInProgress", color: "border-blue-400", bg: "bg-blue-50/50" },
-  { id: "in_review", labelKey: "statusInReview", color: "border-purple-400", bg: "bg-purple-50/50" },
-  { id: "done", labelKey: "statusDone", color: "border-green-400", bg: "bg-green-50/50" },
-  { id: "blocked", labelKey: "statusBlocked", color: "border-red-400", bg: "bg-red-50/50" },
+  { id: "pending_approval", labelKey: "statusPendingApproval", color: "border-amber-400", bg: "bg-amber-50/50", noDrag: true },
+  { id: "todo", labelKey: "statusTodo", color: "border-gray-300", bg: "bg-gray-50", noDrag: false },
+  { id: "in_progress", labelKey: "statusInProgress", color: "border-blue-400", bg: "bg-blue-50/50", noDrag: false },
+  { id: "in_review", labelKey: "statusInReview", color: "border-purple-400", bg: "bg-purple-50/50", noDrag: false },
+  { id: "done", labelKey: "statusDone", color: "border-green-400", bg: "bg-green-50/50", noDrag: false },
+  { id: "blocked", labelKey: "statusBlocked", color: "border-red-400", bg: "bg-red-50/50", noDrag: false },
 ] as const;
 
 interface Task {
@@ -33,6 +34,8 @@ interface Task {
   status: string;
   assignee_id: string | null;
   verification_id: string | null;
+  verification_verdict?: string | null;
+  verification_severity?: string | null;
 }
 
 interface Agent {
@@ -50,15 +53,17 @@ function SortableCard({
   task,
   agents,
   onCardClick,
+  noDrag = false,
 }: {
   task: Task;
   agents: Agent[];
   onCardClick: (taskId: string) => void;
+  noDrag?: boolean;
 }) {
   const { t } = useTranslation();
   const agent = agents.find((a) => a.id === task.assignee_id);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: task.id, data: { task } });
+    useSortable({ id: task.id, data: { task }, disabled: noDrag });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -70,14 +75,16 @@ function SortableCard({
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
+      {...(noDrag ? {} : attributes)}
       className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 shadow-sm hover:shadow dark:bg-gray-800 dark:border-gray-700 group relative"
     >
-      {/* Drag handle area — only drag listener here */}
-      <div
-        {...listeners}
-        className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-lg"
-      />
+      {/* Drag handle area — only drag listener here (skipped for noDrag columns) */}
+      {!noDrag && (
+        <div
+          {...listeners}
+          className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-lg"
+        />
+      )}
       {/* Clickable content above drag layer */}
       <div
         className="relative z-10"
@@ -90,9 +97,24 @@ function SortableCard({
               {agent.name}
             </span>
           )}
-          {task.verification_id && (
-            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded">
+          {task.verification_verdict ? (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+              task.verification_verdict === "pass"
+                ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                : task.verification_verdict === "fail"
+                ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
+                : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400"
+            }`}>
+              {task.verification_verdict.toUpperCase()}
+            </span>
+          ) : task.verification_id ? (
+            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400 rounded">
               {t("verified")}
+            </span>
+          ) : null}
+          {task.status === "pending_approval" && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">
+              {t("statusPendingApproval")}
             </span>
           )}
         </div>
@@ -164,6 +186,9 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
     const currentTask = tasks.find((t) => t.id === taskId);
     if (!currentTask || currentTask.status === targetStatus) return;
 
+    // pending_approval column is read-only — approval only via button
+    if (targetStatus === "pending_approval") return;
+
     // Update task status
     await api.tasks.update(taskId, { status: targetStatus });
     onUpdate?.();
@@ -220,6 +245,7 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
                       task={task}
                       agents={agents}
                       onCardClick={setSelectedTaskId}
+                      noDrag={col.noDrag}
                     />
                   ))}
                   {columnTasks.length === 0 && (

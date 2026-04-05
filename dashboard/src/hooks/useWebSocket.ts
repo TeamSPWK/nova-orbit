@@ -1,12 +1,14 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../stores/useStore";
+import { getApiKey } from "../lib/api";
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const token = getApiKey();
+    const wsUrl = `${protocol}//${window.location.host}/ws${token ? `?token=${token}` : ""}`;
 
     let destroyed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +107,13 @@ export function useWebSocket() {
             case "agent:status":
             case "project:updated":
               // Trigger a refetch — handled by components
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "system:error":
+              window.dispatchEvent(new CustomEvent("nova:system-error", { detail: msg.payload }));
+              break;
+            case "task:git":
+              window.dispatchEvent(new CustomEvent("nova:task-git", { detail: msg.payload }));
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
           }

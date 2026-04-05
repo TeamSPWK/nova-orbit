@@ -21,6 +21,8 @@ const TYPE_ICONS: Record<string, string> = {
   verification_fail: "✗",
   agent_started: "🤖",
   agent_stopped: "⏹",
+  "system:error": "⚠",
+  "task:git": "⬆",
 };
 
 function formatTime(iso: string): string {
@@ -54,6 +56,15 @@ function formatWsMessage(
     }
     case "project:updated":
       return t("activityProjectUpdated");
+    case "system:error":
+      return t("activitySystemError", { message: p.message ?? type });
+    case "task:git": {
+      const parts: string[] = [];
+      if (p.committed) parts.push(t("gitCommitted", { count: String(p.files ?? "") }));
+      if (p.pushed) parts.push(t("gitPushed"));
+      if (p.pr) parts.push(t("gitPrCreated"));
+      return parts.length > 0 ? parts.join(" → ") : t("activityGitEvent");
+    }
     default:
       return t("activityUnknown", { type });
   }
@@ -101,8 +112,28 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
       setActivities((prev) => [buildWsActivity(detail), ...prev].slice(0, 50));
     };
 
+    const errorHandler = (e: Event) => {
+      const payload = (e as CustomEvent).detail;
+      setActivities((prev) =>
+        [buildWsActivity({ type: "system:error", payload }), ...prev].slice(0, 50),
+      );
+    };
+
+    const gitHandler = (e: Event) => {
+      const payload = (e as CustomEvent).detail;
+      setActivities((prev) =>
+        [buildWsActivity({ type: "task:git", payload }), ...prev].slice(0, 50),
+      );
+    };
+
     window.addEventListener("nova:refresh", handler);
-    return () => window.removeEventListener("nova:refresh", handler);
+    window.addEventListener("nova:system-error", errorHandler);
+    window.addEventListener("nova:task-git", gitHandler);
+    return () => {
+      window.removeEventListener("nova:refresh", handler);
+      window.removeEventListener("nova:system-error", errorHandler);
+      window.removeEventListener("nova:task-git", gitHandler);
+    };
   }, [buildWsActivity]);
 
   if (loading) {
@@ -121,11 +152,13 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
     <div className="space-y-1.5 px-3 py-2">
       {activities.map((a) => (
         <div key={a.id} className="flex items-start gap-2 text-xs">
-          <span className="shrink-0 w-4 text-center">
+          <span className={`shrink-0 w-4 text-center ${a.type === "system:error" ? "text-red-500" : ""}`}>
             {TYPE_ICONS[a.type] ?? "•"}
           </span>
           <div className="min-w-0 flex-1">
-            <span className="text-gray-700 dark:text-gray-300 break-words">{a.message}</span>
+            <span className={`break-words ${a.type === "system:error" ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"}`}>
+              {a.message}
+            </span>
           </div>
           <span className="shrink-0 text-gray-300 dark:text-gray-600 tabular-nums">
             {formatTime(a.created_at)}

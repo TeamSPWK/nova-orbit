@@ -1,13 +1,38 @@
 const BASE = "/api";
 
+// Auth — API key management
+let apiKey: string | null = localStorage.getItem("nova-orbit-api-key");
+
+export function setApiKey(key: string): void {
+  apiKey = key;
+  localStorage.setItem("nova-orbit-api-key", key);
+}
+
+export function getApiKey(): string | null {
+  return apiKey;
+}
+
+export async function initAuth(): Promise<void> {
+  if (apiKey) return;
+  const res = await fetch("/api/auth/key?init=true");
+  if (res.ok) {
+    const data = await res.json();
+    setApiKey(data.key);
+  }
+}
+
 // Global server status — components can check this
 let serverDown = false;
 export function isServerDown() { return serverDown; }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    };
     const res = await fetch(`${BASE}${path}`, {
-      headers: { "Content-Type": "application/json" },
+      headers,
       ...options,
     });
     // Server responded — mark as up
@@ -39,6 +64,10 @@ export const api = {
     update: (id: string, data: any) =>
       request<any>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) => request<any>(`/projects/${id}`, { method: "DELETE" }),
+    getCost: (id: string) =>
+      request<{ costs: Array<{ agentId: string; agentName: string; totalTokens: number; totalCost: number }> }>(
+        `/projects/${id}/cost`,
+      ),
     startDevServer: (id: string) =>
       request<{ status: string; port: number; url: string }>(`/projects/${id}/dev-server/start`, { method: "POST" }),
     stopDevServer: (id: string) =>
@@ -154,5 +183,14 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ agentIds, message, projectId }),
       }),
+    approveTask: (projectId: string, taskId: string) =>
+      request<any>(`/orchestration/${projectId}/tasks/${taskId}/approve`, { method: "POST" }),
+    rejectTask: (projectId: string, taskId: string, reason?: string) =>
+      request<any>(`/orchestration/${projectId}/tasks/${taskId}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+    approveAll: (projectId: string) =>
+      request<{ approved: number }>(`/orchestration/${projectId}/tasks/approve-all`, { method: "POST" }),
   },
 };

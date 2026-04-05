@@ -165,6 +165,16 @@ export function ProjectHome() {
     };
   }, [currentProjectId]);
 
+  // Listen for system:error events — show as toast
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ message?: string }>).detail;
+      setToast(detail?.message ?? t("systemErrorGeneric"));
+    };
+    window.addEventListener("nova:system-error", handler);
+    return () => window.removeEventListener("nova:system-error", handler);
+  }, [t]);
+
   // Listen for CommandPalette navigation events
   useEffect(() => {
     const onGoTab = (e: Event) => {
@@ -234,6 +244,7 @@ export function ProjectHome() {
   const agentMap = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
   const activeTasks = useMemo(() => tasks.filter((t) => t.status === "in_progress" || t.status === "in_review"), [tasks]);
   const hasActiveTasks = activeTasks.length > 0;
+  const pendingApprovalCount = useMemo(() => tasks.filter((t) => t.status === "pending_approval").length, [tasks]);
 
   if (!project) {
     return <WelcomeGuide />;
@@ -953,6 +964,18 @@ export function ProjectHome() {
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                         Auto
                       </span>
+                    )}
+                    {pendingApprovalCount > 0 && currentProjectId && (
+                      <button
+                        onClick={async () => {
+                          await api.orchestration.approveAll(currentProjectId);
+                          loadData();
+                        }}
+                        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        {t("approveAll", { count: pendingApprovalCount })}
+                      </button>
                     )}
                     <button
                       onClick={handleToggleQueue}
