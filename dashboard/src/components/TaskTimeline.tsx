@@ -222,7 +222,7 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
                     {isExpanded ? (
                       <div className="max-h-40 overflow-y-auto space-y-0.5 py-0.5">
                         {output.full.map((line, i) => (
-                          <div key={i} className={`truncate ${i === output.full.length - 1 ? "text-gray-600 dark:text-gray-300" : ""}`}>
+                          <div key={i} className={`whitespace-pre-wrap break-all ${i === output.full.length - 1 ? "text-gray-600 dark:text-gray-300" : ""}`}>
                             {line}
                           </div>
                         ))}

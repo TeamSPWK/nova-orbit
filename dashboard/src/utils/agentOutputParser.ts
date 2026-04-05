@@ -58,7 +58,7 @@ export function parseAgentOutput(raw: string): AgentActivity | null {
     if (obj.type === "assistant" && obj.message?.content) {
       for (const block of obj.message.content) {
         if (block.type === "text" && block.text) {
-          const snippet = block.text.trim().split("\n")[0]?.slice(0, 80);
+          const snippet = block.text.trim().split("\n").slice(0, 3).join(" ").slice(0, 300);
           if (snippet) {
             return { type: "thinking", message: snippet };
           }
@@ -70,7 +70,7 @@ export function parseAgentOutput(raw: string): AgentActivity | null {
     if (obj.type === "content_block_delta" || obj.type === "content_block_start") {
       const text = obj.delta?.text ?? obj.content_block?.text ?? "";
       if (text.trim()) {
-        return { type: "text", message: text.trim().split("\n")[0]?.slice(0, 80) };
+        return { type: "text", message: text.trim().split("\n").slice(0, 3).join(" ").slice(0, 300) };
       }
     }
 
