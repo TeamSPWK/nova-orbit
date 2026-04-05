@@ -87,8 +87,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, preset_id: presetId }),
       }),
-    suggest: (mission: string, techStack?: any) =>
-      request<any[]>("/agents/suggest", { method: "POST", body: JSON.stringify({ mission, techStack }) }),
+    suggest: (mission: string, projectId?: string, techStack?: any) =>
+      request<any[]>("/agents/suggest", { method: "POST", body: JSON.stringify({ mission, project_id: projectId, techStack }) }),
     suggestAndCreate: (projectId: string, mission: string, techStack?: any) =>
       request<any>("/agents/suggest-and-create", {
         method: "POST",

@@ -166,10 +166,22 @@ export function createClaudeCodeAdapter() {
               if (code === 0) {
                 session.status = "completed";
                 session.emit("status", "completed");
+                log.info(`Claude Code completed`, {
+                  stdoutLen: stdout.length,
+                  stderrLen: stderr.length,
+                  sessionId: session.lastSessionId,
+                });
               } else {
                 session.status = "failed";
                 session.emit("status", "failed");
                 log.error(`Claude Code exited with code ${code}`, {
+                  stdoutLen: stdout.length,
+                  stderr: stderr.slice(0, 500),
+                });
+              }
+
+              if (stdout.trim() === "") {
+                log.warn(`Claude Code produced empty stdout (exit code: ${code})`, {
                   stderr: stderr.slice(0, 500),
                 });
               }

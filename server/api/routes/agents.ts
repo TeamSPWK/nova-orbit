@@ -3,8 +3,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppContext } from "../../index.js";
 import { getAgentPresets } from "../../core/agent/roles.js";
-import { suggestAgentsFromMission, getTeamPresets } from "../../core/agent/suggest.js";
+import { suggestAgentsFromMission, suggestFromProject, getTeamPresets } from "../../core/agent/suggest.js";
 import { resolvePrompt } from "../../core/agent/prompt-resolver.js";
+import { getPreset } from "../../core/agent/roles.js";
 
 export function createAgentRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -44,11 +45,14 @@ export function createAgentRoutes(ctx: AppContext): Router {
       const created: any[] = [];
       const idMap = new Map<string, string>(); // role → agent id
 
-      // First pass: create all agents
+      // First pass: create all agents with preset systemPrompt
       for (const a of preset.agents) {
+        const rolePreset = getPreset(a.role);
+        const systemPrompt = rolePreset?.systemPrompt ?? "";
+        const promptSource = systemPrompt ? "preset" : "auto";
         const result = db.prepare(
-          "INSERT INTO agents (project_id, name, role) VALUES (?, ?, ?)",
-        ).run(project_id, a.name, a.role);
+          "INSERT INTO agents (project_id, name, role, system_prompt, prompt_source) VALUES (?, ?, ?, ?, ?)",
+        ).run(project_id, a.name, a.role, systemPrompt, promptSource);
         const row = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid) as any;
         created.push(row);
         idMap.set(a.role, row.id);
@@ -72,30 +76,48 @@ export function createAgentRoutes(ctx: AppContext): Router {
     }
   });
 
-  // Suggest domain-specialized agents based on mission + tech stack
+  // Suggest domain-specialized agents based on project analysis + mission
   router.post("/suggest", (req, res) => {
-    const { mission, techStack } = req.body;
-    if (!mission) return res.status(400).json({ error: "mission is required" });
-    const suggestions = suggestAgentsFromMission(mission, techStack);
+    const { mission, techStack, project_id } = req.body;
+    if (!mission && !project_id) return res.status(400).json({ error: "mission or project_id is required" });
+
+    // If project_id provided, use smart analysis (reads actual project files)
+    if (project_id) {
+      const project = db.prepare("SELECT workdir FROM projects WHERE id = ?").get(project_id) as any;
+      if (project?.workdir) {
+        const suggestions = suggestFromProject(project.workdir, mission ?? undefined);
+        return res.json(suggestions);
+      }
+    }
+
+    // Fallback: keyword-only suggestion
+    const suggestions = suggestAgentsFromMission(mission ?? "", techStack);
     res.json(suggestions);
   });
 
-  // Auto-create suggested agents for a project
+  // Auto-create suggested agents for a project (with project analysis)
   router.post("/suggest-and-create", (req, res) => {
     const { project_id, mission, techStack } = req.body;
-    if (!project_id || !mission) {
-      return res.status(400).json({ error: "project_id and mission are required" });
+    if (!project_id) {
+      return res.status(400).json({ error: "project_id is required" });
     }
 
-    const suggestions = suggestAgentsFromMission(mission, techStack);
-    const created = [];
+    // Try smart analysis first, fallback to keyword-only
+    let suggestions: ReturnType<typeof suggestFromProject>;
+    const project = db.prepare("SELECT workdir FROM projects WHERE id = ?").get(project_id) as any;
+    if (project?.workdir) {
+      suggestions = suggestFromProject(project.workdir, mission ?? undefined);
+    } else {
+      suggestions = suggestAgentsFromMission(mission ?? "", techStack);
+    }
 
+    const created = [];
     for (const agent of suggestions) {
-      const suggestPromptSource = agent.systemPrompt.trim() ? "custom" : "auto";
+      const promptSource = agent.systemPrompt.trim() ? "preset" : "auto";
       const result = db.prepare(`
         INSERT INTO agents (project_id, name, role, system_prompt, prompt_source)
         VALUES (?, ?, ?, ?, ?)
-      `).run(project_id, agent.name, agent.role, agent.systemPrompt, suggestPromptSource);
+      `).run(project_id, agent.name, agent.role, agent.systemPrompt, promptSource);
 
       const row = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
       created.push(row);
@@ -230,7 +252,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: "project_id, name, and role are required" });
     }
 
-    const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "backend", "frontend", "ux", "devops"];
+    const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "pm", "backend", "frontend", "ux", "devops"];
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
     }
@@ -272,7 +294,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
     }
 
     if (role) {
-      const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "backend", "frontend", "ux", "devops"];
+      const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "pm", "backend", "frontend", "ux", "devops"];
       if (!VALID_ROLES.includes(role)) {
         return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
       }

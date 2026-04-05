@@ -43,12 +43,21 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
     usage: null,
   };
 
+  if (!rawOutput || rawOutput.trim() === "") {
+    result.errors.push("Empty stdout from Claude Code CLI — no output received");
+    return result;
+  }
+
   const lines = rawOutput.split("\n").filter(Boolean);
   result.lineCount = lines.length;
+
+  let jsonParsed = 0;
+  let jsonFailed = 0;
 
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line);
+      jsonParsed++;
 
       // Extract session ID
       if (parsed.session_id && !result.sessionId) {
@@ -98,8 +107,19 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
         result.errors.push(parsed.message ?? parsed.error ?? "Unknown error");
       }
     } catch {
-      // Non-JSON line, skip
+      jsonFailed++;
     }
+  }
+
+  // Report parsing issues
+  if (jsonFailed > 0 && jsonParsed === 0) {
+    result.errors.push(
+      `All ${lines.length} lines failed JSON parsing — stdout may not be stream-json format. First 200 chars: ${rawOutput.slice(0, 200)}`
+    );
+  } else if (result.text === "" && jsonParsed > 0) {
+    result.errors.push(
+      `Parsed ${jsonParsed} JSON lines but extracted no text — no assistant/result events found`
+    );
   }
 
   return result;

@@ -13,6 +13,7 @@ export interface AgentPreset {
   systemPrompt: string;
   capabilities: string[];
   verificationLevel: "standard" | "full";
+  order?: number;
 }
 
 // Resolve templates/agents/ relative to this file's location at runtime.
@@ -57,9 +58,10 @@ function loadPresets(): Map<string, AgentPreset> {
   return map;
 }
 
-/** Returns all available agent presets loaded from templates/agents/*.yaml */
+/** Returns all available agent presets, sorted by order field */
 export function getAgentPresets(): AgentPreset[] {
-  return Array.from(loadPresets().values());
+  return Array.from(loadPresets().values())
+    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
 }
 
 /** Returns the preset for a given role, or undefined if not found */

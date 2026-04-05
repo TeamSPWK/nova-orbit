@@ -197,9 +197,21 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
         const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");
         const parsed = parseStreamJson(result.stdout);
 
+        // Detect empty/failed response
+        if (parsed.text === "" && result.stdout.length > 0) {
+          const errMsg = parsed.errors.length > 0
+            ? parsed.errors.join("; ")
+            : `Parsed ${parsed.lineCount} lines but got empty text (exitCode: ${result.exitCode})`;
+          console.error(`[orchestration] Agent ${agent.name} (${agentId}): ${errMsg}`);
+          console.error(`[orchestration] Raw stdout first 500 chars:`, result.stdout.slice(0, 500));
+        }
+        if (parsed.text === "" && result.stdout.length === 0) {
+          console.error(`[orchestration] Agent ${agent.name} (${agentId}): Empty stdout — CLI produced no output (exitCode: ${result.exitCode}, stderr: ${result.stderr.slice(0, 300)})`);
+        }
+
         // If CTO agent: try to extract goal + tasks from response and auto-create
         let autoCreated = false;
-        if (agent.role === "cto") {
+        if (agent.role === "cto" && parsed.text !== "") {
           try {
             const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/) ??
                               parsed.text.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
@@ -244,23 +256,45 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
                   ).run(project.id, agentId, `CTO created goal "${goalDesc.slice(0, 50)}" with ${tasks.length} tasks`);
                 }
               }
+            } else {
+              console.warn(`[orchestration] CTO agent responded but no JSON block found — text response will be shown as-is`);
             }
-          } catch {
-            // JSON parsing failed — just show text result
+          } catch (ctoErr: any) {
+            console.error(`[orchestration] CTO JSON extraction failed:`, ctoErr.message);
           }
         }
 
-        broadcast("agent:prompt-complete", {
+        // Build broadcast payload — include errors if text is empty
+        const broadcastPayload: Record<string, unknown> = {
           agentId,
           result: parsed.text,
           exitCode: result.exitCode,
           autoCreated,
-        });
+        };
+        if (parsed.text === "" && parsed.errors.length > 0) {
+          broadcastPayload.error = parsed.errors.join("; ");
+        }
+        if (parsed.text === "" && result.exitCode !== 0) {
+          broadcastPayload.error = broadcastPayload.error
+            ? `${broadcastPayload.error} | stderr: ${result.stderr.slice(0, 300)}`
+            : `CLI exited with code ${result.exitCode}: ${result.stderr.slice(0, 300)}`;
+        }
+
+        broadcast("agent:prompt-complete", broadcastPayload);
+
+        // Broadcast usage data for StatusBar (same event as task execution)
+        if (parsed.usage) {
+          broadcast("task:usage", {
+            taskId: null,
+            agentId,
+            usage: parsed.usage,
+          });
+        }
 
         if (!autoCreated) {
           db.prepare(
             "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
-          ).run(project.id, agentId, `Direct prompt completed`);
+          ).run(project.id, agentId, parsed.text === "" ? `Direct prompt failed: empty response` : `Direct prompt completed`);
         }
       } catch (err: any) {
         broadcast("agent:prompt-complete", {

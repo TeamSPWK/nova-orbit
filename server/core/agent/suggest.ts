@@ -1,4 +1,8 @@
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createLogger } from "../../utils/logger.js";
+import { getPreset } from "./roles.js";
+import { analyzeProject } from "../project/analyzer.js";
 
 const log = createLogger("agent-suggest");
 
@@ -7,152 +11,244 @@ export interface SuggestedAgent {
   role: string;
   systemPrompt: string;
   reason: string;
+  source: "project-agents" | "tech-stack" | "preset";
 }
 
 /**
- * Suggest domain-specialized agents based on project mission + tech stack.
+ * Smart team suggestion — 2-layer:
  *
- * Rule-based (instant) — keyword matching for common domains.
- * Roles align with the org chart: cto, backend, frontend, ux, qa, reviewer, marketer, devops.
+ * 1. .claude/agents/*.md 가 있으면 → 그대로 사용. 파일 = 에이전트.
+ *    role 추론은 best-effort. 매칭 안 되면 "custom" — 문제 없음.
+ *    CLAUDE.md 내용은 각 에이전트 시스템 프롬프트 앞에 컨텍스트로 주입.
+ *
+ * 2. .claude/agents/ 없으면 → package.json 분석 + 프리셋 기반 기본 팀.
+ *    이 경우만 하드코딩 허용 (기본값이니까).
+ *
+ * reviewer/qa가 하나도 없으면 마지막에 추가 (Quality Gate 필수).
+ */
+export function suggestFromProject(
+  workdir: string,
+  mission?: string,
+): SuggestedAgent[] {
+  // ─── Layer 1: .claude/agents/*.md → 파일이 곧 에이전트 ────────────────
+  const projectAgents = loadProjectAgents(workdir);
+
+  if (projectAgents.length > 0) {
+    // CLAUDE.md를 읽어서 각 에이전트에 프로젝트 컨텍스트 주입
+    const claudeMd = loadClaudeMd(workdir);
+    const contextPrefix = claudeMd
+      ? `[Project Context from CLAUDE.md]\n${claudeMd.slice(0, 2000)}\n\n---\n\n`
+      : "";
+
+    const agents: SuggestedAgent[] = projectAgents.map((pa) => ({
+      name: pa.name,
+      role: pa.role,
+      systemPrompt: contextPrefix + pa.systemPrompt,
+      reason: `.claude/agents/${pa.file}`,
+      source: "project-agents" as const,
+    }));
+
+    // Quality Gate: reviewer 계열이 없으면 추가
+    const hasReviewer = agents.some((a) =>
+      a.role === "reviewer" || a.role === "qa" || a.name.toLowerCase().includes("review") || a.name.toLowerCase().includes("qa"),
+    );
+    if (!hasReviewer) {
+      const preset = getPreset("reviewer");
+      agents.push({
+        name: preset?.name ?? "Code Reviewer",
+        role: "reviewer",
+        systemPrompt: contextPrefix + (preset?.systemPrompt ?? ""),
+        reason: "Quality Gate 필수 (자동 추가)",
+        source: "preset",
+      });
+    }
+
+    log.info(`Loaded ${agents.length} agents from .claude/agents/`, {
+      agents: agents.map((a) => `${a.name}(${a.role})`),
+    });
+
+    return agents;
+  }
+
+  // ─── Layer 2: 프로젝트에 에이전트 정의 없음 → 분석 기반 기본 팀 ──────
+  return buildDefaultTeam(workdir, mission);
+}
+
+/**
+ * .claude/agents/ 없을 때: package.json 분석 + 프리셋 기반 기본 팀 생성
+ */
+function buildDefaultTeam(workdir: string, mission?: string): SuggestedAgent[] {
+  const agents: SuggestedAgent[] = [];
+  const seen = new Set<string>();
+
+  const add = (role: string, reason: string, customPrompt?: string) => {
+    if (seen.has(role)) return;
+    seen.add(role);
+    const preset = getPreset(role);
+    agents.push({
+      name: preset?.name ?? role,
+      role,
+      systemPrompt: customPrompt ?? preset?.systemPrompt ?? "",
+      reason,
+      source: customPrompt ? "tech-stack" : "preset",
+    });
+  };
+
+  try {
+    const { techStack } = analyzeProject(workdir);
+
+    const hasFrontend = techStack.frameworks.some((f) =>
+      ["React", "Vue", "Svelte", "Next.js"].includes(f),
+    );
+    const hasBackend = techStack.frameworks.some((f) =>
+      ["Express", "Fastify", "NestJS", "Django", "FastAPI", "Flask", "Spring Boot", "Gin", "Echo"].includes(f),
+    );
+
+    if (hasFrontend && hasBackend) {
+      add("cto", `Full-stack (${techStack.languages.join(", ")})`);
+    }
+    if (hasBackend || (!hasFrontend && !hasBackend)) {
+      add("backend", techStack.frameworks.filter((f) => !["React", "Vue", "Svelte", "Next.js", "TailwindCSS"].includes(f)).join(", ") || techStack.languages.join(", "));
+    }
+    if (hasFrontend) {
+      add("frontend", techStack.frameworks.filter((f) => ["React", "Vue", "Svelte", "Next.js"].includes(f)).join(", "));
+    }
+    if (techStack.testFramework) {
+      add("qa", `${techStack.testFramework} 감지`);
+    }
+  } catch {
+    // Fallback: 분석 실패 시 최소 팀
+    add("backend", "기본 구현 에이전트");
+    add("frontend", "기본 구현 에이전트");
+  }
+
+  add("reviewer", "Quality Gate 필수");
+
+  log.info(`Built default team (${agents.length} agents) for: "${workdir}"`);
+  return agents;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+interface ProjectAgentDef {
+  name: string;
+  role: string;
+  systemPrompt: string;
+  file: string;
+}
+
+/** Read .claude/agents/*.md — parse frontmatter + body as-is */
+function loadProjectAgents(workdir: string): ProjectAgentDef[] {
+  const agentsDir = join(workdir, ".claude", "agents");
+  if (!existsSync(agentsDir)) return [];
+
+  let files: string[];
+  try {
+    files = readdirSync(agentsDir).filter((f) => f.endsWith(".md"));
+  } catch {
+    return [];
+  }
+
+  const results: ProjectAgentDef[] = [];
+  for (const file of files) {
+    try {
+      const content = readFileSync(join(agentsDir, file), "utf-8");
+      if (!content.trim()) continue;
+
+      const parsed = parseFrontmatter(content);
+      const name = parsed.meta.name ?? file.replace(/\.md$/, "");
+
+      // role: best-effort from Nova Orbit preset roles. "custom" is fine.
+      const role = inferRole(name, parsed.meta.description ?? "", parsed.body);
+
+      results.push({ name, role, systemPrompt: parsed.body.trim(), file });
+    } catch {
+      continue;
+    }
+  }
+
+  return results;
+}
+
+function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  if (!match) return { meta: {}, body: content };
+
+  const meta: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const kv = line.match(/^(\w+)\s*:\s*(.+)/);
+    if (kv) meta[kv[1]] = kv[2].trim();
+  }
+  return { meta, body: match[2] };
+}
+
+/**
+ * Best-effort role inference — for UI display only, NOT for behavior.
+ * Returns "custom" if no confident match. That's perfectly fine.
+ */
+function inferRole(name: string, description: string, _body: string): string {
+  // Only use name + description (short, intentional text).
+  // Body is too noisy (mentions "api", "server", "test" in all contexts).
+  const text = `${name} ${description}`.toLowerCase();
+
+  const SIGNALS: Array<{ test: (t: string) => boolean; role: string }> = [
+    { test: (t) => /\bcto\b|tech lead|architect/.test(t), role: "cto" },
+    { test: (t) => /\bbackend\b|api[\s-]dev|\bapi\b.*개발|route handler/.test(t), role: "backend" },
+    { test: (t) => /\bfrontend\b|프론트엔드|\bui\b.*개발|\breact\b.*ui/.test(t), role: "frontend" },
+    { test: (t) => /\bux\b|\bdesign\b|디자인/.test(t), role: "ux" },
+    { test: (t) => /\bqa\b|\breview|검증|품질/.test(t), role: "reviewer" },
+    { test: (t) => /\bdevops\b|\bdeploy|인프라|ci\/cd/.test(t), role: "devops" },
+    { test: (t) => /\bmarket|seo|growth|마케팅/.test(t), role: "marketer" },
+  ];
+
+  for (const { test, role } of SIGNALS) {
+    if (test(text)) return role;
+  }
+
+  return "custom";
+}
+
+function loadClaudeMd(workdir: string): string | null {
+  for (const path of [join(workdir, "CLAUDE.md"), join(workdir, ".claude", "CLAUDE.md")]) {
+    try {
+      if (existsSync(path)) return readFileSync(path, "utf-8");
+    } catch { /* skip */ }
+  }
+  return null;
+}
+
+/**
+ * Legacy: keyword-only suggestion (used when workdir unavailable).
  */
 export function suggestAgentsFromMission(
   mission: string,
-  techStack?: { languages?: string[]; frameworks?: string[] },
+  _techStack?: { languages?: string[]; frameworks?: string[] },
 ): SuggestedAgent[] {
   const agents: SuggestedAgent[] = [];
-  const m = mission.toLowerCase();
+  const seen = new Set<string>();
 
-  // Always include backend + frontend as core implementation agents
-  agents.push({
-    name: "Backend Developer",
-    role: "backend",
-    systemPrompt: `You are a senior backend developer. Implement server-side features: APIs, database schemas, business logic, authentication. Analyze the existing codebase before writing. Run lint/type-check before finishing.`,
-    reason: "Core backend implementation agent",
-  });
-
-  agents.push({
-    name: "Frontend Developer",
-    role: "frontend",
-    systemPrompt: `You are a senior frontend developer. Implement UI components, pages, state management, and user interactions. Use React + TypeScript + TailwindCSS conventions. Focus on responsive design and accessibility.`,
-    reason: "Core frontend implementation agent",
-  });
-
-  // Domain-specific agents based on mission keywords
-  // Real Estate / PropTech
-  if (m.includes("부동산") || m.includes("real estate") || m.includes("property") || m.includes("proptech")) {
+  const add = (role: string, reason: string) => {
+    if (seen.has(role)) return;
+    seen.add(role);
+    const preset = getPreset(role);
     agents.push({
-      name: "Real Estate Domain Expert",
-      role: "custom",
-      systemPrompt: `You are a real estate technology specialist. You understand property listings, mortgage calculations, zoning regulations, title searches, and MLS data formats. When implementing features, ensure compliance with real estate industry standards and regulations. Apply domain knowledge of property valuations, closing processes, and lease management.`,
-      reason: "부동산 도메인 키워드 감지",
+      name: preset?.name ?? role,
+      role,
+      systemPrompt: preset?.systemPrompt ?? "",
+      reason,
+      source: "preset",
     });
-  }
+  };
 
-  // Finance / FinTech
-  if (m.includes("금융") || m.includes("finance") || m.includes("payment") || m.includes("결제") || m.includes("fintech") || m.includes("banking")) {
-    agents.push({
-      name: "Finance Domain Expert",
-      role: "custom",
-      systemPrompt: `You are a financial technology specialist. You understand payment processing, regulatory compliance (PCI-DSS, KYC/AML), financial calculations, transaction security, and audit trails. Ensure all financial operations are idempotent, all amounts use proper decimal handling, and all sensitive data is encrypted.`,
-      reason: "금융/결제 도메인 키워드 감지",
-    });
-  }
+  add("backend", "기본 구현 에이전트");
+  add("frontend", "기본 구현 에이전트");
+  add("reviewer", "Quality Gate 필수");
 
-  // Legal / LegalTech
-  if (m.includes("법률") || m.includes("legal") || m.includes("lawyer") || m.includes("contract") || m.includes("계약")) {
-    agents.push({
-      name: "Legal Domain Expert",
-      role: "custom",
-      systemPrompt: `You are a legal technology specialist. You understand document analysis, contract parsing, legal clause identification, compliance checking, and jurisdiction-specific regulations. Ensure all legal data processing maintains strict confidentiality and audit logging.`,
-      reason: "법률 도메인 키워드 감지",
-    });
-  }
-
-  // E-commerce
-  if (m.includes("쇼핑") || m.includes("ecommerce") || m.includes("e-commerce") || m.includes("shop") || m.includes("store") || m.includes("상품")) {
-    agents.push({
-      name: "E-commerce Specialist",
-      role: "custom",
-      systemPrompt: `You are an e-commerce technology specialist. You understand product catalogs, inventory management, cart/checkout flows, payment integration, order fulfillment, and recommendation engines. Optimize for conversion rates and handle edge cases like stock depletion and concurrent orders.`,
-      reason: "이커머스 도메인 키워드 감지",
-    });
-  }
-
-  // Healthcare / HealthTech
-  if (m.includes("의료") || m.includes("health") || m.includes("medical") || m.includes("hospital") || m.includes("진료")) {
-    agents.push({
-      name: "Healthcare Domain Expert",
-      role: "custom",
-      systemPrompt: `You are a healthcare technology specialist. You understand HIPAA compliance, EHR/EMR systems, medical data standards (HL7, FHIR), patient privacy, and clinical workflows. All implementations must prioritize data security and patient confidentiality.`,
-      reason: "의료 도메인 키워드 감지",
-    });
-  }
-
-  // Education / EdTech
-  if (m.includes("교육") || m.includes("education") || m.includes("learning") || m.includes("course") || m.includes("학습")) {
-    agents.push({
-      name: "EdTech Specialist",
-      role: "custom",
-      systemPrompt: `You are an education technology specialist. You understand LMS platforms, course structures, assessment engines, progress tracking, gamification, and adaptive learning. Design for accessibility and diverse learning styles.`,
-      reason: "교육 도메인 키워드 감지",
-    });
-  }
-
-  // AI / ML
-  if (m.includes("ai") || m.includes("machine learning") || m.includes("ml") || m.includes("인공지능") || m.includes("모델")) {
-    agents.push({
-      name: "AI/ML Engineer",
-      role: "custom",
-      systemPrompt: `You are an AI/ML engineer. You understand model training, inference optimization, prompt engineering, vector databases, embeddings, RAG pipelines, and API integration with LLM providers. Optimize for latency, cost, and accuracy.`,
-      reason: "AI/ML 키워드 감지",
-    });
-  }
-
-  // SaaS
-  if (m.includes("saas") || m.includes("subscription") || m.includes("구독") || m.includes("multi-tenant")) {
-    agents.push({
-      name: "SaaS Architect",
-      role: "custom",
-      systemPrompt: `You are a SaaS architecture specialist. You understand multi-tenancy, subscription billing, usage metering, onboarding flows, feature flags, and tenant isolation. Design for scalability from day one with proper data partitioning.`,
-      reason: "SaaS 키워드 감지",
-    });
-  }
-
-  // Marketing / Content
-  if (m.includes("마케팅") || m.includes("marketing") || m.includes("landing") || m.includes("랜딩") || m.includes("content")) {
-    agents.push({
-      name: "Growth Marketer",
-      role: "marketer",
-      systemPrompt: `You are a growth marketer. Write SEO-optimized content, design landing pages for conversion, and create growth strategies. Always consider target audience and core messaging.`,
-      reason: "마케팅/콘텐츠 키워드 감지",
-    });
-  }
-
-  // Frontend-heavy (from tech stack) → UX designer
-  const frameworks = techStack?.frameworks ?? [];
-  if (frameworks.some(f => ["React", "Vue", "Svelte", "Next.js"].includes(f))) {
-    agents.push({
-      name: "UX Designer",
-      role: "ux",
-      systemPrompt: `You are a UX designer who writes code. Create clean, accessible, and intuitive interfaces. Follow existing design system conventions. Focus on responsive layouts, consistent spacing, and user-friendly interactions.`,
-      reason: "프론트엔드 프레임워크 감지",
-    });
-  }
-
-  // Always include reviewer (Quality Gate)
-  agents.push({
-    name: "Code Reviewer",
-    role: "reviewer",
-    systemPrompt: `You are a code reviewer with an adversarial mindset. "Don't pass it — find the problem." Apply 5-dimension verification: Functionality, Data Flow, Design Alignment, Craft, Edge Cases. Classify issues as auto-resolve / soft-block / hard-block.`,
-    reason: "Quality Gate 필수 에이전트",
-  });
-
-  log.info(`Suggested ${agents.length} agents for mission: "${mission.slice(0, 50)}"`, {
-    agents: agents.map(a => a.name),
-  });
-
+  log.info(`Keyword-only suggestion (${agents.length} agents)`);
   return agents;
 }
+
+// ─── Team Presets (unchanged) ─────────────────────────────────────────────
 
 export interface TeamPreset {
   id: string;

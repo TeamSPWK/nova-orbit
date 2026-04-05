@@ -2,7 +2,7 @@ import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createDatabase, migrate } from "./db/schema.js";
 import { recoverOnStartup } from "./core/recovery.js";
 import { createProjectRoutes } from "./api/routes/projects.js";
@@ -118,6 +118,33 @@ export async function startServer(config: ServerConfig): Promise<void> {
   // Health check
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", version: "0.1.0" });
+  });
+
+  // Claude Code status — read from ~/.claude/tmux-status (written by statusline.sh)
+  const claudeStatusPath = resolve(process.env.HOME ?? "", ".claude", "tmux-status");
+  app.get("/api/claude-status", (_req, res) => {
+    try {
+      const raw = readFileSync(claudeStatusPath, "utf-8").trim();
+      const stat = statSync(claudeStatusPath);
+      // Parse: " Opus 4.6 (1M context) │ ctx:8% │ ↑6K ↓24K │ $1.87 │ 5h:8%"
+      const ctxMatch = raw.match(/ctx:(\d+)%/);
+      const tokenMatch = raw.match(/↑(\d+)K\s*↓(\d+)K/);
+      const costMatch = raw.match(/\$([0-9.]+)/);
+      const rateMatch = raw.match(/5h:(\d+)%/);
+      const modelMatch = raw.match(/^\s*(.+?)\s*│/);
+      res.json({
+        raw,
+        model: modelMatch?.[1]?.trim() ?? null,
+        contextPercent: ctxMatch ? Number(ctxMatch[1]) : null,
+        inputTokensK: tokenMatch ? Number(tokenMatch[1]) : null,
+        outputTokensK: tokenMatch ? Number(tokenMatch[2]) : null,
+        costUsd: costMatch ? Number(costMatch[1]) : null,
+        ratePercent: rateMatch ? Number(rateMatch[1]) : null,
+        updatedAt: stat.mtime.toISOString(),
+      });
+    } catch {
+      res.json({ raw: null, error: "Claude status unavailable" });
+    }
   });
 
   // Serve dashboard (production build)

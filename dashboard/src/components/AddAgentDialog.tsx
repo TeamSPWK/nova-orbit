@@ -122,7 +122,7 @@ export function AddAgentDialog({
     try {
       const [scanResult, suggestResult] = await Promise.allSettled([
         api.agents.scanProject(projectId),
-        mission ? api.agents.suggest(mission) : Promise.resolve([]),
+        api.agents.suggest(mission ?? "", projectId),
       ]);
 
       const scanned: ScannedAgent[] =
