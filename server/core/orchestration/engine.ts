@@ -4,7 +4,7 @@ import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createDelegationEngine } from "./delegation.js";
-import { executeGitWorkflow, type GitHubConfig } from "../project/git-workflow.js";
+import { executeGitWorkflow, mergeBranch, type GitHubConfig } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
 import type { VerificationScope } from "../../../shared/types.js";
@@ -675,6 +675,24 @@ async function runGitWorkflow(
       VALUES (?, ?, 'git_error', ?)
     `).run(task.project_id, task.assignee_id, `Git error on task "${task.title}": ${result.error}`);
   } else {
+    // main_direct + worktree: merge worktree branch into main at project root
+    const gitMode = effectiveConfig.gitMode ??
+      (effectiveConfig.prMode ? "pr" : effectiveConfig.autoPush ? "main_direct" : "branch_only");
+    if (gitMode === "main_direct" && worktreeBranch && result.committed) {
+      const projectRoot = _project.workdir;
+      if (projectRoot) {
+        const merged = mergeBranch(projectRoot, worktreeBranch, effectiveConfig.branch || "main");
+        if (merged) {
+          log.info(`Merged ${worktreeBranch} → ${effectiveConfig.branch || "main"}`);
+          // Push main
+          const { pushBranch } = await import("../project/git-workflow.js");
+          pushBranch(projectRoot, effectiveConfig.branch || "main");
+        } else {
+          log.warn(`Merge failed — worktree branch ${worktreeBranch} preserved for manual merge`);
+        }
+      }
+    }
+
     log.info(`Git workflow complete for task "${task.title}"`, {
       committed: result.committed,
       pushed: result.pushed,

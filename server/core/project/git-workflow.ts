@@ -84,6 +84,25 @@ export function pushBranch(workdir: string, branch: string): boolean {
 }
 
 /**
+ * Merge a branch into the target branch at the project root (not worktree).
+ * Used by main_direct mode: worktree branch → main merge.
+ */
+export function mergeBranch(projectWorkdir: string, sourceBranch: string, targetBranch: string): boolean {
+  try {
+    gitExec(projectWorkdir, ["checkout", targetBranch]);
+    gitExec(projectWorkdir, ["merge", sourceBranch, "--no-ff", "-m", `Merge ${sourceBranch} into ${targetBranch}`]);
+    log.info(`Merged ${sourceBranch} → ${targetBranch}`);
+    return true;
+  } catch (err: any) {
+    log.error(`Merge failed (${sourceBranch} → ${targetBranch}): ${err.message}`);
+    // Abort merge if in conflict state
+    try { gitExec(projectWorkdir, ["merge", "--abort"]); } catch { /* no merge to abort */ }
+    try { gitExec(projectWorkdir, ["checkout", targetBranch]); } catch { /* best effort */ }
+    return false;
+  }
+}
+
+/**
  * Create a pull request via the gh CLI.
  * Returns the PR URL on success, null on failure.
  */
