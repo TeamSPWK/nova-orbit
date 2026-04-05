@@ -77,29 +77,19 @@ export function removeWorktree(projectWorkdir: string, worktreePath: string, bra
     log.warn(`Failed to remove worktree: ${err.message}`);
   }
 
-  // 2. branch 정리 (merge 완료된 경우 -d, 아니면 -D force)
+  // 2. branch 정리 — merge된 branch만 삭제, unmerged branch는 보존 (코드 유실 방지)
   if (branch) {
     try {
-      // 먼저 soft delete 시도 (merge된 branch만)
       const result = spawnSync("git", ["branch", "-d", branch], {
         cwd: projectWorkdir,
         stdio: "pipe",
         timeout: 10_000,
       });
       if (result.status === 0) {
-        log.info(`Deleted branch: ${branch}`);
+        log.info(`Deleted merged branch: ${branch}`);
       } else {
-        // merge 안된 branch — force delete
-        const forceResult = spawnSync("git", ["branch", "-D", branch], {
-          cwd: projectWorkdir,
-          stdio: "pipe",
-          timeout: 10_000,
-        });
-        if (forceResult.status === 0) {
-          log.info(`Force-deleted unmerged branch: ${branch}`);
-        } else {
-          log.warn(`Failed to delete branch ${branch}: ${forceResult.stderr?.toString()}`);
-        }
+        // merge 안된 branch — 보존 (사용자가 수동 확인 가능)
+        log.info(`Keeping unmerged branch: ${branch} (contains uncommitted work)`);
       }
     } catch (err: any) {
       log.warn(`Failed to delete branch ${branch}: ${err.message}`);
@@ -138,9 +128,14 @@ export function cleanupStaleWorktrees(projectWorkdir: string): number {
         .map(b => b.trim())
         .filter(b => b && b.startsWith("agent/"));
       for (const b of branches) {
-        spawnSync("git", ["branch", "-D", b], { cwd: projectWorkdir, stdio: "pipe", timeout: 5_000 });
-        log.info(`Cleaned up stale branch: ${b}`);
-        cleaned++;
+        // merge된 branch만 삭제, unmerged는 보존
+        const delResult = spawnSync("git", ["branch", "-d", b], { cwd: projectWorkdir, stdio: "pipe", timeout: 5_000 });
+        if (delResult.status === 0) {
+          log.info(`Cleaned up stale merged branch: ${b}`);
+          cleaned++;
+        } else {
+          log.info(`Keeping unmerged stale branch: ${b}`);
+        }
       }
     }
   } catch { /* best effort */ }
