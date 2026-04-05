@@ -178,6 +178,20 @@ export async function startServer(config: ServerConfig): Promise<void> {
   const host = process.env.NOVA_ORBIT_HOST ?? "127.0.0.1";
   server.listen(port, host, () => {
     console.log(`  Server listening on ${host}:${port}`);
+
+    // Auto-resume queues for autopilot projects after startup
+    if (ctx.scheduler) {
+      const autopilotProjects = db.prepare(
+        "SELECT id, name, autopilot FROM projects WHERE status = 'active' AND autopilot != 'off'",
+      ).all() as { id: string; name: string; autopilot: string }[];
+
+      for (const p of autopilotProjects) {
+        if (!ctx.scheduler.isRunning(p.id)) {
+          console.log(`  Auto-starting queue for autopilot project "${p.name}" (mode: ${p.autopilot})`);
+          ctx.scheduler.startQueue(p.id);
+        }
+      }
+    }
   });
 
   // Graceful shutdown
