@@ -39,6 +39,7 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
   // Track last output per agent: short (1-line) + full (recent history)
   const [agentOutputs, setAgentOutputs] = useState<Record<string, { short: string; full: string[] }>>({});
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+  const expandedRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -179,11 +180,19 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
     };
   }, [agents, t]);
 
-  // Auto-scroll
+  // Auto-scroll timeline
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [events, activeTasks]);
+
+  // Auto-scroll expanded output panels to bottom
+  useEffect(() => {
+    for (const id of expandedAgents) {
+      const el = expandedRefs.current[id];
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [agentOutputs, expandedAgents]);
 
   const workingAgents = agents.filter((a) => a.status === "working");
   const inProgressTasks = activeTasks.filter((t) => t.status === "in_progress");
@@ -220,7 +229,10 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
                     }}
                   >
                     {isExpanded ? (
-                      <div className="max-h-40 overflow-y-auto space-y-0.5 py-0.5">
+                      <div
+                        ref={(el) => { if (task.assignee_id) expandedRefs.current[task.assignee_id] = el; }}
+                        className="max-h-40 overflow-y-auto space-y-0.5 py-0.5"
+                      >
                         {output.full.map((line, i) => (
                           <div key={i} className={`whitespace-pre-wrap break-all ${i === output.full.length - 1 ? "text-gray-600 dark:text-gray-300" : ""}`}>
                             {line}
