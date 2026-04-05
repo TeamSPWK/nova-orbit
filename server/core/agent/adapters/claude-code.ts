@@ -126,13 +126,19 @@ export function createClaudeCodeAdapter() {
 
             session.process = proc;
 
-            // Kill process after timeout — SIGTERM first, SIGKILL fallback
+            // Activity-based timeout: resets whenever the agent produces output.
+            // This prevents killing agents that are actively working on long tasks
+            // while still catching truly stuck processes.
             let sigkillTimer: ReturnType<typeof setTimeout> | null = null;
-            const timeout = setTimeout(() => {
-              if (session.process) {
-                log.warn(`Session ${session.id} timed out after ${TIMEOUT_MS / 1000}s, sending SIGTERM`);
+            let lastActivity = Date.now();
+
+            const checkTimeout = () => {
+              if (!session.process) return;
+              const idle = Date.now() - lastActivity;
+              if (idle >= TIMEOUT_MS) {
+                log.warn(`Session ${session.id} idle for ${Math.round(idle / 1000)}s (no output), sending SIGTERM`);
                 session.process.kill("SIGTERM");
-                const novaError = makeTimeoutError(TIMEOUT_MS);
+                const novaError = makeTimeoutError(idle);
                 session.emit("nova:error", novaError.toJSON());
                 sigkillTimer = setTimeout(() => {
                   if (session.process) {
@@ -140,20 +146,27 @@ export function createClaudeCodeAdapter() {
                     session.process.kill("SIGKILL");
                   }
                 }, SIGKILL_TIMEOUT_MS);
+              } else {
+                // Re-check after remaining idle allowance
+                idleTimer = setTimeout(checkTimeout, TIMEOUT_MS - idle + 100);
               }
-            }, TIMEOUT_MS);
+            };
+            let idleTimer: ReturnType<typeof setTimeout> = setTimeout(checkTimeout, TIMEOUT_MS);
+
             let stdout = "";
             let stderr = "";
 
             proc.stdout!.on("data", (chunk: Buffer) => {
               const text = chunk.toString();
               stdout += text;
+              lastActivity = Date.now(); // Reset idle timer on output
               session.emit("output", text);
             });
 
             proc.stderr!.on("data", (chunk: Buffer) => {
               const text = chunk.toString();
               stderr += text;
+              lastActivity = Date.now(); // Reset idle timer on stderr too
               session.emit("stderr", text);
             });
 
@@ -162,7 +175,7 @@ export function createClaudeCodeAdapter() {
             proc.stdin!.end();
 
             proc.on("close", (code: number | null) => {
-              clearTimeout(timeout);
+              clearTimeout(idleTimer);
               if (sigkillTimer) clearTimeout(sigkillTimer);
               session.process = null;
 

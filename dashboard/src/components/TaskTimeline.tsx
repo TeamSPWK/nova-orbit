@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
 interface TimelineEvent {
@@ -35,10 +35,28 @@ let eventCounter = 0;
 export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
   const { t } = useTranslation();
   const [events, setEvents] = useState<TimelineEvent[]>([]);
+  // Track last output snippet per agent for live activity display
+  const [agentOutputs, setAgentOutputs] = useState<Record<string, string>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+
+  // Listen for real-time agent output
+  useEffect(() => {
+    const onOutput = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d?.agentId || !d?.output) return;
+      // Extract last meaningful line (skip empty/whitespace)
+      const lines = d.output.split("\n").filter((l: string) => l.trim());
+      const last = lines[lines.length - 1]?.trim().slice(0, 120);
+      if (last) {
+        setAgentOutputs((prev) => ({ ...prev, [d.agentId]: last }));
+      }
+    };
+    window.addEventListener("nova:agent-output", onOutput);
+    return () => window.removeEventListener("nova:agent-output", onOutput);
+  }, []);
 
   // Listen for task lifecycle events
   useEffect(() => {
@@ -164,12 +182,20 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
         <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-700 space-y-2">
           {inProgressTasks.map((task) => {
             const agent = task.assignee_id ? agentMap[task.assignee_id] : null;
+            const lastOutput = task.assignee_id ? agentOutputs[task.assignee_id] : null;
             return (
-              <div key={task.id} className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
-                <span className="text-[11px] text-gray-700 dark:text-gray-300 truncate flex-1">{task.title}</span>
-                {agent && (
-                  <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{agent.name}</span>
+              <div key={task.id} className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                  <span className="text-[11px] text-gray-700 dark:text-gray-300 truncate flex-1">{task.title}</span>
+                  {agent && (
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{agent.name}</span>
+                  )}
+                </div>
+                {lastOutput && (
+                  <div className="ml-3.5 px-2 py-0.5 bg-gray-50 dark:bg-gray-800 rounded text-[10px] text-gray-500 dark:text-gray-400 font-mono truncate">
+                    {lastOutput}
+                  </div>
                 )}
               </div>
             );
