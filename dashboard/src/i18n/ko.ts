@@ -352,6 +352,36 @@ const ko = {
   runQueue: "큐 실행",
   stopQueue: "큐 중지",
   queueRunning: "큐 실행 중",
+  resumeNow: "지금 재개",
+  retryIn: "자동 재시도 대기 중",
+
+  // Autopilot
+  autopilotDescManual: "수동 제어 — Decompose와 Queue를 직접 실행",
+  autopilotDescGoal: "Goal 추가 시 자동 분해·할당·실행",
+  autopilotDescFull: "CTO가 미션 기반으로 Goal까지 자동 생성",
+  autoDecompose: "자동 분해 중",
+  autopilotModalTitle: "Autopilot 설정",
+  autopilotModalDesc: "자동화 수준을 선택하세요. 언제든지 변경할 수 있습니다.",
+  autopilotMode_off: "Manual",
+  autopilotMode_goal: "Goal Autopilot",
+  autopilotMode_full: "Full Autopilot",
+  autopilotModeDesc_off: "Decompose와 Queue를 직접 실행합니다. 모든 과정을 수동으로 제어합니다.",
+  autopilotModeDesc_goal: "Goal을 추가하면 자동으로 분해 → 할당 → 실행합니다. 스코프를 직접 통제할 수 있습니다.",
+  autopilotModeDesc_full: "CTO가 미션을 분석하여 Goal부터 자동 생성합니다. 완료 후 Goal 모드로 전환됩니다.",
+  autopilotFullNeedsMission: "프로젝트 미션이 필요합니다",
+  autopilotFullNeedsCto: "CTO 에이전트가 필요합니다",
+  autopilotFullSafety1: "Goal 최대 5개 자동 생성, 완료 후 Goal 모드로 전환",
+  autopilotFullSafety2: "Rate limit 발생 시 자동 일시정지 → 재시도",
+  recommended: "추천",
+  apply: "적용",
+
+  // Task Timeline
+  taskTimeline: "타임라인",
+  active: "진행 중",
+  timelineEmpty: "태스크를 실행하면 여기에 진행 상황이 표시됩니다",
+  agentsWorking: "{{count}}개 에이전트 작업 중",
+  delegatedSubtasks: "{{count}}개 서브태스크로 위임",
+  rateLimitDetected: "Rate limit 감지",
 
   // Agent pause/resume
   pauseAgent: "일시정지",

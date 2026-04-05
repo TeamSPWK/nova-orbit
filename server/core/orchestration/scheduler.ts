@@ -1,26 +1,42 @@
 import type { Database } from "better-sqlite3";
 import type { SessionManager } from "../agent/session.js";
 import { createOrchestrationEngine } from "./engine.js";
+import { createDelegationEngine } from "./delegation.js";
 import { createLogger } from "../../utils/logger.js";
 
 const log = createLogger("scheduler");
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 3000;
+const BACKOFF_BASE_MS = 60_000;
+const BACKOFF_MAX_MS = 300_000;
+const MAX_CONSECUTIVE_RATE_LIMITS = 3;
+const DEFAULT_MAX_CONCURRENCY = 3; // max parallel tasks per project
 
 export interface Scheduler {
   startQueue: (projectId: string) => void;
   stopQueue: (projectId: string) => void;
   isRunning: (projectId: string) => boolean;
+  isPaused: (projectId: string) => boolean;
+  resumeQueue: (projectId: string) => void;
+  getQueueState: (projectId: string) => QueueState;
+}
+
+export interface QueueState {
+  running: boolean;
+  paused: boolean;
+  activeTasks: number;
+  maxConcurrency: number;
+  rateLimitRetries: number;
+  nextRetryAt: string | null;
 }
 
 /**
- * Priority-based task scheduler.
+ * Parallel task scheduler with per-agent concurrency control.
  *
- * - Polls for 'todo' tasks with an assigned agent.
- * - Executes tasks in priority order: critical > high > medium > low,
- *   then by created_at (FIFO within the same priority).
- * - Max 1 concurrent task per project to avoid overwhelming Claude sessions.
- * - After a task completes, auto-starts the next queued task.
+ * - Each agent runs at most 1 task at a time (prevents session conflicts).
+ * - Different agents run in parallel (up to maxConcurrency).
+ * - Rate limit: pauses queue with exponential backoff.
+ * - 3 consecutive rate limits → full stop.
  */
 export function createScheduler(
   db: Database,
@@ -28,26 +44,103 @@ export function createScheduler(
   broadcast: (event: string, data: unknown) => void,
 ): Scheduler {
   const engine = createOrchestrationEngine(db, sessionManager, broadcast);
+  const delegationEngine = createDelegationEngine(db, sessionManager, broadcast);
 
-  // projectId → timer handle (undefined means stopped)
+  // projectId → timer handle
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  // projectId → whether a task is actively running
-  const running = new Map<string, boolean>();
+  // projectId → set of currently busy agent IDs
+  const busyAgents = new Map<string, Set<string>>();
 
-  function pickNextTask(projectId: string): any | null {
-    // Join with goals to get priority ordering
-    return db.prepare(`
+  // projectId → rate limit state
+  const pauseState = new Map<string, {
+    paused: boolean;
+    consecutiveRateLimits: number;
+    resumeTimer: ReturnType<typeof setTimeout> | null;
+    nextRetryAt: Date | null;
+  }>();
+
+  function getBusyAgents(projectId: string): Set<string> {
+    if (!busyAgents.has(projectId)) busyAgents.set(projectId, new Set());
+    return busyAgents.get(projectId)!;
+  }
+
+  function getPauseState(projectId: string) {
+    if (!pauseState.has(projectId)) {
+      pauseState.set(projectId, {
+        paused: false,
+        consecutiveRateLimits: 0,
+        resumeTimer: null,
+        nextRetryAt: null,
+      });
+    }
+    return pauseState.get(projectId)!;
+  }
+
+  /**
+   * Auto-assign unassigned todo tasks to available agents.
+   * Uses role matching similar to decompose logic.
+   */
+  function autoAssignUnassigned(projectId: string): void {
+    // Only auto-assign todo tasks (blocked tasks need human review)
+    const unassigned = db.prepare(
+      "SELECT id, title FROM tasks WHERE project_id = ? AND status = 'todo' AND assignee_id IS NULL",
+    ).all(projectId) as { id: string; title: string }[];
+
+    if (unassigned.length === 0) return;
+
+    const agents = db.prepare(
+      "SELECT id, role FROM agents WHERE project_id = ? AND role NOT IN ('cto', 'reviewer')",
+    ).all(projectId) as { id: string; role: string }[];
+
+    if (agents.length === 0) return;
+
+    // Round-robin assignment among worker agents
+    for (let i = 0; i < unassigned.length; i++) {
+      const agent = agents[i % agents.length];
+      db.prepare("UPDATE tasks SET assignee_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(agent.id, unassigned[i].id);
+    }
+
+    log.info(`Auto-assigned ${unassigned.length} unassigned tasks in project ${projectId}`);
+    broadcast("project:updated", { projectId });
+  }
+
+  /**
+   * Pick next executable tasks — returns multiple tasks for parallel execution.
+   * Skips tasks whose assignee is already busy.
+   */
+  function pickNextTasks(projectId: string, maxSlots: number): any[] {
+    if (maxSlots <= 0) return [];
+
+    // First, auto-assign any unassigned tasks
+    autoAssignUnassigned(projectId);
+
+    const busy = getBusyAgents(projectId);
+
+    const candidates = db.prepare(`
       SELECT t.* FROM tasks t
       LEFT JOIN goals g ON t.goal_id = g.id
       WHERE t.project_id = ?
         AND t.status = 'todo'
         AND t.assignee_id IS NOT NULL
       ORDER BY
+        CASE WHEN t.parent_task_id IS NOT NULL THEN 0 ELSE 1 END,
         CASE g.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
         t.created_at ASC
-      LIMIT 1
-    `).get(projectId) ?? null;
+      LIMIT 20
+    `).all(projectId) as any[];
+
+    // Filter out tasks whose agent is already busy, pick up to maxSlots
+    const picked: any[] = [];
+    const usedAgents = new Set(busy);
+    for (const task of candidates) {
+      if (picked.length >= maxSlots) break;
+      if (usedAgents.has(task.assignee_id)) continue; // agent already occupied
+      picked.push(task);
+      usedAgents.add(task.assignee_id);
+    }
+    return picked;
   }
 
   function scheduleNextPoll(projectId: string): void {
@@ -55,39 +148,136 @@ export function createScheduler(
     timers.set(projectId, handle);
   }
 
-  async function poll(projectId: string): Promise<void> {
-    // Queue was stopped while waiting
-    if (!timers.has(projectId)) return;
+  function handleRateLimit(projectId: string): void {
+    const state = getPauseState(projectId);
+    state.consecutiveRateLimits++;
+    state.paused = true;
 
-    // Another task is still running for this project
-    if (running.get(projectId)) {
-      scheduleNextPoll(projectId);
+    if (state.consecutiveRateLimits >= MAX_CONSECUTIVE_RATE_LIMITS) {
+      log.error(`Queue stopped: ${state.consecutiveRateLimits} consecutive rate limits for project ${projectId}`);
+      stopQueueInternal(projectId);
+      broadcast("queue:stopped", {
+        projectId,
+        reason: "rate_limit_exceeded",
+        consecutiveFailures: state.consecutiveRateLimits,
+        message: `Rate limit ${state.consecutiveRateLimits}회 연속 발생 — 큐가 정지되었습니다.`,
+      });
       return;
     }
 
-    const task = pickNextTask(projectId);
-    if (!task) {
-      // No tasks pending — keep polling in case new tasks arrive
-      scheduleNextPoll(projectId);
-      return;
-    }
+    const backoffMs = Math.min(
+      BACKOFF_BASE_MS * Math.pow(2, state.consecutiveRateLimits - 1),
+      BACKOFF_MAX_MS,
+    );
+    const retryAt = new Date(Date.now() + backoffMs);
+    state.nextRetryAt = retryAt;
 
-    running.set(projectId, true);
-    log.info(`Scheduler: executing task "${task.title}" (${task.priority}) for project ${projectId}`);
+    log.warn(`Queue paused: rate limit (${state.consecutiveRateLimits}/${MAX_CONSECUTIVE_RATE_LIMITS}), retry in ${backoffMs / 1000}s`);
+
+    broadcast("queue:paused", {
+      projectId,
+      reason: "rate_limit",
+      retryNumber: state.consecutiveRateLimits,
+      maxRetries: MAX_CONSECUTIVE_RATE_LIMITS,
+      nextRetryAt: retryAt.toISOString(),
+      backoffMs,
+    });
+
+    state.resumeTimer = setTimeout(() => {
+      state.paused = false;
+      state.nextRetryAt = null;
+      log.info(`Queue resumed after backoff for project ${projectId}`);
+      broadcast("queue:resumed", { projectId });
+      if (timers.has(projectId)) poll(projectId);
+    }, backoffMs);
+  }
+
+  function stopQueueInternal(projectId: string): void {
+    const handle = timers.get(projectId);
+    if (handle !== undefined) clearTimeout(handle);
+    timers.delete(projectId);
+
+    const state = getPauseState(projectId);
+    if (state.resumeTimer) clearTimeout(state.resumeTimer);
+    pauseState.delete(projectId);
+  }
+
+  /** Execute a single task, handling completion and delegation. */
+  async function executeOne(projectId: string, task: any): Promise<void> {
+    const busy = getBusyAgents(projectId);
+    busy.add(task.assignee_id);
+    const state = getPauseState(projectId);
+
+    log.info(`Scheduler: executing "${task.title}" via agent ${task.assignee_id}`);
 
     try {
       const result = await engine.executeTask(task.id);
       broadcast("task:updated", { taskId: task.id, ...result });
+
+      // Success — reset rate limit counter
+      state.consecutiveRateLimits = 0;
+
+      if (task.parent_task_id) {
+        delegationEngine.checkParentCompletion(task.parent_task_id);
+      }
     } catch (err: any) {
-      broadcast("task:updated", { taskId: task.id, status: "blocked", error: err.message });
-      log.error(`Scheduler: task "${task.title}" failed`, err);
+      const isRateLimit = err.message?.toLowerCase().includes("rate limit") ||
+        err.message?.toLowerCase().includes("429") ||
+        err.message?.toLowerCase().includes("too many requests");
+
+      if (isRateLimit) {
+        handleRateLimit(projectId);
+      } else {
+        broadcast("task:updated", { taskId: task.id, status: "blocked", error: err.message });
+        log.error(`Scheduler: task "${task.title}" failed`, err);
+
+        if (task.parent_task_id) {
+          delegationEngine.checkParentCompletion(task.parent_task_id);
+        }
+      }
     } finally {
-      running.set(projectId, false);
-      // Auto-start next task immediately after completion (no wait)
-      if (timers.has(projectId)) {
-        poll(projectId);
+      busy.delete(task.assignee_id);
+      // Trigger next poll to fill the freed slot — cancel existing timer to avoid double-poll
+      if (timers.has(projectId) && !getPauseState(projectId).paused) {
+        const existing = timers.get(projectId);
+        if (existing) clearTimeout(existing);
+        timers.set(projectId, setTimeout(() => poll(projectId), 100)); // near-immediate
       }
     }
+  }
+
+  async function poll(projectId: string): Promise<void> {
+    if (!timers.has(projectId)) return;
+
+    const state = getPauseState(projectId);
+    if (state.paused) {
+      scheduleNextPoll(projectId);
+      return;
+    }
+
+    const busy = getBusyAgents(projectId);
+    const availableSlots = DEFAULT_MAX_CONCURRENCY - busy.size;
+
+    if (availableSlots <= 0) {
+      // All slots occupied — wait for a task to finish
+      scheduleNextPoll(projectId);
+      return;
+    }
+
+    const tasks = pickNextTasks(projectId, availableSlots);
+
+    if (tasks.length === 0) {
+      scheduleNextPoll(projectId);
+      return;
+    }
+
+    // Launch all picked tasks in parallel (fire-and-forget, each manages its own lifecycle)
+    for (const task of tasks) {
+      executeOne(projectId, task); // intentionally not awaited
+    }
+
+    // Schedule next poll to check for more tasks
+    scheduleNextPoll(projectId);
   }
 
   return {
@@ -96,23 +286,50 @@ export function createScheduler(
         log.warn(`Queue already running for project ${projectId}`);
         return;
       }
-      log.info(`Starting queue for project ${projectId}`);
-      running.set(projectId, false);
-      // Set a placeholder so the queue is considered "active"
+      log.info(`Starting queue for project ${projectId} (max concurrency: ${DEFAULT_MAX_CONCURRENCY})`);
+      busyAgents.set(projectId, new Set());
+      pauseState.delete(projectId);
       timers.set(projectId, setTimeout(() => poll(projectId), 0));
     },
 
     stopQueue(projectId: string): void {
-      const handle = timers.get(projectId);
-      if (handle !== undefined) {
-        clearTimeout(handle);
-      }
-      timers.delete(projectId);
+      stopQueueInternal(projectId);
       log.info(`Stopped queue for project ${projectId}`);
     },
 
     isRunning(projectId: string): boolean {
       return timers.has(projectId);
+    },
+
+    isPaused(projectId: string): boolean {
+      return getPauseState(projectId).paused;
+    },
+
+    resumeQueue(projectId: string): void {
+      const state = getPauseState(projectId);
+      if (!state.paused) return;
+
+      if (state.resumeTimer) clearTimeout(state.resumeTimer);
+      state.paused = false;
+      state.consecutiveRateLimits = 0;
+      state.nextRetryAt = null;
+
+      log.info(`Queue manually resumed for project ${projectId}`);
+      broadcast("queue:resumed", { projectId });
+
+      if (timers.has(projectId)) poll(projectId);
+    },
+
+    getQueueState(projectId: string): QueueState {
+      const state = getPauseState(projectId);
+      return {
+        running: timers.has(projectId),
+        paused: state.paused,
+        activeTasks: getBusyAgents(projectId).size,
+        maxConcurrency: DEFAULT_MAX_CONCURRENCY,
+        rateLimitRetries: state.consecutiveRateLimits,
+        nextRetryAt: state.nextRetryAt?.toISOString() ?? null,
+      };
     },
   };
 }

@@ -22,15 +22,18 @@ const STATUS_COLORS: Record<string, { color: string; bg: string }> = {
   blocked: { color: "text-red-600", bg: "bg-red-50" },
 };
 
+interface TaskItem {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  assignee_id: string | null;
+  parent_task_id?: string | null;
+  verification_id: string | null;
+}
+
 interface TaskListProps {
-  tasks: Array<{
-    id: string;
-    title: string;
-    description: string;
-    status: string;
-    assignee_id: string | null;
-    verification_id: string | null;
-  }>;
+  tasks: TaskItem[];
   agents: Array<{ id: string; name: string }>;
   projectId?: string;
   onUpdate?: () => void;
@@ -58,9 +61,33 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
   const [taskUsage, setTaskUsage] = useState<Map<string, { costUsd: number; totalTokens: number }>>(new Map());
   const [showAllDone, setShowAllDone] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   const agentMap = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
-  const groupedTasks = useMemo(() => groupBy(tasks, "status"), [tasks]);
+
+  // Separate root tasks and subtasks
+  const rootTasks = useMemo(() => tasks.filter((t) => !t.parent_task_id), [tasks]);
+  const subtaskMap = useMemo(() => {
+    const map: Record<string, TaskItem[]> = {};
+    for (const t of tasks) {
+      if (t.parent_task_id) {
+        if (!map[t.parent_task_id]) map[t.parent_task_id] = [];
+        map[t.parent_task_id].push(t);
+      }
+    }
+    return map;
+  }, [tasks]);
+
+  const groupedTasks = useMemo(() => groupBy(rootTasks, "status"), [rootTasks]);
+
+  const toggleExpand = (taskId: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
   const isSearching = globalSearch.trim() !== "";
@@ -165,24 +192,42 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
     onUpdate?.();
   };
 
-  const renderTaskRow = (task: TaskListProps["tasks"][0]) => {
+  const renderTaskRow = (task: TaskItem, isSubtask = false) => {
     const isRunning = runningTasks.has(task.id);
     const seconds = elapsedSeconds[task.id] ?? 0;
     const usage = taskUsage.get(task.id);
     const config = STATUS_COLORS[task.status] ?? STATUS_COLORS.todo;
+    const childTasks = subtaskMap[task.id];
+    const hasChildren = childTasks && childTasks.length > 0;
+    const isExpanded = expandedParents.has(task.id);
 
     return (
-      <div
-        key={task.id}
-        onClick={(e) => handleTaskClick(e, task.id)}
-        className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors dark:bg-gray-800 cursor-pointer ${
-          isRunning
-            ? "border-blue-400 dark:border-blue-500 animate-pulse"
-            : "border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600"
-        } ${config.bg}`}
-      >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{task.title}</span>
+      <div key={task.id}>
+        <div
+          onClick={(e) => handleTaskClick(e, task.id)}
+          className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors dark:bg-gray-800 cursor-pointer ${
+            isSubtask ? "ml-6 border-dashed" : ""
+          } ${
+            isRunning
+              ? "border-blue-400 dark:border-blue-500 animate-pulse"
+              : "border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600"
+          } ${config.bg}`}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {hasChildren && (
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleExpand(task.id); }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 w-4 h-4 flex items-center justify-center"
+              >
+                <svg className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            )}
+            {isSubtask && (
+              <span className="text-gray-300 dark:text-gray-600 text-xs shrink-0">└</span>
+            )}
+            <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{task.title}</span>
           {task.verification_id && (
             <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
               {t("verified")}
@@ -320,6 +365,22 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
               </button>
             )}
         </div>
+        </div>
+        {/* Subtasks (expanded) */}
+        {hasChildren && isExpanded && (
+          <div className="space-y-1 mt-1">
+            {childTasks.map((st) => renderTaskRow(st, true))}
+          </div>
+        )}
+        {/* Subtask count badge (collapsed) */}
+        {hasChildren && !isExpanded && (
+          <button
+            onClick={() => toggleExpand(task.id)}
+            className="ml-6 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+          >
+            {childTasks.length} subtask{childTasks.length > 1 ? "s" : ""}
+          </button>
+        )}
       </div>
     );
   };

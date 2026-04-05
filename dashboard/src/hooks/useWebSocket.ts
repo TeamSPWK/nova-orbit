@@ -26,8 +26,22 @@ export function useWebSocket() {
           switch (msg.type) {
             case "task:updated":
               useStore.getState().updateTask(msg.payload);
+              window.dispatchEvent(new CustomEvent("nova:task-updated-event", { detail: msg.payload }));
+              break;
+            case "task:started":
+              window.dispatchEvent(new CustomEvent("nova:task-started", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "task:completed":
+              window.dispatchEvent(new CustomEvent("nova:task-completed", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "verification:result":
+              window.dispatchEvent(new CustomEvent("nova:verification-result", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
             case "agent:output":
+              // Still dispatch for AgentTerminal in agent detail view
               window.dispatchEvent(
                 new CustomEvent("nova:agent-output", {
                   detail: { agentId: msg.payload.agentId, output: msg.payload.output },
@@ -64,8 +78,31 @@ export function useWebSocket() {
               // Also trigger refresh
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
+            case "task:delegated":
+              window.dispatchEvent(new CustomEvent("nova:task-delegated", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "queue:paused":
+              window.dispatchEvent(new CustomEvent("nova:queue-paused", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "queue:resumed":
+              window.dispatchEvent(new CustomEvent("nova:queue-resumed", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "queue:stopped":
+              window.dispatchEvent(new CustomEvent("nova:queue-stopped", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "autopilot:mode-changed":
+              window.dispatchEvent(new CustomEvent("nova:autopilot-changed", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            case "autopilot:full-completed":
+              window.dispatchEvent(new CustomEvent("nova:autopilot-full-completed", { detail: msg.payload }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
             case "agent:status":
-            case "verification:result":
             case "project:updated":
               // Trigger a refetch — handled by components
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));

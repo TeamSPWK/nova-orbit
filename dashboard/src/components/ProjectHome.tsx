@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
-import { AgentChatLog } from "./AgentChatLog";
+import { TaskTimeline } from "./TaskTimeline";
 import { OrgChart } from "./OrgChart";
 import { AgentDetail } from "./AgentDetail";
 import { TaskList } from "./TaskList";
@@ -15,6 +15,7 @@ import { InputDialog } from "./InputDialog";
 import { Toast } from "./Toast";
 import { WelcomeGuide } from "./WelcomeGuide";
 import { ProjectStats } from "./ProjectStats";
+import { AutopilotModal } from "./AutopilotModal";
 
 type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
 
@@ -34,6 +35,17 @@ export function ProjectHome() {
 
   // Queue state
   const [queueRunning, setQueueRunning] = useState(false);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [queuePausedInfo, setQueuePausedInfo] = useState<{
+    nextRetryAt: string | null;
+    retryNumber: number;
+    maxRetries: number;
+  } | null>(null);
+
+  // Autopilot state
+  const [autopilotMode, setAutopilotMode] = useState<"off" | "goal" | "full">("off");
+  const [autopilotChanging, setAutopilotChanging] = useState(false);
+  const [showAutopilotModal, setShowAutopilotModal] = useState(false);
 
   // Dev server state
   const [devServerStatus, setDevServerStatus] = useState<{
@@ -74,13 +86,23 @@ export function ProjectHome() {
       api.agents.list(currentProjectId),
       api.goals.list(currentProjectId),
       api.tasks.list(currentProjectId),
-      api.orchestration.queueStatus(currentProjectId).catch(() => ({ running: false })),
+      api.orchestration.queueStatus(currentProjectId).catch(() => ({ running: false, paused: false, rateLimitRetries: 0, nextRetryAt: null as string | null })),
       api.projects.devServerStatus(currentProjectId).catch(() => ({ running: false, port: null, url: null })),
     ]).then(([a, g, t, qs, ds]) => {
       setAgents(a);
       setGoals(g);
       setTasks(t);
       setQueueRunning(qs.running);
+      setQueuePaused(qs.paused ?? false);
+      if (qs.paused && qs.nextRetryAt) {
+        setQueuePausedInfo({
+          nextRetryAt: qs.nextRetryAt,
+          retryNumber: qs.rateLimitRetries ?? 0,
+          maxRetries: 3,
+        });
+      } else {
+        setQueuePausedInfo(null);
+      }
       setDevServerStatus({ running: ds.running, port: ds.port ?? null, url: ds.url ?? null });
       setLoading(false);
     });
@@ -91,12 +113,57 @@ export function ProjectHome() {
     loadData();
   }, [loadData]);
 
+  // Sync autopilot mode from project data
+  useEffect(() => {
+    if (project) {
+      setAutopilotMode((project as any).autopilot ?? "off");
+    }
+  }, [project]);
+
   // Listen for WebSocket refresh events
   useEffect(() => {
     const handler = () => loadData();
     window.addEventListener("nova:refresh", handler);
     return () => window.removeEventListener("nova:refresh", handler);
   }, [loadData]);
+
+  // Listen for queue pause/resume/stop events
+  useEffect(() => {
+    const onPaused = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setQueuePaused(true);
+      setQueuePausedInfo({
+        nextRetryAt: detail.nextRetryAt,
+        retryNumber: detail.retryNumber,
+        maxRetries: detail.maxRetries,
+      });
+    };
+    const onResumed = () => {
+      setQueuePaused(false);
+      setQueuePausedInfo(null);
+    };
+    const onStopped = () => {
+      setQueueRunning(false);
+      setQueuePaused(false);
+      setQueuePausedInfo(null);
+    };
+    const onAutopilotChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.projectId === currentProjectId) {
+        setAutopilotMode(detail.mode);
+      }
+    };
+    window.addEventListener("nova:queue-paused", onPaused);
+    window.addEventListener("nova:queue-resumed", onResumed);
+    window.addEventListener("nova:queue-stopped", onStopped);
+    window.addEventListener("nova:autopilot-changed", onAutopilotChanged);
+    return () => {
+      window.removeEventListener("nova:queue-paused", onPaused);
+      window.removeEventListener("nova:queue-resumed", onResumed);
+      window.removeEventListener("nova:queue-stopped", onStopped);
+      window.removeEventListener("nova:autopilot-changed", onAutopilotChanged);
+    };
+  }, [currentProjectId]);
 
   // Listen for CommandPalette navigation events
   useEffect(() => {
@@ -165,6 +232,8 @@ export function ProjectHome() {
 
   // useMemo MUST be called before any early returns (Rules of Hooks)
   const agentMap = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
+  const activeTasks = useMemo(() => tasks.filter((t) => t.status === "in_progress" || t.status === "in_review"), [tasks]);
+  const hasActiveTasks = activeTasks.length > 0;
 
   if (!project) {
     return <WelcomeGuide />;
@@ -268,6 +337,32 @@ export function ProjectHome() {
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
 
+  const handleAutopilotChange = async (mode: "off" | "goal" | "full") => {
+    if (!currentProjectId || autopilotChanging) return;
+    setShowAutopilotModal(false);
+    setAutopilotChanging(true);
+    try {
+      const updated = await api.projects.update(currentProjectId, { autopilot: mode });
+      updateProject(updated);
+      setAutopilotMode(mode);
+    } catch (err: any) {
+      setToast(err.message ?? "Failed to change autopilot mode");
+    } finally {
+      setAutopilotChanging(false);
+    }
+  };
+
+  const handleResumeQueue = async () => {
+    if (!currentProjectId) return;
+    try {
+      await api.orchestration.resumeQueue(currentProjectId);
+      setQueuePaused(false);
+      setQueuePausedInfo(null);
+    } catch (err: any) {
+      setToast(err.message ?? "Failed to resume queue");
+    }
+  };
+
   const handleToggleQueue = async () => {
     if (!currentProjectId || queueToggling) return;
     setQueueToggling(true);
@@ -348,11 +443,7 @@ export function ProjectHome() {
     );
   };
 
-  // Derive in-progress task and its assigned agent for the chat panel
-  const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
-  const inProgressAgent = inProgressTask?.assignee_id
-    ? agents.find((a) => a.id === inProgressTask.assignee_id) ?? null
-    : null;
+  // activeTasks / hasActiveTasks are defined above (before early returns)
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -373,6 +464,15 @@ export function ProjectHome() {
         />
       )}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+      {showAutopilotModal && (
+        <AutopilotModal
+          currentMode={autopilotMode}
+          hasMission={!!project?.mission?.trim()}
+          hasCto={agents.some((a) => a.role === "cto")}
+          onConfirm={handleAutopilotChange}
+          onClose={() => setShowAutopilotModal(false)}
+        />
+      )}
       {showAddAgent && currentProjectId && (
         <AddAgentDialog
           projectId={currentProjectId}
@@ -537,6 +637,68 @@ export function ProjectHome() {
           <div className="flex gap-6">
             {/* Main column — scrollable, takes remaining width */}
             <div className="flex-1 min-w-0">
+              {/* Autopilot Trigger */}
+              <section className="mb-6">
+                <button
+                  onClick={() => setShowAutopilotModal(true)}
+                  disabled={autopilotChanging}
+                  className="flex items-center gap-2.5 px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-gray-300 dark:hover:border-gray-600 transition-colors w-full text-left"
+                >
+                  <span className={`text-xs font-semibold uppercase tracking-wider shrink-0 ${
+                    autopilotMode === "full"
+                      ? "text-orange-500 dark:text-orange-400"
+                      : autopilotMode === "goal"
+                        ? "text-blue-500 dark:text-blue-400"
+                        : "text-gray-400 dark:text-gray-500"
+                  }`}>
+                    Autopilot
+                  </span>
+                  <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${
+                    autopilotMode === "full"
+                      ? "bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400"
+                      : autopilotMode === "goal"
+                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                        : "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
+                  }`}>
+                    {autopilotMode === "off" ? "Manual" : autopilotMode === "goal" ? "Goal" : "Full"}
+                  </span>
+                  <span className="text-[11px] text-gray-400 dark:text-gray-500 flex-1 truncate">
+                    {autopilotMode === "off" && t("autopilotDescManual")}
+                    {autopilotMode === "goal" && t("autopilotDescGoal")}
+                    {autopilotMode === "full" && t("autopilotDescFull")}
+                  </span>
+                  {autopilotChanging && (
+                    <svg className="animate-spin w-3.5 h-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                  )}
+                  <svg className="w-4 h-4 text-gray-300 dark:text-gray-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              </section>
+
+              {/* Rate Limit Banner */}
+              {queuePaused && queuePausedInfo && (
+                <section className="mb-4">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-500 text-sm">&#9208;</span>
+                      <span className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                        Rate limit — {t("retryIn")} ({queuePausedInfo.retryNumber}/{queuePausedInfo.maxRetries})
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleResumeQueue}
+                      className="text-[11px] px-2.5 py-1 bg-amber-100 dark:bg-amber-800/40 text-amber-700 dark:text-amber-300 rounded hover:bg-amber-200 dark:hover:bg-amber-800/60 font-medium"
+                    >
+                      {t("resumeNow")}
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {/* Agents Section — compact summary */}
               <section className="mb-8">
                 <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -642,6 +804,14 @@ export function ProjectHome() {
                             {tasks.some((tk) => tk.goal_id === goal.id) ? (
                               <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
                                 {t("decomposed")}
+                              </span>
+                            ) : autopilotMode !== "off" ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-400 dark:text-blue-500 whitespace-nowrap flex items-center gap-1">
+                                <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                </svg>
+                                {t("autoDecompose")}
                               </span>
                             ) : (
                               <button
@@ -777,22 +947,30 @@ export function ProjectHome() {
                   <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
                     {t("tasks")}
                   </h2>
-                  <button
-                    onClick={handleToggleQueue}
-                    disabled={queueToggling}
-                    className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                      queueToggling
-                        ? "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-wait"
-                        : queueRunning
-                          ? "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
-                          : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50"
-                    }`}
-                  >
-                    {queueRunning && !queueToggling && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  <div className="flex items-center gap-2">
+                    {autopilotMode !== "off" && queueRunning && (
+                      <span className="text-[10px] text-blue-500 dark:text-blue-400 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                        Auto
+                      </span>
                     )}
-                    {queueToggling ? "..." : queueRunning ? t("stopQueue") : t("runQueue")}
-                  </button>
+                    <button
+                      onClick={handleToggleQueue}
+                      disabled={queueToggling}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                        queueToggling
+                          ? "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-wait"
+                          : queueRunning
+                            ? "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                            : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                      }`}
+                    >
+                      {queueRunning && !queueToggling && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                      )}
+                      {queueToggling ? "..." : queueRunning ? t("stopQueue") : t("runQueue")}
+                    </button>
+                  </div>
                 </div>
                 {queueRunning && (
                   <p className="text-[10px] text-blue-500 dark:text-blue-400 flex items-center gap-1 mb-2">
@@ -806,41 +984,30 @@ export function ProjectHome() {
 
             {/* Side panel — sticky, fixed width, scrollable within */}
             <div className="w-[360px] max-w-[calc(100vw-2rem)] shrink-0 sticky top-0 self-start max-h-[calc(100vh-140px)] overflow-y-auto space-y-4">
-              {/* Agent Output */}
+              {/* Task Timeline */}
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                 <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                  {inProgressTask ? (
+                  {hasActiveTasks ? (
                     <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />
                   ) : (
                     <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 shrink-0" />
                   )}
                   <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                    {t("agentOutput")}
+                    {t("taskTimeline")}
                   </span>
-                  {inProgressTask && (
-                    <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-                      — {inProgressTask.title}
+                  {hasActiveTasks && (
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                      {activeTasks.length} {t("active")}
                     </span>
                   )}
                 </div>
-                <div className={`${inProgressTask ? "h-[260px]" : "h-[120px]"} bg-white dark:bg-[#1e1e2e] transition-all`}>
-                  {inProgressTask ? (
-                    <AgentChatLog
-                      taskId={inProgressTask.id}
-                      agentName={inProgressAgent?.name}
-                      agentRole={inProgressAgent?.role}
-                      isWorking={inProgressAgent?.status === "working"}
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-gray-400 dark:text-gray-500 px-4 text-center">
-                      {t("waitingForAgent")}
-                    </div>
-                  )}
+                <div className={`${hasActiveTasks ? "h-[300px]" : "h-[120px]"} bg-white dark:bg-[#1e1e2e] transition-all`}>
+                  <TaskTimeline activeTasks={activeTasks} agents={agents} />
                 </div>
               </div>
 
               {/* Direct Prompt — only when no task is running */}
-              {!inProgressTask && agents.length > 0 && (
+              {!hasActiveTasks && agents.length > 0 && (
                 <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                   <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     <h2 className="text-xs font-medium text-gray-600 dark:text-gray-300">

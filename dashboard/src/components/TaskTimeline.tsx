@@ -1,0 +1,228 @@
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+interface TimelineEvent {
+  id: string;
+  type: "started" | "completed" | "failed" | "delegated" | "verified" | "rate-limit" | "info";
+  taskTitle: string;
+  agentName: string;
+  message?: string;
+  timestamp: Date;
+}
+
+interface TaskTimelineProps {
+  activeTasks: Array<{
+    id: string;
+    title: string;
+    status: string;
+    assignee_id: string | null;
+  }>;
+  agents: Array<{ id: string; name: string; role: string; status: string }>;
+}
+
+const TYPE_STYLES: Record<TimelineEvent["type"], { dot: string; text: string }> = {
+  started: { dot: "bg-blue-400 animate-pulse", text: "text-blue-600 dark:text-blue-400" },
+  completed: { dot: "bg-green-500", text: "text-green-600 dark:text-green-400" },
+  failed: { dot: "bg-red-500", text: "text-red-500 dark:text-red-400" },
+  delegated: { dot: "bg-purple-500", text: "text-purple-600 dark:text-purple-400" },
+  verified: { dot: "bg-green-400", text: "text-green-600 dark:text-green-400" },
+  "rate-limit": { dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
+  info: { dot: "bg-gray-400", text: "text-gray-500 dark:text-gray-400" },
+};
+
+let eventCounter = 0;
+
+export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
+  const { t } = useTranslation();
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+
+  // Listen for task lifecycle events
+  useEffect(() => {
+    const addEvent = (evt: TimelineEvent) => {
+      setEvents((prev) => [...prev.slice(-50), evt]); // keep last 50
+    };
+
+    const onTaskStarted = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d?.taskId) return;
+      const agent = d.agentId ? agentMap[d.agentId]?.name ?? "Agent" : "Agent";
+      addEvent({
+        id: `ev-${++eventCounter}`,
+        type: "started",
+        taskTitle: d.title ?? d.taskId,
+        agentName: agent,
+        timestamp: new Date(),
+      });
+    };
+
+    const onTaskCompleted = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d?.taskId) return;
+      const agent = d.agentId ? agentMap[d.agentId]?.name ?? "Agent" : "Agent";
+      addEvent({
+        id: `ev-${++eventCounter}`,
+        type: "completed",
+        taskTitle: d.title ?? d.taskId,
+        agentName: agent,
+        timestamp: new Date(),
+      });
+    };
+
+    const onTaskUpdated = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d) return;
+      const agent = d.agentId ? agentMap[d.agentId]?.name ?? "" : "";
+      if (d.status === "blocked" && d.error) {
+        addEvent({
+          id: `ev-${++eventCounter}`,
+          type: "failed",
+          taskTitle: d.title ?? d.taskId ?? "",
+          agentName: agent,
+          message: d.error?.slice(0, 100),
+          timestamp: new Date(),
+        });
+      }
+    };
+
+    const onDelegated = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      addEvent({
+        id: `ev-${++eventCounter}`,
+        type: "delegated",
+        taskTitle: "",
+        agentName: d.parentAgentName ?? "Agent",
+        message: t("delegatedSubtasks", { count: d.subtaskCount ?? 0 }),
+        timestamp: new Date(),
+      });
+    };
+
+    const onVerification = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d?.verdict) return;
+      addEvent({
+        id: `ev-${++eventCounter}`,
+        type: d.verdict === "pass" ? "verified" : "failed",
+        taskTitle: "",
+        agentName: "Quality Gate",
+        message: d.verdict.toUpperCase(),
+        timestamp: new Date(),
+      });
+    };
+
+    const onRateLimit = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      addEvent({
+        id: `ev-${++eventCounter}`,
+        type: "rate-limit",
+        taskTitle: "",
+        agentName: d.agentName ?? "System",
+        message: t("rateLimitDetected"),
+        timestamp: new Date(),
+      });
+    };
+
+    window.addEventListener("nova:task-started", onTaskStarted);
+    window.addEventListener("nova:task-completed", onTaskCompleted);
+    window.addEventListener("nova:task-updated-event", onTaskUpdated);
+    window.addEventListener("nova:task-delegated", onDelegated);
+    window.addEventListener("nova:verification-result", onVerification);
+    window.addEventListener("nova:rate-limit", onRateLimit);
+    // Also listen to generic refresh for task status changes
+    window.addEventListener("nova:refresh", (e) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.type === "task:updated") onTaskUpdated(e);
+    });
+
+    return () => {
+      window.removeEventListener("nova:task-started", onTaskStarted);
+      window.removeEventListener("nova:task-completed", onTaskCompleted);
+      window.removeEventListener("nova:task-updated-event", onTaskUpdated);
+      window.removeEventListener("nova:task-delegated", onDelegated);
+      window.removeEventListener("nova:verification-result", onVerification);
+      window.removeEventListener("nova:rate-limit", onRateLimit);
+    };
+  }, [agents, t]);
+
+  // Auto-scroll
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events, activeTasks]);
+
+  const workingAgents = agents.filter((a) => a.status === "working");
+  const inProgressTasks = activeTasks.filter((t) => t.status === "in_progress");
+  const hasActivity = inProgressTasks.length > 0 || events.length > 0;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Active Tasks — status cards */}
+      {inProgressTasks.length > 0 && (
+        <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-700 space-y-2">
+          {inProgressTasks.map((task) => {
+            const agent = task.assignee_id ? agentMap[task.assignee_id] : null;
+            return (
+              <div key={task.id} className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                <span className="text-[11px] text-gray-700 dark:text-gray-300 truncate flex-1">{task.title}</span>
+                {agent && (
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{agent.name}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Timeline */}
+      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {!hasActivity && (
+          <p className="text-xs text-gray-400 dark:text-gray-500 text-center pt-6">
+            {t("timelineEmpty")}
+          </p>
+        )}
+
+        {events.map((evt) => {
+          const style = TYPE_STYLES[evt.type];
+          return (
+            <div key={evt.id} className="flex items-start gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${style.dot}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[11px] font-medium ${style.text}`}>
+                    {evt.agentName}
+                  </span>
+                  {evt.taskTitle && (
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                      {evt.taskTitle}
+                    </span>
+                  )}
+                  <span className="text-[9px] text-gray-300 dark:text-gray-600 shrink-0 ml-auto">
+                    {evt.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </span>
+                </div>
+                {evt.message && (
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{evt.message}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Footer — working agent count */}
+      {workingAgents.length > 0 && (
+        <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+            {t("agentsWorking", { count: workingAgents.length })}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}

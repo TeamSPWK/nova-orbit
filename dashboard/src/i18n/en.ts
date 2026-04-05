@@ -352,6 +352,36 @@ const en = {
   runQueue: "Run Queue",
   stopQueue: "Stop Queue",
   queueRunning: "Queue Running",
+  resumeNow: "Resume Now",
+  retryIn: "Auto-retry pending",
+
+  // Autopilot
+  autopilotDescManual: "Manual — run Decompose and Queue yourself",
+  autopilotDescGoal: "Auto decompose, assign & execute when Goal is added",
+  autopilotDescFull: "CTO auto-generates Goals from mission",
+  autoDecompose: "Auto-decomposing",
+  autopilotModalTitle: "Autopilot Settings",
+  autopilotModalDesc: "Choose the automation level. You can change this anytime.",
+  autopilotMode_off: "Manual",
+  autopilotMode_goal: "Goal Autopilot",
+  autopilotMode_full: "Full Autopilot",
+  autopilotModeDesc_off: "Run Decompose and Queue manually. Full control over every step.",
+  autopilotModeDesc_goal: "Auto decompose, assign & execute when you add a Goal. You control the scope.",
+  autopilotModeDesc_full: "CTO analyzes mission and auto-generates Goals. Switches to Goal mode when done.",
+  autopilotFullNeedsMission: "Project mission is required",
+  autopilotFullNeedsCto: "CTO agent is required",
+  autopilotFullSafety1: "Max 5 goals auto-generated, switches to Goal mode when done",
+  autopilotFullSafety2: "Auto-pauses on rate limit with retry",
+  recommended: "Recommended",
+  apply: "Apply",
+
+  // Task Timeline
+  taskTimeline: "Timeline",
+  active: "active",
+  timelineEmpty: "Run a task to see progress here",
+  agentsWorking: "{{count}} agent(s) working",
+  delegatedSubtasks: "Delegated to {{count}} subtasks",
+  rateLimitDetected: "Rate limit detected",
 
   // Agent pause/resume
   pauseAgent: "Pause",

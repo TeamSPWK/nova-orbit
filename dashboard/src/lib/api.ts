@@ -126,11 +126,15 @@ export const api = {
     killAll: () =>
       request<any>("/orchestration/sessions/kill-all", { method: "POST" }),
     queueStatus: (projectId: string) =>
-      request<{ running: boolean }>(`/orchestration/projects/${projectId}/queue-status`),
+      request<{ running: boolean; paused: boolean; activeTasks: number; maxConcurrency: number; rateLimitRetries: number; nextRetryAt: string | null }>(
+        `/orchestration/projects/${projectId}/queue-status`,
+      ),
     startQueue: (projectId: string) =>
       request<any>(`/orchestration/projects/${projectId}/run-queue`, { method: "POST" }),
     stopQueue: (projectId: string) =>
       request<any>(`/orchestration/projects/${projectId}/stop-queue`, { method: "POST" }),
+    resumeQueue: (projectId: string) =>
+      request<any>(`/orchestration/projects/${projectId}/resume-queue`, { method: "POST" }),
     pauseAgent: (agentId: string) =>
       request<any>(`/orchestration/agents/${agentId}/pause`, { method: "POST" }),
     resumeAgent: (agentId: string) =>

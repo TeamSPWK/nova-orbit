@@ -15,6 +15,7 @@ import { createWSHandler } from "./api/websocket.js";
 import { createDevServerManager, type DevServerManager } from "./core/project/dev-server.js";
 import type { Database } from "better-sqlite3";
 import type { SessionManager } from "./core/agent/session.js";
+import type { Scheduler } from "./core/orchestration/scheduler.js";
 
 export interface ServerConfig {
   port: number;
@@ -27,6 +28,13 @@ export interface AppContext {
   broadcast: (event: string, data: unknown) => void;
   sessionManager?: SessionManager;
   devServerManager: DevServerManager;
+  // Set by orchestration routes, used by goals/projects autopilot triggers
+  orchestrationEngine?: {
+    decomposeGoal: (goalId: string) => Promise<{ taskCount: number; projectId: string }>;
+    generateGoalsFromMission: (projectId: string) => Promise<{ goalIds: string[] }>;
+    executeTask: (taskId: string, config?: any) => Promise<{ success: boolean; verdict: string }>;
+  };
+  scheduler?: Scheduler;
 }
 
 export async function startServer(config: ServerConfig): Promise<void> {

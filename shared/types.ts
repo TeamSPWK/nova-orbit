@@ -4,6 +4,7 @@
 
 export type ProjectSource = "new" | "local_import" | "github";
 export type ProjectStatus = "active" | "archived" | "paused";
+export type AutopilotMode = "off" | "goal" | "full";
 
 export interface Project {
   id: string;
@@ -14,6 +15,7 @@ export interface Project {
   github?: GitHubConfig;
   techStack?: TechStack;
   status: ProjectStatus;
+  autopilot: AutopilotMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -96,6 +98,7 @@ export interface Task {
   title: string;
   description: string;
   assigneeId: string | null;
+  parentTaskId: string | null;
   status: TaskStatus;
   verificationId: string | null;
   createdAt: string;
@@ -146,8 +149,14 @@ export type WSEventType =
   | "agent:status"
   | "agent:output"
   | "task:updated"
+  | "task:delegated"
   | "verification:result"
-  | "project:updated";
+  | "project:updated"
+  | "queue:paused"
+  | "queue:resumed"
+  | "queue:stopped"
+  | "autopilot:mode-changed"
+  | "autopilot:full-completed";
 
 export interface WSEvent {
   type: WSEventType;

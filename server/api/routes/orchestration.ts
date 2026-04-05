@@ -467,10 +467,11 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     }
   });
 
-  // Check queue status for a project
+  // Check queue status for a project (extended with pause info)
   router.get("/projects/:projectId/queue-status", (req, res) => {
     const { projectId } = req.params;
-    res.json({ running: scheduler.isRunning(projectId), projectId });
+    const state = scheduler.getQueueState(projectId);
+    res.json({ ...state, projectId });
   });
 
   // Start priority queue for a project
@@ -498,6 +499,25 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     scheduler.stopQueue(projectId);
     res.json({ status: "queue_stopped", projectId });
   });
+
+  // Resume a paused queue (manual resume after rate limit)
+  router.post("/projects/:projectId/resume-queue", (req, res) => {
+    const { projectId } = req.params;
+
+    const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    if (!scheduler.isPaused(projectId)) {
+      return res.status(400).json({ error: "Queue is not paused" });
+    }
+
+    scheduler.resumeQueue(projectId);
+    res.json({ status: "queue_resumed", projectId });
+  });
+
+  // Expose engine & scheduler on ctx for autopilot triggers in goals.ts / projects.ts
+  ctx.orchestrationEngine = engine;
+  ctx.scheduler = scheduler;
 
   return router;
 }

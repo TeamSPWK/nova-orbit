@@ -1,47 +1,42 @@
 # Nova State
 
 ## Current
-- **Goal**: Nova Orbit v0.1.0 — 전체 기능 + 보안 + CTO 자동화 + 멀티 에이전트
+- **Goal**: Nova Orbit v0.2.0 — Autopilot + Hierarchical Delegation + 병렬 실행
 - **Phase**: done
 - **Blocker**: none
 
 ## Tasks
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
-| 보안 강화 | done | PASS | CI/Path Traversal/상태머신/try-catch |
-| UX 오버홀 | done | PASS | 반려모달/검증흐름/i18n/반응형 |
-| Dev Server 관리 | done | PASS | 포트자동할당/시작중지/브라우저열기 |
-| Rate Limit 처리 | done | PASS | 감지+재시도+배너+todo복구 |
-| 직접 프롬프트 | done | PASS | 에이전트 명령+실시간출력+결과표시 |
-| CTO 자동 태스크 생성 | done | PASS | JSON파싱→Goal+Tasks 자동생성 |
-| 에이전트 조직 구조 | done | PASS | parent_id+N-depth+팀프리셋4종 |
-| 에이전트 탭 + 조직도 | done | PASS | OrgChart 재귀트리+CSS커넥터 |
-| 멀티 에이전트 프롬프트 | done | PASS | 순차릴레이+컨텍스트체이닝+CTO자동생성 |
-| 개요 UX 개편 | done | PASS | 칩→텍스트요약/인라인태스크/done접힘 |
-| 상태바 | done | PASS | 모델+토큰+경과시간 |
-| Agent Prompt Resolution | done | PASS | 4단계 Resolution Chain+경로Traversal방어+소스배지 |
-| 에이전트 탭 전면 개편 | done | PASS | 전체삭제/교체/DnD/퀵프롬프트/스마트팀/워크플로우모달 |
-| 대량 데이터 UX 리팩토링 | done | PASS | useMemo전면적용/접기패턴/그리드가이드/검증신뢰도 |
+| Autopilot 3단계 (off/goal/full) | done | PASS | Goal모드: 자동분해+실행, Full모드: mission→Goal생성+자동전환 |
+| Rate Limit 복원력 | done | PASS | Queue pause+backoff(60→120→240s)+3회정지+수동재개 |
+| Hierarchical Delegation | done | PASS | 2뎁스→3뎁스 위임, 서브태스크5개상한, depth1제한 |
+| 병렬 스케줄러 | done | PASS | 에이전트별1태스크, max3동시, busyAgents추적 |
+| TaskTimeline 패널 | done | PASS | AgentChatLog→이벤트타임라인, 복수태스크동시표시 |
+| AutopilotModal | done | PASS | 3단계선택모달, Full전제조건체크, 안전장치안내 |
+| QA 버그수정 (8건) | done | PASS | TDZ/sessionLeak/nullAssignee/conditionalVerdict 등 |
+| Nova Review 이슈수정 (6건) | done | PASS | SQL보간→바인딩/transitionTask중앙화/서브태스크검증스킵 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| 대량 데이터 UX 리팩토링 | 2026-04-05 | PASS | useMemo+접기+그리드가이드+검증로그날짜그룹 |
-| Agent Prompt Resolution | 2026-04-05 | PASS | 4단계 Resolution Chain + UI 배지 |
-| 에이전트 탭 전면 개편 | 2026-04-05 | PASS | DnD소속변경/스마트팀/워크플로우모달/프리셋개편 |
+| Autopilot + Delegation 전체 구현 | 2026-04-05 | PASS | 18파일+1138줄, 22테스트 |
+| QA 버그 8건 수정 | 2026-04-05 | PASS | 엔진/스케줄러/평가기 핵심경로 |
+| Nova Review C3+W2+I1 수정 | 2026-04-05 | PASS | 세션leak/상태중앙화/테스트추가 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
 |------|-------------------|----------|
 | npm publish | npmjs.com 미배포 | Low |
-| Phase 3 에이전트 자동 토론 | 라운드 로빈 토론 | Medium |
-| API 페이지네이션 | 서버 API limit/offset 미구현 (프론트 접기로 임시 대응) | Medium |
-| 단위 테스트 | prompt-resolver 등 신규 모듈 테스트 미작성 | Medium |
+| 서브태스크 병렬 실행 | 현재 직렬만, 에이전트별 병렬은 Phase 2 | Low |
+| Delegation depth 확장 | 현재 1단계만 (2→3뎁스), 다단계는 Phase 2 | Low |
+| API 페이지네이션 | 서버 API limit/offset 미구현 | Medium |
+| Full Autopilot 비용 추적 | Goal별 누적 비용 표시 미구현 | Medium |
 
 ## Last Activity
-- /nova:auto Sprint 1+2+3 → PASS — 대량 데이터 UX 리팩토링 전체 완료 | 2026-04-05T11:32:00+09:00
+- /nova:review → PASS — Autopilot+Delegation 전체 (18파일) | 2026-04-05T13:35:00+09:00
 
 ## Refs
 - Plan: docs/PROJECT.md
-- Design: docs/KICKOFF.md, docs/designs/agent-prompt-resolution.md, docs/designs/large-data-ux-refactor.md
-- Last Verification: 빌드 PASS + tsc --noEmit PASS + Playwright UI 검증
+- Design: docs/designs/autopilot-hierarchical-delegation.md
+- Last Verification: tsc PASS + build PASS + vitest 22/22 PASS + API curl 검증 PASS

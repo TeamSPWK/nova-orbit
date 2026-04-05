@@ -23,6 +23,7 @@ export function migrate(db: Database.Database): void {
       github_config TEXT, -- JSON: { repoUrl, branch, autoPush, prMode }
       tech_stack TEXT,    -- JSON: { languages, frameworks, buildTool, ... }
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'paused')),
+      autopilot TEXT NOT NULL DEFAULT 'off' CHECK (autopilot IN ('off', 'goal', 'full')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -59,6 +60,7 @@ export function migrate(db: Database.Database): void {
       title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
       status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'in_progress', 'in_review', 'done', 'blocked')),
       verification_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -192,6 +194,18 @@ export function migrate(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
       `);
     }
+  }
+
+  // Autopilot column on projects (off | goal | full)
+  const projectColumns = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
+  if (!projectColumns.some((c) => c.name === "autopilot")) {
+    db.exec("ALTER TABLE projects ADD COLUMN autopilot TEXT NOT NULL DEFAULT 'off'");
+  }
+
+  // parent_task_id on tasks (for hierarchical delegation subtasks)
+  const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  if (!taskColumns.some((c) => c.name === "parent_task_id")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE");
   }
 }
 

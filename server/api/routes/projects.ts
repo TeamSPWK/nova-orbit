@@ -5,6 +5,9 @@ import { homedir } from "node:os";
 import type { AppContext } from "../../index.js";
 import { analyzeProject } from "../../core/project/analyzer.js";
 import { connectGitHub } from "../../core/project/github.js";
+import { createLogger } from "../../utils/logger.js";
+
+const log = createLogger("projects");
 
 export function createProjectRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -48,9 +51,28 @@ export function createProjectRoutes(ctx: AppContext): Router {
 
   // Update project
   router.patch("/:id", (req, res) => {
-    const { name, mission, status, workdir, github_config, tech_stack } = req.body;
-    const existing = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
+    const { name, mission, status, workdir, github_config, tech_stack, autopilot } = req.body;
+    const existing = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Project not found" });
+
+    // Validate autopilot mode
+    const VALID_AUTOPILOT = ["off", "goal", "full"];
+    if (autopilot !== undefined && !VALID_AUTOPILOT.includes(autopilot)) {
+      return res.status(400).json({ error: `Invalid autopilot mode. Must be one of: ${VALID_AUTOPILOT.join(", ")}` });
+    }
+
+    // Full mode requires mission and CTO agent
+    if (autopilot === "full") {
+      const proj = db.prepare("SELECT mission FROM projects WHERE id = ?").get(req.params.id) as any;
+      const effectiveMission = mission ?? proj?.mission;
+      if (!effectiveMission || effectiveMission.trim() === "") {
+        return res.status(400).json({ error: "Full autopilot requires a project mission" });
+      }
+      const cto = db.prepare("SELECT id FROM agents WHERE project_id = ? AND role = 'cto' LIMIT 1").get(req.params.id);
+      if (!cto) {
+        return res.status(400).json({ error: "Full autopilot requires a CTO agent in the team" });
+      }
+    }
 
     db.prepare(`
       UPDATE projects SET
@@ -60,6 +82,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
         workdir = COALESCE(?, workdir),
         github_config = COALESCE(?, github_config),
         tech_stack = COALESCE(?, tech_stack),
+        autopilot = COALESCE(?, autopilot),
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -69,12 +92,19 @@ export function createProjectRoutes(ctx: AppContext): Router {
       workdir ?? null,
       github_config ? JSON.stringify(github_config) : null,
       tech_stack ? JSON.stringify(tech_stack) : null,
+      autopilot ?? null,
       req.params.id,
     );
 
     const updated = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
     broadcast("project:updated", updated);
+    broadcast("autopilot:mode-changed", { projectId: req.params.id, mode: autopilot ?? existing.autopilot });
     res.json(updated);
+
+    // Trigger Full autopilot if switching to 'full' from another mode
+    if (autopilot === "full" && existing.autopilot !== "full") {
+      triggerFullAutopilot(req.params.id);
+    }
   });
 
   // Analyze a local directory (for project import)
@@ -219,6 +249,71 @@ export function createProjectRoutes(ctx: AppContext): Router {
     const status = ctx.devServerManager.getStatus(req.params.id);
     res.json(status);
   });
+
+  // --- Full autopilot: generate goals from mission, decompose, run queue ---
+  async function triggerFullAutopilot(projectId: string) {
+    if (!ctx.orchestrationEngine || !ctx.scheduler) {
+      log.warn("Full autopilot trigger skipped: orchestration not initialized");
+      return;
+    }
+
+    try {
+      log.info(`Full autopilot started for project ${projectId}`);
+
+      // Step 1: CTO generates goals from mission
+      const { goalIds } = await ctx.orchestrationEngine.generateGoalsFromMission(projectId);
+
+      if (goalIds.length === 0) {
+        log.warn("Full autopilot: no goals generated, downgrading to goal mode");
+        db.prepare("UPDATE projects SET autopilot = 'goal', updated_at = datetime('now') WHERE id = ?").run(projectId);
+        broadcast("autopilot:full-completed", { projectId, reason: "no_goals" });
+        broadcast("autopilot:mode-changed", { projectId, mode: "goal" });
+        return;
+      }
+
+      // Step 2: Decompose each goal
+      for (const goalId of goalIds) {
+        try {
+          // Guard: re-check autopilot mode (user may have switched mid-run)
+          const current = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as any;
+          if (current?.autopilot !== "full") {
+            log.info("Full autopilot: mode changed during execution, stopping");
+            return;
+          }
+
+          await ctx.orchestrationEngine.decomposeGoal(goalId);
+        } catch (err: any) {
+          log.error(`Full autopilot: failed to decompose goal ${goalId}`, err);
+          // Continue with other goals — don't let one failure block all
+        }
+      }
+
+      // Step 3: Start queue
+      if (!ctx.scheduler.isRunning(projectId)) {
+        ctx.scheduler.startQueue(projectId);
+      }
+
+      // Step 4: Downgrade to 'goal' mode after generation complete
+      // (Tasks will continue executing, but no new goals will be auto-generated)
+      db.prepare("UPDATE projects SET autopilot = 'goal', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      broadcast("autopilot:full-completed", { projectId, reason: "goals_generated", goalCount: goalIds.length });
+      broadcast("autopilot:mode-changed", { projectId, mode: "goal" });
+      broadcast("project:updated", { projectId });
+
+      log.info(`Full autopilot completed: ${goalIds.length} goals generated, downgraded to goal mode`);
+    } catch (err: any) {
+      log.error(`Full autopilot failed for project ${projectId}`, err);
+
+      // Safety: downgrade to goal mode on failure
+      db.prepare("UPDATE projects SET autopilot = 'goal', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      broadcast("autopilot:full-completed", { projectId, reason: "error", error: err.message });
+      broadcast("autopilot:mode-changed", { projectId, mode: "goal" });
+
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)",
+      ).run(projectId, `Full autopilot failed: ${err.message?.slice(0, 200)}`);
+    }
+  }
 
   return router;
 }

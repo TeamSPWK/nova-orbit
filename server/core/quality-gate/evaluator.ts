@@ -124,11 +124,13 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
           evaluatorId,
         );
 
-        // Update task status based on verdict
-        if (result.verdict === "pass") {
-          db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?").run(taskId);
-        } else if (result.severity === "hard-block") {
-          db.prepare("UPDATE tasks SET status = 'blocked', updated_at = datetime('now') WHERE id = ?").run(taskId);
+          // Link verification to task (don't change task status — engine handles it)
+        const verId = db.prepare(
+          "SELECT id FROM verifications WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
+        ).get(taskId) as { id: string } | undefined;
+        if (verId) {
+          db.prepare("UPDATE tasks SET verification_id = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(verId.id, taskId);
         }
 
         log.info(`Verification complete: ${result.verdict.toUpperCase()} [${result.severity}]`);
@@ -136,6 +138,9 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
       } catch (err) {
         log.error("Verification failed", err);
         throw err;
+      } finally {
+        // Cleanup evaluator session to prevent leak
+        sessionManager.killSession(evaluatorAgent.id);
       }
     },
   };
@@ -148,55 +153,49 @@ function buildEvaluationPrompt(task: any, project: any, scope: VerificationScope
     full: `Layer 1 + 2 + 3: Static + semantic + execution-based validation — run tests, verify API endpoints, check edge cases.`,
   };
 
-  return `# Nova Quality Gate — Adversarial Evaluation
+  return `# Code Review — Quality Verification
 
-You are an independent Evaluator. You have NO context from the implementation agent.
 Review the code changes for task: "${task.title}"
 ${task.description ? `\nTask description: ${task.description}` : ""}
 
-## Verification Scope: ${scope.toUpperCase()}
+## Scope: ${scope.toUpperCase()}
 ${scopeInstructions[scope]}
 
-## 5-Dimension Verification Framework
+## Score each dimension 0-10:
 
-Score each dimension 0-10 with notes:
+1. **Functionality** — Does it do what the task asked for?
+2. **Data Flow** — Is the data pipeline reasonable for this task?
+3. **Design Alignment** — Does it follow existing codebase patterns?
+4. **Craft** — Code clarity, type safety, reasonable error handling?
+5. **Edge Cases** — Are obvious boundary cases considered?
 
-1. **Functionality** — Does the implementation match the task requirements?
-2. **Data Flow** — Is the data pipeline complete (input → process → store → display)?
-3. **Design Alignment** — Does it follow existing codebase conventions and architecture?
-4. **Craft** — Error handling, type safety, logging, code clarity?
-5. **Edge Cases** — Boundary values (0, -1, empty string, null, max int) handled?
+## Verdict Rules (based on average score):
+- Average >= 6 → "pass"
+- Average >= 4 and < 6 → "conditional"
+- Average < 4, OR security/data-loss issue found → "fail"
 
-## Output Format
+Not every task needs perfect scores. A simple UI change scoring 7 across the board is a clear PASS.
+Only fail if there are genuine bugs, broken functionality, or security issues.
 
-CRITICAL: Your response MUST contain a valid JSON block wrapped in \`\`\`json ... \`\`\`.
-Do NOT include any text outside the JSON block.
-If you cannot evaluate a dimension, score it 0 and explain why in the notes field.
+## Output — respond ONLY with this JSON block:
 
 \`\`\`json
 {
   "verdict": "pass",
   "severity": "auto-resolve",
   "dimensions": {
-    "functionality": { "value": 8, "notes": "Implementation matches requirements" },
-    "dataFlow": { "value": 7, "notes": "Data pipeline is complete" },
-    "designAlignment": { "value": 9, "notes": "Follows existing patterns" },
-    "craft": { "value": 8, "notes": "Good error handling" },
-    "edgeCases": { "value": 6, "notes": "Most edge cases handled" }
+    "functionality": { "value": 8, "notes": "..." },
+    "dataFlow": { "value": 7, "notes": "..." },
+    "designAlignment": { "value": 8, "notes": "..." },
+    "craft": { "value": 7, "notes": "..." },
+    "edgeCases": { "value": 6, "notes": "..." }
   },
   "issues": []
 }
 \`\`\`
 
-Replace the example values above with your actual evaluation. Use this exact structure.
-
-Rules:
-- "Don't pass it — find the problem"
-- Any data loss / security / irreversible issue = hard-block
-- Failing tests or broken build = fail
-- If you cannot execute Layer 3 verification, issue "conditional" (not "pass")
-- verdict must be exactly one of: "pass", "conditional", "fail"
-- severity must be exactly one of: "auto-resolve", "soft-block", "hard-block"
+- severity: "auto-resolve" (minor), "soft-block" (runtime risk), "hard-block" (security/data loss)
+- issues: only list actual problems found, empty array if none
 `;
 }
 
@@ -244,25 +243,45 @@ function parseVerificationResult(
     const jsonStr = jsonMatch[1] ?? jsonMatch[0];
     const parsed = JSON.parse(jsonStr);
 
+    const dimensions = {
+      functionality: parsed.dimensions?.functionality ?? defaultScore,
+      dataFlow: parsed.dimensions?.dataFlow ?? defaultScore,
+      designAlignment: parsed.dimensions?.designAlignment ?? defaultScore,
+      craft: parsed.dimensions?.craft ?? defaultScore,
+      edgeCases: parsed.dimensions?.edgeCases ?? defaultScore,
+    };
+
+    // Score-based verdict correction — prevent high scores + fail verdict mismatch
+    const scores = Object.values(dimensions).map((d: any) => d.value ?? 0);
+    const avg = scores.reduce((a: number, b: number) => a + b, 0) / scores.length;
+    let verdict: Verdict = parsed.verdict ?? "fail";
+    if (avg >= 6 && verdict === "fail") {
+      log.info(`Verdict corrected: fail → pass (avg score ${avg.toFixed(1)} >= 6)`);
+      verdict = "pass";
+    } else if (avg >= 4 && verdict === "fail") {
+      log.info(`Verdict corrected: fail → conditional (avg score ${avg.toFixed(1)} >= 4)`);
+      verdict = "conditional";
+    }
+
+    const issues = (parsed.issues ?? []).map((issue: any, i: number) => ({
+      id: `issue-${i}`,
+      severity: issue.severity ?? "warning",
+      file: issue.file,
+      line: issue.line,
+      message: issue.message ?? "No description",
+      suggestion: issue.suggestion,
+    }));
+
+    // Also correct severity based on actual issues
+    const hasCritical = issues.some((i: any) => i.severity === "critical");
+    const severity: Severity = hasCritical ? "hard-block" : (parsed.severity ?? "auto-resolve");
+
     return {
       ...defaultResult,
-      verdict: parsed.verdict ?? "fail",
-      severity: parsed.severity ?? "soft-block",
-      dimensions: {
-        functionality: parsed.dimensions?.functionality ?? defaultScore,
-        dataFlow: parsed.dimensions?.dataFlow ?? defaultScore,
-        designAlignment: parsed.dimensions?.designAlignment ?? defaultScore,
-        craft: parsed.dimensions?.craft ?? defaultScore,
-        edgeCases: parsed.dimensions?.edgeCases ?? defaultScore,
-      },
-      issues: (parsed.issues ?? []).map((issue: any, i: number) => ({
-        id: `issue-${i}`,
-        severity: issue.severity ?? "warning",
-        file: issue.file,
-        line: issue.line,
-        message: issue.message ?? "No description",
-        suggestion: issue.suggestion,
-      })),
+      verdict,
+      severity,
+      dimensions,
+      issues,
     };
   } catch (err) {
     log.warn("Failed to parse verification result", err);

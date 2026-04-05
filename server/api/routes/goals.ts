@@ -1,5 +1,8 @@
 import { Router } from "express";
 import type { AppContext } from "../../index.js";
+import { createLogger } from "../../utils/logger.js";
+
+const log = createLogger("goals");
 
 export function createGoalRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -16,7 +19,7 @@ export function createGoalRoutes(ctx: AppContext): Router {
     res.json(goals);
   });
 
-  // Create goal
+  // Create goal — triggers autopilot if enabled
   router.post("/", (req, res) => {
     const { project_id, description, priority = "medium" } = req.body;
     if (!project_id || !description) {
@@ -33,9 +36,15 @@ export function createGoalRoutes(ctx: AppContext): Router {
         "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, ?)",
       ).run(project_id, description, priority);
 
-      const goal = db.prepare("SELECT * FROM goals WHERE rowid = ?").get(result.lastInsertRowid);
+      const goal = db.prepare("SELECT * FROM goals WHERE rowid = ?").get(result.lastInsertRowid) as any;
       broadcast("project:updated", { projectId: project_id });
       res.status(201).json(goal);
+
+      // --- Autopilot trigger (async, after response) ---
+      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(project_id) as { autopilot: string } | undefined;
+      if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+        triggerAutopilotDecompose(goal.id, project_id);
+      }
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
@@ -69,6 +78,45 @@ export function createGoalRoutes(ctx: AppContext): Router {
     if (result.changes === 0) return res.status(404).json({ error: "Goal not found" });
     res.json({ success: true });
   });
+
+  // --- Internal: autopilot decompose + queue start ---
+  async function triggerAutopilotDecompose(goalId: string, projectId: string) {
+    // Guard: ensure engine and scheduler are available (lazy import from ctx)
+    if (!ctx.orchestrationEngine || !ctx.scheduler) {
+      log.warn("Autopilot trigger skipped: orchestration not initialized yet");
+      return;
+    }
+
+    try {
+      log.info(`Autopilot: auto-decomposing goal ${goalId}`);
+
+      // Check that goal doesn't already have tasks (race condition guard)
+      const existing = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?").get(goalId) as { count: number };
+      if (existing.count > 0) {
+        log.warn(`Autopilot: goal ${goalId} already has tasks, skipping decompose`);
+        return;
+      }
+
+      const result = await ctx.orchestrationEngine.decomposeGoal(goalId);
+
+      if (result.taskCount > 0) {
+        // Auto-start queue if not already running
+        if (!ctx.scheduler.isRunning(projectId)) {
+          log.info(`Autopilot: auto-starting queue for project ${projectId}`);
+          ctx.scheduler.startQueue(projectId);
+        }
+      }
+
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)",
+      ).run(projectId, `Autopilot decomposed goal into ${result.taskCount} tasks`);
+    } catch (err: any) {
+      log.error(`Autopilot decompose failed for goal ${goalId}`, err);
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)",
+      ).run(projectId, `Autopilot failed: ${err.message?.slice(0, 200)}`);
+    }
+  }
 
   return router;
 }
