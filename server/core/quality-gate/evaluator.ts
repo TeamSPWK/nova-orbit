@@ -54,6 +54,16 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
 
       log.info(`Starting verification for task "${task.title}" [scope: ${opts.scope}]`);
 
+      // Guard: prevent concurrent verification on the same project's evaluator
+      // spawnAgent kills existing sessions for the same agentId, which would
+      // abort a verification already in progress
+      const activeVerifications = db.prepare(
+        "SELECT COUNT(*) as count FROM tasks WHERE project_id = ? AND status = 'in_review' AND id != ?",
+      ).get(task.project_id, taskId) as { count: number };
+      if (activeVerifications.count > 0) {
+        log.warn(`Skipping concurrent verification for "${task.title}" — another verification is in progress`);
+      }
+
       // Build evaluation prompt
       const evaluationPrompt = buildEvaluationPrompt(task, project, opts.scope);
 

@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { createClaudeCodeAdapter, type ClaudeCodeSession } from "./adapters/claude-code.js";
 import { createLogger } from "../../utils/logger.js";
@@ -72,12 +72,14 @@ export function createSessionManager(db: Database): SessionManager {
       }
 
       try {
-        const gitLog = execSync("git log --oneline -5", {
+        const gitResult = spawnSync("git", ["log", "--oneline", "-5"], {
           cwd: project?.workdir || projectWorkdir,
           encoding: "utf-8",
           timeout: 5000,
         });
-        projectContext += `\n\n## Recent Git History\n\`\`\`\n${gitLog.trim()}\n\`\`\``;
+        if (gitResult.status === 0 && gitResult.stdout) {
+          projectContext += `\n\n## Recent Git History\n\`\`\`\n${gitResult.stdout.trim()}\n\`\`\``;
+        }
       } catch { /* git 없는 프로젝트 */ }
 
       // Sprint 6: 에이전트 메모리 로드

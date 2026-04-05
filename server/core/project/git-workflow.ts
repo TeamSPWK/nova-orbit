@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createAgentBranch } from "./github.js";
 import { createLogger } from "../../utils/logger.js";
 
@@ -56,6 +58,11 @@ export function commitTaskResult(
   }
 
   const filesChanged = statusOutput.trim().split("\n").filter(Boolean).length;
+
+  // Warn if no .gitignore — risk of committing secrets/node_modules
+  if (!existsSync(join(workdir, ".gitignore"))) {
+    log.warn(`No .gitignore found in ${workdir} — git add -A may stage unwanted files`);
+  }
 
   // Stage all changes
   gitExec(workdir, ["add", "-A"]);

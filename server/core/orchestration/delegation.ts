@@ -210,9 +210,13 @@ Respond in this EXACT JSON format:
         // Fallback: execute directly without delegation
         return { delegated: false, subtaskIds: [] };
       } finally {
-        // Reset parent agent status
-        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?").run(parentAgent.id);
-        broadcast("agent:status", { id: parentAgent.id, name: parentAgent.name, status: "idle" });
+        // Only reset agent if session was actually spawned
+        // (spawnAgent failure returns early before this try block)
+        if (session) {
+          sessionManager.killSession(parentAgent.id);
+          db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?").run(parentAgent.id);
+          broadcast("agent:status", { id: parentAgent.id, name: parentAgent.name, status: "idle" });
+        }
       }
     },
 

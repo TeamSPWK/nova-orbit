@@ -44,15 +44,21 @@ export function createWorktree(
   });
 
   if (result.status !== 0) {
-    // branch가 이미 존재할 수 있음 — 기존 branch 사용
-    const retryResult = spawnSync("git", ["worktree", "add", worktreePath, branch], {
-      cwd: projectWorkdir,
-      stdio: "pipe",
-      timeout: 30_000,
-    });
-    if (retryResult.status !== 0) {
-      log.error(`Failed to create worktree: ${retryResult.stderr?.toString()}`);
-      return null; // fallback to direct execution
+    const stderr = result.stderr?.toString() ?? "";
+    // Only retry if the error is branch-related (already exists)
+    if (stderr.includes("already exists")) {
+      const retryResult = spawnSync("git", ["worktree", "add", worktreePath, branch], {
+        cwd: projectWorkdir,
+        stdio: "pipe",
+        timeout: 30_000,
+      });
+      if (retryResult.status !== 0) {
+        log.error(`Failed to create worktree (retry): ${retryResult.stderr?.toString()}`);
+        return null;
+      }
+    } else {
+      log.error(`Failed to create worktree: ${stderr}`);
+      return null;
     }
   }
 

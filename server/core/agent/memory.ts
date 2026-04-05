@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const MAX_MEMORY_SIZE = 50 * 1024; // 50KB
@@ -28,14 +28,18 @@ export function loadMemory(dataDir: string, agentId: string): string {
 
 export function appendMemory(dataDir: string, agentId: string, entry: string): void {
   const filePath = getMemoryPath(dataDir, agentId);
-  const existing = existsSync(filePath) ? readFileSync(filePath, "utf-8") : "";
   const timestamp = new Date().toISOString();
-  const appended = existing + `\n\n---\n${timestamp}\n${entry}`;
+  const newContent = `\n\n---\n${timestamp}\n${entry}`;
 
-  // 50KB 초과 시 앞 잘라냄 (최근 내용 유지)
-  const final = appended.length > MAX_MEMORY_SIZE
-    ? appended.slice(appended.length - MAX_MEMORY_SIZE)
-    : appended;
+  // Use appendFileSync for atomic append (no read-modify-write race)
+  appendFileSync(filePath, newContent, "utf-8");
 
-  writeFileSync(filePath, final, "utf-8");
+  // Trim if over size limit (separate step — occasional, not every write)
+  try {
+    const size = statSync(filePath).size;
+    if (size > MAX_MEMORY_SIZE) {
+      const full = readFileSync(filePath, "utf-8");
+      writeFileSync(filePath, full.slice(full.length - MAX_MEMORY_SIZE), "utf-8");
+    }
+  } catch { /* trim failure is non-critical */ }
 }

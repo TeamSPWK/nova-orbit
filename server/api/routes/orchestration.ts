@@ -60,7 +60,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       if (!t.title || typeof t.title !== "string") continue;
       const assignee = findAgentForRole(t.role ?? "coder");
       db.prepare(
-        "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status) VALUES (?, ?, ?, ?, ?, 'pending_approval')",
       ).run(goalRow.id, projectId, t.title.slice(0, MAX_TITLE_LEN), (t.description ?? "").slice(0, MAX_DESC_LEN), assignee?.id ?? null);
     }
 
