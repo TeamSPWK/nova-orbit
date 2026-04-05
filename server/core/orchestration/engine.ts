@@ -651,6 +651,7 @@ async function runGitWorkflow(
     branch: worktreeBranch ?? "main",
     autoPush: false,
     prMode: false,
+    gitMode: "local_only",
   };
 
   const result = executeGitWorkflow(workdir, task.title, agentName, effectiveConfig, {

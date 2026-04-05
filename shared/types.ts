@@ -20,11 +20,15 @@ export interface Project {
   updatedAt: string;
 }
 
+export type GitMode = "branch_only" | "pr" | "main_direct" | "local_only";
+
 export interface GitHubConfig {
   repoUrl: string;
   branch: string;
   autoPush: boolean;
   prMode: boolean;
+  /** Explicit git workflow mode. Takes precedence over autoPush/prMode when set. */
+  gitMode?: GitMode;
 }
 
 export interface TechStack {

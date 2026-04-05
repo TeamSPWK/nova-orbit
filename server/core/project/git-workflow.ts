@@ -120,11 +120,14 @@ export interface GitWorkflowResult {
   error?: string;
 }
 
+export type GitMode = "branch_only" | "pr" | "main_direct" | "local_only";
+
 export interface GitHubConfig {
   repoUrl: string;
   branch: string;
   autoPush: boolean;
   prMode: boolean;
+  gitMode?: GitMode;
 }
 
 export interface GitWorkflowOptions {
@@ -133,14 +136,24 @@ export interface GitWorkflowOptions {
 }
 
 /**
+ * Resolve the effective git mode from config.
+ * gitMode takes precedence; legacy autoPush/prMode for backward compat.
+ */
+function resolveGitMode(config: GitHubConfig): GitMode {
+  if (config.gitMode) return config.gitMode;
+  if (config.prMode) return "pr";
+  if (config.autoPush) return "main_direct";
+  return "branch_only";
+}
+
+/**
  * Execute the full git workflow after a task passes verification.
  *
  * Modes:
- *   prMode=true  → createAgentBranch → commit → push → PR
- *   autoPush=true → commit → push (on current/main branch)
- *   both false   → commit only (local)
- *
- * overrideBranch: worktree 모드에서 이미 branch가 생성된 경우 createAgentBranch를 skip한다.
+ *   local_only    → commit only, no push (로컬 프로젝트 기본값)
+ *   branch_only   → agent branch에 commit (push 안함)
+ *   pr            → agent branch → push → PR 생성
+ *   main_direct   → main에 직접 commit → push (Solo founder 워크플로우)
  */
 export function executeGitWorkflow(
   workdir: string,
@@ -149,59 +162,81 @@ export function executeGitWorkflow(
   githubConfig: GitHubConfig,
   options: GitWorkflowOptions = {},
 ): GitWorkflowResult {
-  const { autoPush, prMode, branch: baseBranch } = githubConfig;
+  const mode = resolveGitMode(githubConfig);
+  const { branch: baseBranch } = githubConfig;
   const { overrideBranch } = options;
 
-  let activeBranch = baseBranch;
+  let activeBranch = overrideBranch ?? baseBranch;
   let pushed = false;
   let prUrl: string | null = null;
 
   try {
-    if (prMode) {
-      // worktree 모드: branch가 이미 생성됨 — createAgentBranch skip
-      if (overrideBranch) {
-        activeBranch = overrideBranch;
-      } else {
-        // Create a dedicated agent branch
+    if (mode === "local_only") {
+      // 로컬 commit만 — push 안함
+      const commitResult = commitTaskResult(workdir, taskTitle, agentName);
+      return {
+        committed: commitResult.committed, pushed: false, prUrl: null,
+        branch: activeBranch, filesChanged: commitResult.filesChanged,
+      };
+    }
+
+    if (mode === "branch_only") {
+      // agent branch에 commit — push 안함
+      if (!overrideBranch) {
         activeBranch = createAgentBranch(workdir, agentName, taskTitle);
       }
+      const commitResult = commitTaskResult(workdir, taskTitle, agentName);
+      return {
+        committed: commitResult.committed, pushed: false, prUrl: null,
+        branch: activeBranch, filesChanged: commitResult.filesChanged,
+      };
+    }
 
+    if (mode === "pr") {
+      // agent branch → commit → push → PR
+      if (!overrideBranch) {
+        activeBranch = createAgentBranch(workdir, agentName, taskTitle);
+      }
       const commitResult = commitTaskResult(workdir, taskTitle, agentName);
       if (!commitResult.committed) {
         return { committed: false, pushed: false, prUrl: null, branch: activeBranch, filesChanged: 0 };
       }
-
       pushed = pushBranch(workdir, activeBranch);
-
       if (pushed) {
         const prBody = `Automated task implementation by Nova Orbit agent.\n\nTask: ${taskTitle}\nAgent: ${agentName}`;
         prUrl = createPR(workdir, activeBranch, taskTitle, prBody);
       }
-
       return { committed: true, pushed, prUrl, branch: activeBranch, filesChanged: commitResult.filesChanged };
     }
 
-    if (autoPush) {
-      // worktree 모드에서는 overrideBranch 사용
-      if (overrideBranch) activeBranch = overrideBranch;
-
+    if (mode === "main_direct") {
+      // main에 직접 commit → push (Solo founder 워크플로우)
+      // worktree 모드에서는 worktree branch에서 commit 후 main으로 merge
+      if (overrideBranch && overrideBranch !== baseBranch) {
+        // worktree branch에서 commit
+        const commitResult = commitTaskResult(workdir, taskTitle, agentName);
+        if (!commitResult.committed) {
+          return { committed: false, pushed: false, prUrl: null, branch: baseBranch, filesChanged: 0 };
+        }
+        // main으로 merge는 worktree 정리 후 engine에서 처리
+        // 여기서는 commit + push만
+        pushed = pushBranch(workdir, overrideBranch);
+        return { committed: true, pushed, prUrl: null, branch: overrideBranch, filesChanged: commitResult.filesChanged };
+      }
+      // 직접 main에서 작업 (worktree 없음)
       const commitResult = commitTaskResult(workdir, taskTitle, agentName);
       if (!commitResult.committed) {
-        return { committed: false, pushed: false, prUrl: null, branch: activeBranch, filesChanged: 0 };
+        return { committed: false, pushed: false, prUrl: null, branch: baseBranch, filesChanged: 0 };
       }
-
-      pushed = pushBranch(workdir, activeBranch);
-      return { committed: true, pushed, prUrl: null, branch: activeBranch, filesChanged: commitResult.filesChanged };
+      pushed = pushBranch(workdir, baseBranch);
+      return { committed: true, pushed, prUrl: null, branch: baseBranch, filesChanged: commitResult.filesChanged };
     }
 
-    // Commit only (local)
+    // fallback — local_only
     const commitResult = commitTaskResult(workdir, taskTitle, agentName);
     return {
-      committed: commitResult.committed,
-      pushed: false,
-      prUrl: null,
-      branch: activeBranch,
-      filesChanged: commitResult.filesChanged,
+      committed: commitResult.committed, pushed: false, prUrl: null,
+      branch: activeBranch, filesChanged: commitResult.filesChanged,
     };
   } catch (err: any) {
     log.error(`Git workflow failed for task "${taskTitle}"`, err);

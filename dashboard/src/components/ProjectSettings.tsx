@@ -22,6 +22,7 @@ export function ProjectSettings({ projectId }: Props) {
 
   const [autoPush, setAutoPush] = useState(project?.github?.autoPush ?? false);
   const [prMode, setPrMode] = useState(project?.github?.prMode ?? false);
+  const [gitMode, setGitMode] = useState<string>(project?.github?.gitMode ?? "local_only");
 
   if (!project) return null;
 
@@ -145,7 +146,39 @@ export function ProjectSettings({ projectId }: Props) {
         </div>
       </section>
 
-      {/* GitHub Config */}
+      {/* Git Workflow Mode — 모든 프로젝트 공통 */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          Git Workflow
+        </h2>
+        <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">모드</span>
+            <select
+              value={gitMode}
+              onChange={async (e) => {
+                const mode = e.target.value;
+                setGitMode(mode);
+                await saveGithubField({ gitMode: mode as any });
+              }}
+              className="text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-[#1a1a2e] text-gray-700 dark:text-gray-300"
+            >
+              <option value="local_only">로컬 커밋만 (push 안함)</option>
+              <option value="branch_only">에이전트 브랜치에 커밋</option>
+              <option value="pr">PR 생성 (브랜치 → push → PR)</option>
+              <option value="main_direct">메인에 직접 반영 (commit → push)</option>
+            </select>
+          </div>
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            {gitMode === "local_only" && "에이전트가 작성한 코드를 로컬 브랜치에만 커밋합니다. push하지 않습니다."}
+            {gitMode === "branch_only" && "에이전트별 브랜치(agent/...)에 커밋합니다. 나중에 수동으로 머지하세요."}
+            {gitMode === "pr" && "에이전트 브랜치를 push하고 PR을 자동 생성합니다. GitHub 연결이 필요합니다."}
+            {gitMode === "main_direct" && "메인 브랜치에 직접 커밋하고 push합니다. Solo 개발자에게 적합합니다."}
+          </p>
+        </div>
+      </section>
+
+      {/* GitHub Config — GitHub 연결 프로젝트 추가 설정 */}
       {project.source === "github" && project.github && (
         <section>
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">

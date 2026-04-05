@@ -5,6 +5,7 @@ interface GitHubConfig {
   branch: string;
   autoPush: boolean;
   prMode: boolean;
+  gitMode?: "branch_only" | "pr" | "main_direct" | "local_only";
 }
 
 interface Project {
