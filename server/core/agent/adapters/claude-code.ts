@@ -316,12 +316,6 @@ function buildTempDir(config: ClaudeCodeConfig): string | null {
     }
   }
 
-  // Write a CLAUDE.md for the agent context
-  writeFileSync(
-    join(tempDir, "CLAUDE.md"),
-    `# Nova Orbit Agent\n\nThis agent is managed by Nova Orbit. Follow quality gate rules.\n`,
-  );
-
   return tempDir;
 }
 

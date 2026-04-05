@@ -2,8 +2,9 @@
 
 ## Current
 - **Goal**: Nova Orbit v0.1.0 — 전체 기능 + 보안 + CTO 자동화 + 멀티 에이전트
-- **Phase**: done
+- **Phase**: building
 - **Blocker**: none
+- **Next**: Agent Prompt Resolution — 프로젝트 에이전트 우선 전략 구현
 
 ## Tasks
 | Task | Status | Verdict | Note |
@@ -23,9 +24,9 @@
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
+| Agent Prompt Resolution | 2026-04-05 | PASS | 4단계 Resolution Chain + UI 배지 |
+| 에이전트 탭 개선 5종 | 2026-04-05 | PASS | 전체삭제/교체/퀵프롬프트/삭제안전/org주입 |
 | 멀티 에이전트 프롬프트 | 2026-04-05 | PASS | FE+CTO 테스트 성공 |
-| 에이전트 탭 + 조직도 | 2026-04-05 | PASS | N-depth OrgChart |
-| CTO 자동 태스크 생성 | 2026-04-04 | PASS | 7태스크 자동생성 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -33,7 +34,10 @@
 | npm publish | npmjs.com 미배포 | Low |
 | Phase 3 에이전트 자동 토론 | 라운드 로빈 토론 | Medium |
 
+## Last Activity
+- /nova:auto Sprint 1+2+3 → PASS — Agent Prompt Resolution 전체 완료 | 2026-04-05T09:22:00+09:00
+
 ## Refs
 - Plan: docs/PROJECT.md
-- Design: docs/KICKOFF.md
+- Design: docs/KICKOFF.md, docs/designs/agent-prompt-resolution.md
 - Last Verification: 빌드 PASS + vitest 44/44 + 멀티에이전트 실사용 테스트

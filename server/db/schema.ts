@@ -114,6 +114,14 @@ export function migrate(db: Database.Database): void {
   `);
 
   // Incremental migrations for existing databases
+
+  // prompt_source 컬럼 추가 (기존 DB 호환)
+  const agentColumnsEarly = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
+  const hasPromptSource = agentColumnsEarly.some((c) => c.name === "prompt_source");
+  if (!hasPromptSource) {
+    db.exec("ALTER TABLE agents ADD COLUMN prompt_source TEXT NOT NULL DEFAULT 'auto'");
+  }
+
   const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
   const hasTokenUsage = sessionColumns.some((c) => c.name === "token_usage");
   const hasCostUsd = sessionColumns.some((c) => c.name === "cost_usd");
@@ -131,7 +139,7 @@ export function migrate(db: Database.Database): void {
   const hasParentId = agentColumns.some((c) => c.name === "parent_id");
 
   if (!hasParentId) {
-    // Recreate agents table with expanded role CHECK + parent_id
+    // Recreate agents table with expanded role CHECK + parent_id + prompt_source
     db.exec("DROP TABLE IF EXISTS agents_new");
     db.exec(`
       CREATE TABLE agents_new (
@@ -141,14 +149,15 @@ export function migrate(db: Database.Database): void {
         role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
         status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
         system_prompt TEXT NOT NULL DEFAULT '',
+        prompt_source TEXT NOT NULL DEFAULT 'auto',
         skills_dir TEXT,
         session_behavior TEXT NOT NULL DEFAULT 'resume-or-new',
         current_task_id TEXT,
         parent_id TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
-      INSERT INTO agents_new (id, project_id, name, role, status, system_prompt, skills_dir, session_behavior, current_task_id, created_at)
-        SELECT id, project_id, name, role, status, COALESCE(system_prompt, ''), skills_dir, COALESCE(session_behavior, 'resume-or-new'), current_task_id, COALESCE(created_at, datetime('now')) FROM agents;
+      INSERT INTO agents_new (id, project_id, name, role, status, system_prompt, prompt_source, skills_dir, session_behavior, current_task_id, created_at)
+        SELECT id, project_id, name, role, status, COALESCE(system_prompt, ''), 'auto', skills_dir, COALESCE(session_behavior, 'resume-or-new'), current_task_id, COALESCE(created_at, datetime('now')) FROM agents;
       DROP TABLE agents;
       ALTER TABLE agents_new RENAME TO agents;
       CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
@@ -169,14 +178,15 @@ export function migrate(db: Database.Database): void {
           role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
           status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
           system_prompt TEXT NOT NULL DEFAULT '',
+          prompt_source TEXT NOT NULL DEFAULT 'auto',
           skills_dir TEXT,
           session_behavior TEXT NOT NULL DEFAULT 'resume-or-new',
           current_task_id TEXT,
           parent_id TEXT,
           created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
-        INSERT INTO agents_new (id, project_id, name, role, status, system_prompt, skills_dir, session_behavior, current_task_id, parent_id, created_at)
-          SELECT id, project_id, name, role, status, COALESCE(system_prompt, ''), skills_dir, COALESCE(session_behavior, 'resume-or-new'), current_task_id, parent_id, COALESCE(created_at, datetime('now')) FROM agents;
+        INSERT INTO agents_new (id, project_id, name, role, status, system_prompt, prompt_source, skills_dir, session_behavior, current_task_id, parent_id, created_at)
+          SELECT id, project_id, name, role, status, COALESCE(system_prompt, ''), COALESCE(prompt_source, 'auto'), skills_dir, COALESCE(session_behavior, 'resume-or-new'), current_task_id, parent_id, COALESCE(created_at, datetime('now')) FROM agents;
         DROP TABLE agents;
         ALTER TABLE agents_new RENAME TO agents;
         CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);

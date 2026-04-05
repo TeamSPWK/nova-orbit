@@ -12,12 +12,8 @@ export interface SuggestedAgent {
 /**
  * Suggest domain-specialized agents based on project mission + tech stack.
  *
- * Two modes:
- * 1. Rule-based (instant) — keyword matching for common domains
- * 2. AI-based (via Claude) — deep analysis for complex missions
- *
- * This function is rule-based for instant results.
- * For AI-based, use the /agents/suggest-ai endpoint which spawns Claude.
+ * Rule-based (instant) — keyword matching for common domains.
+ * Roles align with the org chart: cto, backend, frontend, ux, qa, reviewer, marketer, devops.
  */
 export function suggestAgentsFromMission(
   mission: string,
@@ -26,12 +22,19 @@ export function suggestAgentsFromMission(
   const agents: SuggestedAgent[] = [];
   const m = mission.toLowerCase();
 
-  // Always include a core coder
+  // Always include backend + frontend as core implementation agents
   agents.push({
-    name: "Developer",
-    role: "coder",
-    systemPrompt: `You are a senior software engineer. Implement assigned tasks with clean, production-ready code. Analyze the existing codebase before writing.`,
-    reason: "Core implementation agent",
+    name: "Backend Developer",
+    role: "backend",
+    systemPrompt: `You are a senior backend developer. Implement server-side features: APIs, database schemas, business logic, authentication. Analyze the existing codebase before writing. Run lint/type-check before finishing.`,
+    reason: "Core backend implementation agent",
+  });
+
+  agents.push({
+    name: "Frontend Developer",
+    role: "frontend",
+    systemPrompt: `You are a senior frontend developer. Implement UI components, pages, state management, and user interactions. Use React + TypeScript + TailwindCSS conventions. Focus on responsive design and accessibility.`,
+    reason: "Core frontend implementation agent",
   });
 
   // Domain-specific agents based on mission keywords
@@ -125,13 +128,13 @@ export function suggestAgentsFromMission(
     });
   }
 
-  // Frontend-heavy (from tech stack)
+  // Frontend-heavy (from tech stack) → UX designer
   const frameworks = techStack?.frameworks ?? [];
   if (frameworks.some(f => ["React", "Vue", "Svelte", "Next.js"].includes(f))) {
     agents.push({
-      name: "UI/UX Designer",
-      role: "designer",
-      systemPrompt: `You are a UI/UX designer and frontend specialist. Create clean, accessible, and intuitive interfaces. Follow existing design system conventions. Focus on responsive layouts, consistent spacing, and user-friendly interactions.`,
+      name: "UX Designer",
+      role: "ux",
+      systemPrompt: `You are a UX designer who writes code. Create clean, accessible, and intuitive interfaces. Follow existing design system conventions. Focus on responsive layouts, consistent spacing, and user-friendly interactions.`,
       reason: "프론트엔드 프레임워크 감지",
     });
   }
@@ -161,11 +164,12 @@ export interface TeamPreset {
 export function getTeamPresets(): TeamPreset[] {
   return [
     {
-      id: "solo",
-      name: "Solo Founder",
-      description: "Developer + Reviewer (기본)",
+      id: "minimal",
+      name: "Minimal",
+      description: "Backend + Frontend + Reviewer",
       agents: [
-        { name: "Developer", role: "coder" },
+        { name: "Backend Developer", role: "backend" },
+        { name: "Frontend Developer", role: "frontend" },
         { name: "Code Reviewer", role: "reviewer" },
       ],
     },

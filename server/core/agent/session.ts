@@ -1,7 +1,7 @@
 import type { Database } from "better-sqlite3";
 import { createClaudeCodeAdapter, type ClaudeCodeSession } from "./adapters/claude-code.js";
 import { createLogger } from "../../utils/logger.js";
-import { getPreset } from "./roles.js";
+import { resolvePrompt } from "./prompt-resolver.js";
 
 const log = createLogger("session-manager");
 
@@ -35,9 +35,12 @@ export function createSessionManager(db: Database): SessionManager {
         "SELECT id FROM sessions WHERE agent_id = ? AND status = 'completed' ORDER BY ended_at DESC LIMIT 1",
       ).get(agentId) as any;
 
+      const resolution = resolvePrompt(agent, projectWorkdir);
+      log.info(`Spawned agent ${agent.role} (source: ${resolution.source}${resolution.filePath ? `, file: ${resolution.filePath}` : ""})`);
+
       const session = adapter.spawn({
         workdir: projectWorkdir,
-        systemPrompt: agent.system_prompt || getDefaultPrompt(agent.role),
+        systemPrompt: resolution.prompt,
         sessionBehavior: agent.session_behavior || "resume-or-new",
         resumeSessionId: lastSession?.id ?? null,
         skillsDir: agent.skills_dir || undefined,
@@ -122,17 +125,3 @@ export function createSessionManager(db: Database): SessionManager {
   };
 }
 
-// Fallback prompts used when no YAML template is found for a given role.
-const FALLBACK_PROMPTS: Record<string, string> = {
-  coder: `You are a senior software engineer. Implement the assigned task by writing clean, production-ready code. Before writing, analyze the existing codebase. Run lint/type-check before committing. You implement only — verification is handled separately.`,
-  reviewer: `You are a code reviewer with an adversarial mindset. "Don't pass it — find the problem." Apply 5-dimension verification: Functionality, Data Flow, Design Alignment, Craft, Edge Cases. Classify issues as auto-resolve / soft-block / hard-block.`,
-  marketer: `You are a growth marketer. Write SEO-optimized content. Always consider target audience and core messaging.`,
-  designer: `You are a UI/UX designer. Create clean, accessible, and intuitive designs. Follow existing design system conventions.`,
-  qa: `You are a QA engineer. Analyze failure paths before success paths. Always test boundary values (0, -1, empty, null, max). Risk-based priority, not 100% coverage.`,
-};
-
-function getDefaultPrompt(role: string): string {
-  const preset = getPreset(role);
-  if (preset) return preset.systemPrompt;
-  return FALLBACK_PROMPTS[role] ?? FALLBACK_PROMPTS.coder;
-}

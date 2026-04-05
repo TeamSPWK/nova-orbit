@@ -50,6 +50,7 @@ export const api = {
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
+    get: (id: string) => request<any>(`/agents/${id}`),
     presets: () => request<any[]>("/agents/presets"),
     teamPresets: () => request<any[]>("/agents/team-presets"),
     createTeam: (projectId: string, presetId: string) =>
@@ -64,10 +65,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, mission, techStack }),
       }),
+    scanProject: (projectId: string) =>
+      request<any>("/agents/scan-project", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId }),
+      }),
     create: (data: any) => request<any>("/agents", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request<any>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) => request<any>(`/agents/${id}`, { method: "DELETE" }),
+    deleteAll: (projectId: string) => request<{ success: boolean; deleted: number }>(`/agents/bulk/${projectId}`, { method: "DELETE" }),
     stats: (id: string) =>
       request<{ taskCount: number; totalTokens: number; totalCostUsd: number }>(`/agents/${id}/stats`),
   },

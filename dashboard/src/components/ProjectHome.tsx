@@ -361,6 +361,7 @@ export function ProjectHome() {
       {showAddAgent && currentProjectId && (
         <AddAgentDialog
           projectId={currentProjectId}
+          mission={project?.mission ?? undefined}
           existingAgents={agents}
           onCreated={handleAgentCreated}
           onClose={() => setShowAddAgent(false)}
@@ -369,6 +370,7 @@ export function ProjectHome() {
       {selectedAgent && (
         <AgentDetail
           agent={selectedAgent}
+          agents={agents}
           tasks={tasks}
           onClose={() => setSelectedAgentId(null)}
           onKill={() => {

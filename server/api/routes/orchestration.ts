@@ -150,6 +150,27 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
     const workdir = project.workdir || process.cwd();
 
+    // Build org context so the agent knows the team structure
+    const projectAgents = db.prepare("SELECT id, name, role, parent_id FROM agents WHERE project_id = ?").all(agent.project_id) as any[];
+    let orgContext = "";
+    if (projectAgents.length > 1) {
+      const parent = projectAgents.find((a: any) => a.id === agent.parent_id);
+      const subordinates = projectAgents.filter((a: any) => a.parent_id === agentId);
+      const peers = agent.parent_id
+        ? projectAgents.filter((a: any) => a.parent_id === agent.parent_id && a.id !== agentId)
+        : [];
+
+      const lines: string[] = [`[Org Context] You are "${agent.name}" (${agent.role}).`];
+      if (parent) lines.push(`You report to "${parent.name}" (${parent.role}).`);
+      if (subordinates.length > 0) {
+        lines.push(`Your team: ${subordinates.map((s: any) => `${s.name}(${s.role})`).join(", ")}.`);
+      }
+      if (peers.length > 0) {
+        lines.push(`Peers: ${peers.map((p: any) => `${p.name}(${p.role})`).join(", ")}.`);
+      }
+      orgContext = lines.join(" ") + "\n\n";
+    }
+
     // Return immediately — run asynchronously
     res.json({ status: "started", agentId });
 
@@ -167,7 +188,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
           broadcast("agent:output", { agentId, output: text });
         });
 
-        const result = await session.send(message.trim());
+        const result = await session.send(orgContext + message.trim());
 
         // Parse result text for broadcast
         const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");

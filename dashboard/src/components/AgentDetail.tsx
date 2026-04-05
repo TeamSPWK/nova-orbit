@@ -13,6 +13,10 @@ interface Agent {
   current_task_id: string | null;
   system_prompt?: string;
   session_id?: string;
+  parent_id?: string | null;
+  prompt_source?: string;
+  resolved_prompt_source?: string;
+  resolved_prompt_file?: string;
 }
 
 interface Task {
@@ -25,6 +29,7 @@ interface Task {
 
 interface AgentDetailProps {
   agent: Agent;
+  agents?: Agent[];
   tasks: Task[];
   onClose: () => void;
   onKill: () => void;
@@ -39,7 +44,32 @@ const STATUS_COLORS: Record<string, string> = {
   terminated: "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400",
 };
 
-export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentDetailProps) {
+const PROMPT_SOURCE_COLORS: Record<string, string> = {
+  project: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  custom: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  preset: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
+  fallback: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
+};
+
+// Selectable roles for the role change dropdown (excludes legacy: coder, designer, custom)
+const SELECTABLE_ROLES = ["cto", "backend", "frontend", "ux", "qa", "reviewer", "marketer", "devops"];
+
+const ROLE_LABELS: Record<string, string> = {
+  cto: "CTO",
+  backend: "Backend",
+  frontend: "Frontend",
+  ux: "UX",
+  qa: "QA",
+  reviewer: "Reviewer",
+  marketer: "Marketer",
+  devops: "DevOps",
+  // Legacy — display only, not selectable
+  coder: "Coder",
+  designer: "Designer",
+  custom: "Custom",
+};
+
+export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDeleted }: AgentDetailProps) {
   const { t } = useTranslation();
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showKillConfirm, setShowKillConfirm] = useState(false);
@@ -48,6 +78,23 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
   const [editedPrompt, setEditedPrompt] = useState(agent.system_prompt ?? "");
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Role editing state
+  const [isEditingRole, setIsEditingRole] = useState(false);
+  const [editedName, setEditedName] = useState(agent.name);
+  const [editedRole, setEditedRole] = useState(agent.role);
+  const [isSavingRole, setIsSavingRole] = useState(false);
+
+  // Parent change state
+  const [isChangingParent, setIsChangingParent] = useState(false);
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(agent.parent_id ?? null);
+  const [isSavingParent, setIsSavingParent] = useState(false);
+  const [parentError, setParentError] = useState<string | null>(null);
+
+  // Resolved prompt source state (loaded from GET /agents/:id on mount)
+  const [resolvedSource, setResolvedSource] = useState<string | undefined>(agent.resolved_prompt_source);
+  const [resolvedFile, setResolvedFile] = useState<string | undefined>(agent.resolved_prompt_file);
+  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
 
   // Direct prompt state
   const [directMessage, setDirectMessage] = useState("");
@@ -63,16 +110,22 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
     (t) => t.status === "blocked" && t.verification_id === null
   ).length;
 
-  // Close on outside click
+  // Affected tasks count for delete warning
+  const affectedTaskCount = tasks.filter(
+    (t) => t.assignee_id === agent.id && t.status !== "done"
+  ).length;
+
+  // Close on outside click (skip when confirm dialogs are open)
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
+      if (showKillConfirm || showDeleteConfirm) return;
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [onClose]);
+  }, [onClose, showKillConfirm, showDeleteConfirm]);
 
   // Close on Escape
   useEffect(() => {
@@ -82,6 +135,29 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
+
+  // Sync edited values when agent changes
+  useEffect(() => {
+    setEditedName(agent.name);
+    setEditedRole(agent.role);
+    setEditedPrompt(agent.system_prompt ?? "");
+    setSelectedParentId(agent.parent_id ?? null);
+    setIsChangingParent(false);
+    setParentError(null);
+  }, [agent.id, agent.name, agent.role, agent.system_prompt, agent.parent_id]);
+
+  // Load resolved prompt source from server (list API does not include resolved fields)
+  useEffect(() => {
+    let cancelled = false;
+    api.agents.get(agent.id).then((data) => {
+      if (cancelled) return;
+      setResolvedSource(data.resolved_prompt_source);
+      setResolvedFile(data.resolved_prompt_file);
+    }).catch(() => {
+      // Non-critical — silently ignore
+    });
+    return () => { cancelled = true; };
+  }, [agent.id]);
 
   const handleKillConfirm = async () => {
     setShowKillConfirm(false);
@@ -101,14 +177,89 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
     try {
       await api.agents.update(agent.id, { system_prompt: editedPrompt });
       setIsEditingPrompt(false);
+      // After saving, reload resolved source (server sets prompt_source to 'custom')
+      const data = await api.agents.get(agent.id);
+      setResolvedSource(data.resolved_prompt_source);
+      setResolvedFile(data.resolved_prompt_file);
     } finally {
       setIsSavingPrompt(false);
+    }
+  };
+
+  const handleSwitchToCustom = async () => {
+    setIsSwitchingSource(true);
+    try {
+      await api.agents.update(agent.id, { prompt_source: "custom" });
+      setResolvedSource("custom");
+      setResolvedFile(undefined);
+      setPromptExpanded(true);
+      setIsEditingPrompt(true);
+    } finally {
+      setIsSwitchingSource(false);
+    }
+  };
+
+  const handleRestoreProjectSync = async () => {
+    setIsSwitchingSource(true);
+    try {
+      await api.agents.update(agent.id, { system_prompt: "", prompt_source: "auto" });
+      const data = await api.agents.get(agent.id);
+      setResolvedSource(data.resolved_prompt_source);
+      setResolvedFile(data.resolved_prompt_file);
+      setEditedPrompt("");
+      setIsEditingPrompt(false);
+    } finally {
+      setIsSwitchingSource(false);
     }
   };
 
   const handleCancelPromptEdit = () => {
     setEditedPrompt(agent.system_prompt ?? "");
     setIsEditingPrompt(false);
+  };
+
+  const handleSaveRole = async () => {
+    setIsSavingRole(true);
+    try {
+      const updates: any = {};
+      if (editedName !== agent.name) updates.name = editedName;
+      if (editedRole !== agent.role) updates.role = editedRole;
+      if (Object.keys(updates).length > 0) {
+        await api.agents.update(agent.id, updates);
+      }
+      setIsEditingRole(false);
+    } finally {
+      setIsSavingRole(false);
+    }
+  };
+
+  // Collect all descendant IDs of this agent (to exclude from parent selector)
+  const getDescendantIds = (): Set<string> => {
+    const result = new Set<string>();
+    const queue = [agent.id];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      agents.forEach((a) => {
+        if (a.parent_id === current && !result.has(a.id)) {
+          result.add(a.id);
+          queue.push(a.id);
+        }
+      });
+    }
+    return result;
+  };
+
+  const handleSaveParent = async () => {
+    setIsSavingParent(true);
+    setParentError(null);
+    try {
+      await api.agents.update(agent.id, { parent_id: selectedParentId });
+      setIsChangingParent(false);
+    } catch (err: any) {
+      setParentError(err.message ?? t("circularRefError"));
+    } finally {
+      setIsSavingParent(false);
+    }
   };
 
   // Listen for prompt-complete events scoped to this agent
@@ -159,23 +310,12 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
     el.style.height = `${el.scrollHeight}px`;
   };
 
+  // Get subordinates for this agent
+  const subordinates = agents.filter((a) => a.parent_id === agent.id);
+  const parentAgent = agents.find((a) => a.id === agent.parent_id);
+
   return (
     <>
-      {showKillConfirm && (
-        <ConfirmDialog
-          message={t("confirmKillAgent")}
-          onConfirm={handleKillConfirm}
-          onCancel={() => setShowKillConfirm(false)}
-        />
-      )}
-      {showDeleteConfirm && (
-        <ConfirmDialog
-          message={t("deleteAgentConfirm")}
-          onConfirm={handleDeleteConfirm}
-          onCancel={() => setShowDeleteConfirm(false)}
-        />
-      )}
-
       {/* Overlay */}
       <div className="fixed inset-0 bg-black/20 dark:bg-black/40 z-40" />
 
@@ -189,10 +329,58 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
           <div className="flex items-center gap-3">
             <AgentAvatar name={agent.name} role={agent.role} size="lg" />
             <div>
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                {agent.name}
-              </h2>
-              <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</p>
+              {isEditingRole ? (
+                <div className="space-y-1.5">
+                  <input
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    className="text-sm font-semibold text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 w-full focus:outline-none focus:border-blue-400"
+                  />
+                  <select
+                    value={editedRole}
+                    onChange={(e) => setEditedRole(e.target.value)}
+                    className="text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 w-full focus:outline-none focus:border-blue-400"
+                  >
+                    {SELECTABLE_ROLES.map((r) => (
+                      <option key={r} value={r}>{ROLE_LABELS[r] ?? r}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={handleSaveRole}
+                      disabled={isSavingRole}
+                      className="px-2 py-0.5 text-[10px] bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                    >
+                      {t("savePrompt")}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditedName(agent.name);
+                        setEditedRole(agent.role);
+                        setIsEditingRole(false);
+                      }}
+                      className="px-2 py-0.5 text-[10px] text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                    >
+                      {t("cancel")}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {agent.name}
+                  </h2>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">{agent.role}</p>
+                    <button
+                      onClick={() => setIsEditingRole(true)}
+                      className="text-[10px] text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                    >
+                      {t("changeRole")}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
           <button
@@ -250,6 +438,90 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
             </div>
           </section>
 
+          {/* Org Context — parent + subordinates */}
+          {(agents.length > 0 || subordinates.length > 0) && (
+            <section>
+              <h3 className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium mb-3">
+                {t("orgContext")}
+              </h3>
+              <div className="space-y-1.5">
+                {/* Reports-to row with change button */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{t("reportsTo")}</span>
+                  {isChangingParent ? (
+                    <div className="flex items-center gap-1.5 flex-1 justify-end">
+                      <select
+                        value={selectedParentId ?? ""}
+                        onChange={(e) => setSelectedParentId(e.target.value || null)}
+                        className="text-[11px] text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 focus:outline-none focus:border-blue-400 max-w-[160px]"
+                      >
+                        <option value="">{t("noParentTopLevel")}</option>
+                        {agents
+                          .filter((a) => {
+                            if (a.id === agent.id) return false;
+                            if (getDescendantIds().has(a.id)) return false;
+                            return true;
+                          })
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>{a.name}</option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={handleSaveParent}
+                        disabled={isSavingParent}
+                        className="px-2 py-0.5 text-[10px] bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                      >
+                        {t("savePrompt")}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsChangingParent(false);
+                          setSelectedParentId(agent.parent_id ?? null);
+                          setParentError(null);
+                        }}
+                        className="text-[10px] text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                      >
+                        {t("cancel")}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      {parentAgent ? (
+                        <>
+                          <AgentAvatar name={parentAgent.name} role={parentAgent.role} size="xs" />
+                          <span className="text-xs text-gray-700 dark:text-gray-300">{parentAgent.name}</span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                      <button
+                        onClick={() => setIsChangingParent(true)}
+                        className="text-[10px] text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                      >
+                        {t("changeParent")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {parentError && (
+                  <p className="text-[10px] text-red-500 dark:text-red-400">{parentError}</p>
+                )}
+                {subordinates.length > 0 && (
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{t("manages")}</span>
+                    <div className="flex flex-wrap gap-1 justify-end">
+                      {subordinates.map((s) => (
+                        <span key={s.id} className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
+                          {s.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Live Terminal — only while working */}
           {agent.status === "working" && (
             <AgentTerminal agentId={agent.id} />
@@ -277,15 +549,43 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
-              {!isEditingPrompt && (
-                <button
-                  onClick={() => { setPromptExpanded(true); setIsEditingPrompt(true); }}
-                  className="text-[10px] text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
-                >
-                  {t("editPrompt")}
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Prompt source badge */}
+                {resolvedSource && (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                      PROMPT_SOURCE_COLORS[resolvedSource] ?? PROMPT_SOURCE_COLORS.fallback
+                    }`}
+                  >
+                    {t(
+                      resolvedSource === "project"
+                        ? "promptSourceProject"
+                        : resolvedSource === "custom"
+                        ? "promptSourceCustom"
+                        : resolvedSource === "preset"
+                        ? "promptSourcePreset"
+                        : "promptSourceFallback"
+                    )}
+                  </span>
+                )}
+                {!isEditingPrompt && resolvedSource !== "project" && (
+                  <button
+                    onClick={() => { setPromptExpanded(true); setIsEditingPrompt(true); }}
+                    className="text-[10px] text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                  >
+                    {t("editPrompt")}
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Source file path (project mode) */}
+            {resolvedSource === "project" && resolvedFile && (
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 font-mono mb-2">
+                {t("promptSourceFile", { file: resolvedFile })}
+              </p>
+            )}
+
             {promptExpanded && (
               <>
                 {isEditingPrompt ? (
@@ -319,6 +619,31 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
                   <pre className="text-[11px] text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 whitespace-pre-wrap font-mono leading-relaxed border border-gray-100 dark:border-gray-700">
                     {editedPrompt || <span className="text-gray-300 dark:text-gray-600 italic">—</span>}
                   </pre>
+                )}
+
+                {/* Source-specific action buttons */}
+                {!isEditingPrompt && resolvedSource === "project" && (
+                  <button
+                    onClick={handleSwitchToCustom}
+                    disabled={isSwitchingSource}
+                    className="mt-2 text-[10px] text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-50 transition-colors"
+                  >
+                    {t("switchToCustom")}
+                  </button>
+                )}
+                {!isEditingPrompt && resolvedSource === "custom" && (
+                  <button
+                    onClick={handleRestoreProjectSync}
+                    disabled={isSwitchingSource}
+                    className="mt-2 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50 transition-colors"
+                  >
+                    {t("restoreProjectSync")}
+                  </button>
+                )}
+                {!isEditingPrompt && (resolvedSource === "preset" || resolvedSource === "fallback") && (
+                  <p className="mt-2 text-[10px] text-gray-400 dark:text-gray-500 italic">
+                    {t("noProjectAgentFile")}
+                  </p>
                 )}
               </>
             )}
@@ -458,6 +783,26 @@ export function AgentDetail({ agent, tasks, onClose, onKill, onDeleted }: AgentD
           </div>
         </div>
       </div>
+
+      {/* ConfirmDialogs — must render AFTER panel so z-index stacks correctly */}
+      {showKillConfirm && (
+        <ConfirmDialog
+          message={t("confirmKillAgent")}
+          onConfirm={handleKillConfirm}
+          onCancel={() => setShowKillConfirm(false)}
+        />
+      )}
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          message={
+            affectedTaskCount > 0
+              ? t("deleteAgentConfirmWithTasks", { count: affectedTaskCount })
+              : t("deleteAgentConfirm")
+          }
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </>
   );
 }
