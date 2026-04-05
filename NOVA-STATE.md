@@ -1,30 +1,27 @@
 # Nova State
 
 ## Current
-- **Goal**: 방어로직 전면 강화 + Autopilot 자동화 완성 + 실시간 UX
+- **Goal**: 워크트리 격리 버그 수정 + 포트 설정 + UX 개선
 - **Phase**: done
 - **Blocker**: none
 
 ## Tasks
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
-| Autopilot 자동실행 | done | PASS | pending_approval → 자동 승인, 큐 자동 시작 |
-| 방어로직 1차 (34건) | done | PASS | constants.ts, 하드코딩 제거, 에이전트 stuck 방지 등 |
-| blocked 자동 재시도 | done | PASS | retry_count + 쿨다운 + 에이전트 재할당 + 목표 진행 보장 |
-| 서버 재시작 큐 복구 | done | PASS | Autopilot 프로젝트 큐 자동 시작 |
-| 방어로직 2차 (9건) | done | PASS | 리소스 삭제 안전화, WS 보안, DB↔WS 상태 동기화 |
-| 방어로직 3차 (7건) | done | PASS | worktree, git, 세션, 메모리 안전화 |
-| ENOENT 근본 해결 | done | PASS | PATH 보충, 환경 에러 즉시 포기 |
-| Evaluator 0점 문제 | done | PASS | 비코드 태스크 conditional pass |
-| 동적 타임아웃 | done | PASS | 고정 5분 → 활동 기반 (출력 있으면 연장) |
-| 실시간 에이전트 출력 | done | PASS | stream-json 파싱 → 아이콘+요약, 클릭 히스토리 |
+| 워크트리 격리 문제 해결 | done | PASS | needs_worktree 컬럼, reviewer/qa 프로젝트 루트 실행, 모든 모드 main 머지 |
+| 서버 포트 3000→7200 | done | PASS | bin, server, vite, predev, package.json 일괄 변경 |
+| 프로젝트 dev server 포트 설정 | done | PASS | dev_port 컬럼, force kill 옵션, 예약포트 보호, UI 추가 |
+| StatusBar ctx 제거 | done | PASS | context window % 표시 제거, 5h/토큰/비용 유지 |
+| 직접 프롬프트 컨텍스트 강화 | done | PASS | Goal+Task 상태를 org context에 주입, curl 검증 완료 |
+| Git Workflow 모드 버그 수정 | done | PASS | github_config→github 변환 (toProjectResponse) |
+| 태스크 정렬 내림차순 | done | PASS | ORDER BY created_at DESC |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| 방어로직 전면 강화 (55+건) | 2026-04-05 | PASS | 14커밋, 서버+대시보드 |
-| 실시간 UX (출력 파싱+펼침) | 2026-04-05 | PASS | agentOutputParser.ts 신규 |
-| zippit 실전 Autopilot 검증 | 2026-04-05 | PASS | 19태스크 중 18완료, 자동 복구 동작 확인 |
+| 워크트리 격리 + 포트 + UX | 2026-04-06 | PASS | 18파일 변경, c992a1d |
+| 방어로직 전면 강화 (55+건) | 2026-04-05 | PASS | 14커밋 |
+| 실시간 UX (출력 파싱+펼침) | 2026-04-05 | PASS | agentOutputParser.ts |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -34,15 +31,18 @@
 | 대시보드 오프라인 모드 | WS 끊김 시 캐시 표시 없음 | Low |
 
 ## Key Changes This Session
-- `server/utils/constants.ts` — 공유 상수 + env var 오버라이드 (14개 상수)
-- 에이전트 삭제 시 모든 비완료 Task assignee 클리어
-- 스케줄러: fixDanglingAssignees → retryBlockedTasks → autoAssignUnassigned → pickNextTasks
-- tasks 테이블: retry_count, reassign_count 컬럼 추가
-- 동적 타임아웃: lastActivity 기반 idle 감지
-- `dashboard/src/utils/agentOutputParser.ts` — stream-json → 사람 읽기 파싱
+- `server/db/schema.ts` — agents.needs_worktree 컬럼 + projects.dev_port 컬럼
+- `server/core/orchestration/engine.ts` — needs_worktree=0이면 워크트리 스킵, 모든 모드에서 main 머지
+- `server/core/project/git-workflow.ts` — mergeBranchSequential (동시 머지 방어)
+- `server/core/project/worktree.ts` — HEAD 존재 여부 방어 로직
+- `server/core/project/dev-server.ts` — 포트 검증, 예약포트 보호, force kill 지원
+- `server/api/routes/projects.ts` — toProjectResponse (github_config→github 변환)
+- `server/api/routes/orchestration.ts` — 직접 프롬프트에 Goal/Task 컨텍스트 주입
+- 서버 기본 포트 3000→7200 (bin, server, vite, package.json, predev.sh)
+- 대시보드: 워크트리 토글 UI, dev port 설정 UI
 
 ## Last Activity
-- 방어로직 전면 강화 + Autopilot 완성 + 실시간 UX | 2026-04-05
+- 워크트리 격리 버그 수정 + 포트 설정 + UX 다수 개선 | 2026-04-06
 
 ## Refs
 - Plan: docs/plans/phase2-production-ready.md
