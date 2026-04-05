@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { parseAgentOutput } from "../utils/agentOutputParser";
 
 interface TimelineEvent {
   id: string;
@@ -42,16 +43,21 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
 
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
 
-  // Listen for real-time agent output
+  // Listen for real-time agent output — parse stream-json into readable messages
   useEffect(() => {
     const onOutput = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (!d?.agentId || !d?.output) return;
-      // Extract last meaningful line (skip empty/whitespace)
-      const lines = d.output.split("\n").filter((l: string) => l.trim());
-      const last = lines[lines.length - 1]?.trim().slice(0, 120);
-      if (last) {
-        setAgentOutputs((prev) => ({ ...prev, [d.agentId]: last }));
+      const activity = parseAgentOutput(d.output);
+      if (activity) {
+        const ICONS: Record<string, string> = {
+          tool: "⚡", thinking: "💭", text: "💬", error: "⚠️", result: "✅",
+        };
+        const icon = ICONS[activity.type] ?? "";
+        setAgentOutputs((prev) => ({
+          ...prev,
+          [d.agentId]: `${icon} ${activity.message}`,
+        }));
       }
     };
     window.addEventListener("nova:agent-output", onOutput);
