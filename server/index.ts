@@ -88,12 +88,13 @@ export async function startServer(config: ServerConfig): Promise<void> {
 
   // HTTP + WebSocket server
   const server = createServer(app);
+  // 연결을 항상 수락하되, 인증 여부를 태깅 — proxy EPIPE 방지
   const wss = new WebSocketServer({ server, path: "/ws" });
 
   const broadcast = (event: string, data: unknown) => {
     const message = JSON.stringify({ type: event, payload: data, timestamp: new Date().toISOString() });
     for (const client of wss.clients) {
-      if (client.readyState === 1) {
+      if (client.readyState === 1 && (client as any).__authenticated) {
         try { client.send(message); } catch { /* skip dead client */ }
       }
     }

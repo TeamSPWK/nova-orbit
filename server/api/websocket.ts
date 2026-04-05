@@ -8,13 +8,11 @@ export function createWSHandler(wss: WebSocketServer, apiKey: string): void {
   });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    // Token verification
+    // 인증 확인 — 실패해도 close하지 않음 (proxy EPIPE 방지)
+    // 미인증 연결은 태깅만 하고 broadcast에서 제외
     const url = new URL(req.url ?? "", "http://localhost");
     const token = url.searchParams.get("token");
-    if (token !== apiKey) {
-      ws.close(4001, "Unauthorized");
-      return;
-    }
+    (ws as any).__authenticated = token === apiKey;
 
     // Handle client errors gracefully
     ws.on("error", (err) => {
