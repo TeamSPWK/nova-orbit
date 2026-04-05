@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import { createLogger } from "../utils/logger.js";
+import { cleanupStaleWorktrees } from "./project/worktree.js";
 
 const log = createLogger("recovery");
 
@@ -53,8 +54,19 @@ export function recoverOnStartup(db: Database): RecoveryResult {
   // 3. 에이전트 상태 초기화: working → idle, current_task_id 해제
   db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE status = 'working'").run();
 
-  if (recoveredTasks > 0 || killedProcesses > 0) {
-    log.info(`Recovery complete: ${recoveredTasks} tasks restored, ${killedProcesses} orphan processes killed`);
+  // 4. 잔존 worktree + agent branch 정리 (프로젝트별)
+  let cleanedWorktrees = 0;
+  try {
+    const projects = db.prepare("SELECT workdir FROM projects WHERE status = 'active' AND workdir != ''").all() as { workdir: string }[];
+    for (const p of projects) {
+      cleanedWorktrees += cleanupStaleWorktrees(p.workdir);
+    }
+  } catch (err: any) {
+    log.warn(`Worktree cleanup failed: ${err.message}`);
+  }
+
+  if (recoveredTasks > 0 || killedProcesses > 0 || cleanedWorktrees > 0) {
+    log.info(`Recovery complete: ${recoveredTasks} tasks restored, ${killedProcesses} orphan processes killed, ${cleanedWorktrees} stale worktrees cleaned`);
   }
 
   return { recoveredTasks, killedProcesses };

@@ -357,11 +357,11 @@ Fix ONLY these issues. Do not modify other code.
           .run(task.assignee_id);
         broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
 
-        // Worktree 정리 (Sprint 4)
+        // Worktree + branch 정리 (Sprint 4)
         if (worktreeInfo) {
           try {
             const { removeWorktree } = await import("../project/worktree.js");
-            removeWorktree(workdir, worktreeInfo.path);
+            removeWorktree(workdir, worktreeInfo.path, worktreeInfo.branch);
           } catch { /* 정리 실패는 무시 */ }
         }
       }
