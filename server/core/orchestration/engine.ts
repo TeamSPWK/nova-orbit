@@ -630,8 +630,8 @@ function getGitHubConfig(db: Database, projectId: string): GitHubConfig | null {
 
 /**
  * Run git workflow after a task passes verification.
- * Returns null when github config is absent (workflow skipped).
- * Returns the workflow result (including error field) otherwise.
+ * - With githubConfig: full workflow (commit → push → PR)
+ * - Without githubConfig: local commit only (코드 보존 — worktree 정리 전 필수)
  * Never throws — git failures must not corrupt already-verified code.
  */
 async function runGitWorkflow(
@@ -644,9 +644,16 @@ async function runGitWorkflow(
   worktreeBranch?: string,
 ): Promise<{ error?: string } | null> {
   const githubConfig = getGitHubConfig(db, task.project_id);
-  if (!githubConfig) return null;
 
-  const result = executeGitWorkflow(workdir, task.title, agentName, githubConfig, {
+  // github_config 없어도 로컬 commit은 수행 (worktree 정리 전 코드 보존)
+  const effectiveConfig: GitHubConfig = githubConfig ?? {
+    repoUrl: "",
+    branch: worktreeBranch ?? "main",
+    autoPush: false,
+    prMode: false,
+  };
+
+  const result = executeGitWorkflow(workdir, task.title, agentName, effectiveConfig, {
     overrideBranch: worktreeBranch,
   });
 
