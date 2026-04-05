@@ -17,7 +17,10 @@ export default defineConfig({
         target: "ws://127.0.0.1:3000",
         ws: true,
         configure: (proxy) => {
-          proxy.on("error", () => {}); // Suppress WS proxy errors
+          proxy.on("error", () => {});
+          proxy.on("proxyReqWs", (_proxyReq: unknown, _req: unknown, socket: any) => {
+            socket.on("error", () => {}); // Suppress EPIPE/ECONNRESET on WS proxy socket
+          });
         },
       },
     },

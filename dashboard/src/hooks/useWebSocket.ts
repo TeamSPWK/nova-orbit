@@ -7,13 +7,18 @@ export function useWebSocket() {
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const token = getApiKey();
-    const wsUrl = `${protocol}//${window.location.host}/ws${token ? `?token=${token}` : ""}`;
 
     let destroyed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
+      // API 키가 없으면 연결 지연 — initAuth() 완료 대기
+      const token = getApiKey();
+      if (!token) {
+        if (!destroyed) reconnectTimer = setTimeout(connect, 1000);
+        return;
+      }
+      const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
