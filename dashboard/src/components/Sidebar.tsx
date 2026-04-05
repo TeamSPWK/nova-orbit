@@ -147,7 +147,7 @@ export function Sidebar() {
           {projects.map((p) => (
             <button
               key={p.id}
-              onClick={() => setCurrentProject(p.id)}
+              onClick={() => { setCurrentProject(p.id); window.dispatchEvent(new CustomEvent("nova:close-guide")); }}
               className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
                 currentProjectId === p.id
                   ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium"

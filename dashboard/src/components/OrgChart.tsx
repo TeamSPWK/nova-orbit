@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentAvatar } from "./AgentAvatar";
 import { AgentDetail } from "./AgentDetail";
@@ -58,14 +58,11 @@ const STATUS_LABEL: Record<string, string> = {
   idle: "idle",
 };
 
-/** 특정 노드의 모든 자식(직계)을 반환 */
-function getChildren(agents: Agent[], parentId: string): Agent[] {
-  return agents.filter((a) => a.parent_id === parentId);
-}
 
 interface NodeProps {
   agent: Agent;
   agents: Agent[];
+  childrenMap: Record<string, Agent[]>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onQuickPrompt: (agent: Agent) => void;
@@ -76,8 +73,8 @@ interface NodeProps {
   isLast: boolean;
 }
 
-function OrgNode({ agent, agents, selectedId, onSelect, onQuickPrompt, onDrop, dragOverId, onDragOverChange, depth }: NodeProps) {
-  const children = getChildren(agents, agent.id);
+function OrgNode({ agent, agents, childrenMap, selectedId, onSelect, onQuickPrompt, onDrop, dragOverId, onDragOverChange, depth }: NodeProps) {
+  const children = childrenMap[agent.id] ?? [];
   const isSelected = selectedId === agent.id;
   const isWorking = agent.status === "working";
   const isDragOver = dragOverId === agent.id;
@@ -204,6 +201,7 @@ function OrgNode({ agent, agents, selectedId, onSelect, onQuickPrompt, onDrop, d
                   <OrgNode
                     agent={child}
                     agents={agents}
+                    childrenMap={childrenMap}
                     selectedId={selectedId}
                     onSelect={onSelect}
                     onQuickPrompt={onQuickPrompt}
@@ -355,8 +353,18 @@ export function OrgChart({ agents, tasks, onAddAgent, onAgentDeleted, onAgentKil
 
   const selectedAgent = agents.find((a) => a.id === selectedId) ?? null;
 
+  // useMemo로 parentId → children[] 맵 1회 생성
+  const childrenMap = useMemo(() => {
+    return agents.reduce<Record<string, Agent[]>>((acc, a) => {
+      const key = a.parent_id ?? "__root__";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(a);
+      return acc;
+    }, {});
+  }, [agents]);
+
   // parent_id가 null인 루트 노드들
-  const roots = agents.filter((a) => !a.parent_id);
+  const roots = childrenMap["__root__"] ?? [];
 
   const handleClose = () => setSelectedId(null);
   const handleKill = () => {
@@ -503,6 +511,7 @@ export function OrgChart({ agents, tasks, onAddAgent, onAgentDeleted, onAgentKil
                   key={root.id}
                   agent={root}
                   agents={agents}
+                  childrenMap={childrenMap}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onQuickPrompt={setQuickPromptAgent}

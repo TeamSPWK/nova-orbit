@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { TaskDetail } from "./TaskDetail";
@@ -38,6 +38,15 @@ interface TaskListProps {
 
 const DONE_PREVIEW_COUNT = 5;
 
+function groupBy<T>(arr: T[], key: keyof T): Record<string, T[]> {
+  return arr.reduce<Record<string, T[]>>((acc, item) => {
+    const k = String(item[key]);
+    if (!acc[k]) acc[k] = [];
+    acc[k].push(item);
+    return acc;
+  }, {});
+}
+
 export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) {
   const { t } = useTranslation();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
@@ -48,10 +57,14 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
   const [rejectingTask, setRejectingTask] = useState<{ id: string; title: string } | null>(null);
   const [taskUsage, setTaskUsage] = useState<Map<string, { costUsd: number; totalTokens: number }>>(new Map());
   const [showAllDone, setShowAllDone] = useState(false);
-  const [doneSearch, setDoneSearch] = useState("");
-  const [showDoneSearch, setShowDoneSearch] = useState(false);
-  const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+  const [globalSearch, setGlobalSearch] = useState("");
+
+  const agentMap = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
+  const groupedTasks = useMemo(() => groupBy(tasks, "status"), [tasks]);
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
+
+  const isSearching = globalSearch.trim() !== "";
+  const searchTerm = globalSearch.trim().toLowerCase();
 
   // Per-task interval refs for elapsed time counters
   const intervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -111,22 +124,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
     };
   }, []);
 
-  if (tasks.length === 0) {
-    return (
-      <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
-        <div className="text-3xl mb-2 opacity-40">📋</div>
-        <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
-          {t("emptyTasksTitle")}
-        </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500">
-          {t("emptyTasksDesc")}
-        </p>
-      </div>
-    );
-  }
-
   const handleTaskClick = (e: React.MouseEvent, taskId: string) => {
-    // Don't open modal if clicking on interactive controls inside the row
     const target = e.target as HTMLElement;
     if (target.closest("select") || target.closest("button")) return;
     setSelectedTaskId(taskId);
@@ -155,9 +153,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
     await api.tasks.reject(taskId, feedback || undefined);
     onUpdate?.();
 
-    // Auto-rerun: wait for status to go back to todo, then execute
     if (autoRerun) {
-      // Small delay to let the status update propagate
       setTimeout(() => handleRunTask(taskId), 500);
     }
   };
@@ -169,7 +165,166 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
     onUpdate?.();
   };
 
-  return (
+  const renderTaskRow = (task: TaskListProps["tasks"][0]) => {
+    const isRunning = runningTasks.has(task.id);
+    const seconds = elapsedSeconds[task.id] ?? 0;
+    const usage = taskUsage.get(task.id);
+    const config = STATUS_COLORS[task.status] ?? STATUS_COLORS.todo;
+
+    return (
+      <div
+        key={task.id}
+        onClick={(e) => handleTaskClick(e, task.id)}
+        className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors dark:bg-gray-800 cursor-pointer ${
+          isRunning
+            ? "border-blue-400 dark:border-blue-500 animate-pulse"
+            : "border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600"
+        } ${config.bg}`}
+      >
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{task.title}</span>
+          {task.verification_id && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
+              {t("verified")}
+            </span>
+          )}
+          {task.status === "todo" && task.description?.includes("--- Rejection Feedback ---") && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded shrink-0">
+              {t("rejected")}
+            </span>
+          )}
+          {task.status === "done" && usage && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded shrink-0">
+              ${usage.costUsd.toFixed(2)}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0 ml-3">
+          {/* Agent assignment */}
+          {task.assignee_id && agentMap[task.assignee_id] ? (
+            <span className="text-[10px] text-gray-400 dark:text-gray-400 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600">
+              {agentMap[task.assignee_id].name}
+            </span>
+          ) : assigningTaskId === task.id ? (
+            <select
+              autoFocus
+              defaultValue=""
+              onChange={(e) => handleAssignSelect(task.id, e.target.value)}
+              onBlur={() => setAssigningTaskId(null)}
+              className="text-[10px] text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-blue-300 dark:border-blue-600 rounded px-1 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="" disabled>{t("promptAssignAgent")}</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          ) : (
+            <button
+              onClick={() => setAssigningTaskId(task.id)}
+              className="text-[10px] text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 px-1.5 py-0.5 border border-dashed border-gray-200 dark:border-gray-600 rounded"
+            >
+              {t("assign")}
+            </button>
+          )}
+
+          {/* Status dropdown */}
+          <select
+            aria-label={t("taskStatus")}
+            value={task.status}
+            onChange={(e) => handleStatusChange(task.id, e.target.value)}
+            className="text-[10px] text-gray-400 dark:text-gray-400 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5 cursor-pointer"
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {t(STATUS_LABEL_KEYS[s])}
+              </option>
+            ))}
+          </select>
+
+          {/* Governance: Verify → Approve/Reject for in_review tasks */}
+          {task.status === "in_review" && (
+            <>
+              {task.verification_id ? (
+                <>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
+                    {t("verified")}
+                  </span>
+                  <button
+                    onClick={async () => { await api.tasks.approve(task.id); onUpdate?.(); }}
+                    className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"
+                  >
+                    {t("approve")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded">
+                    {t("unverified")}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      setVerifyingTasks((prev) => new Set(prev).add(task.id));
+                      try {
+                        await api.orchestration.verifyTask(task.id);
+                      } catch { /* result comes via WebSocket */ }
+                    }}
+                    disabled={verifyingTasks.has(task.id)}
+                    className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                      verifyingTasks.has(task.id)
+                        ? "bg-purple-50 dark:bg-purple-900/30 text-purple-400 cursor-not-allowed"
+                        : "bg-purple-500 text-white hover:bg-purple-600"
+                    }`}
+                  >
+                    {verifyingTasks.has(task.id) ? t("verifying") : t("verify")}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setRejectingTask({ id: task.id, title: task.title })}
+                className="text-[10px] px-2 py-0.5 rounded font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
+              >
+                {t("reject")}
+              </button>
+            </>
+          )}
+
+          {/* Run button — only for assigned tasks in todo/blocked */}
+          {task.assignee_id &&
+            (task.status === "todo" || task.status === "blocked") && (
+              <button
+                onClick={() => handleRunTask(task.id)}
+                disabled={isRunning}
+                className={`text-[10px] px-2 py-0.5 rounded font-medium transition-colors flex items-center gap-1 ${
+                  isRunning
+                    ? "bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 cursor-not-allowed"
+                    : "bg-blue-500 text-white hover:bg-blue-600"
+                }`}
+              >
+                {isRunning ? (
+                  <>
+                    <svg
+                      className="animate-spin w-2.5 h-2.5 shrink-0"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    {t("taskRunning", { seconds })}
+                  </>
+                ) : (
+                  t("run")
+                )}
+              </button>
+            )}
+        </div>
+      </div>
+    );
+  };
+
+  const modals = (
     <>
       {selectedTask && (
         <TaskDetail
@@ -186,249 +341,98 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
           onCancel={() => setRejectingTask(null)}
         />
       )}
-    <div className="space-y-5">
-      {STATUSES.map((status) => {
-        const filtered = tasks.filter((task) => task.status === status);
-        if (filtered.length === 0) return null;
-        const config = STATUS_COLORS[status];
-        const labelKey = STATUS_LABEL_KEYS[status];
+    </>
+  );
 
-        // done 상태: 검색 또는 5개 초과 시 접기
-        const isDone = status === "done";
-        const isSearching = isDone && doneSearch.trim() !== "";
-        const doneFiltered = isSearching
-          ? filtered.filter((task) => task.title.toLowerCase().includes(doneSearch.toLowerCase()))
-          : filtered;
-        const visibleTasks = isDone && !showAllDone && !isSearching && doneFiltered.length > DONE_PREVIEW_COUNT
-          ? doneFiltered.slice(0, DONE_PREVIEW_COUNT)
-          : doneFiltered;
-        const hiddenCount = doneFiltered.length - visibleTasks.length;
+  if (tasks.length === 0) {
+    return (
+      <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
+        <div className="text-3xl mb-2 opacity-40">📋</div>
+        <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+          {t("emptyTasksTitle")}
+        </p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          {t("emptyTasksDesc")}
+        </p>
+      </div>
+    );
+  }
 
-        return (
-          <div key={status}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`text-xs font-medium ${config.color}`}>{t(labelKey)}</span>
-              <span className="text-[10px] text-gray-300">{filtered.length}</span>
-              {isDone && (
-                <div className="ml-auto flex items-center gap-1">
-                  {showDoneSearch && (
-                    <input
-                      autoFocus
-                      type="text"
-                      value={doneSearch}
-                      onChange={(e) => setDoneSearch(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Escape") { setDoneSearch(""); setShowDoneSearch(false); } }}
-                      placeholder={t("searchDoneTasks")}
-                      className="text-[11px] px-2 py-0.5 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-400 w-36"
-                    />
-                  )}
-                  <button
-                    onClick={() => { setShowDoneSearch((v) => !v); if (showDoneSearch) setDoneSearch(""); }}
-                    className="text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 transition-colors"
-                    aria-label={t("searchDoneTasks")}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="11" cy="11" r="8" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-              {status === "in_review" && filtered.length > 1 && projectId && (
-                <button
-                  onClick={async () => {
-                    await api.tasks.bulkApprove(projectId);
-                    onUpdate?.();
-                  }}
-                  className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600 ml-auto"
-                >
-                  {t("bulkApprove", { count: filtered.length })}
-                </button>
-              )}
-            </div>
+  return (
+    <>
+      {modals}
+      {/* 전역 검색 바 */}
+      <div className="mb-4">
+        <input
+          type="text"
+          value={globalSearch}
+          onChange={(e) => setGlobalSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") setGlobalSearch(""); }}
+          placeholder={t("searchAllTasks")}
+          className="w-full text-sm px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+        />
+      </div>
+
+      {isSearching ? (
+        (() => {
+          const searchResults = tasks.filter((task) => task.title.toLowerCase().includes(searchTerm));
+          return searchResults.length === 0 ? (
+            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">{t("noSearchResults")}</p>
+          ) : (
             <div className="space-y-1">
-              {visibleTasks.map((task) => {
-                const isRunning = runningTasks.has(task.id);
-                const seconds = elapsedSeconds[task.id] ?? 0;
-                const usage = taskUsage.get(task.id);
-                return (
-                <div
-                  key={task.id}
-                  onClick={(e) => handleTaskClick(e, task.id)}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors dark:bg-gray-800 cursor-pointer ${
-                    isRunning
-                      ? "border-blue-400 dark:border-blue-500 animate-pulse"
-                      : `border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600`
-                  } ${config.bg}`}
-                >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{task.title}</span>
-                    {task.verification_id && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
-                        {t("verified")}
-                      </span>
-                    )}
-                    {task.status === "todo" && task.description?.includes("--- Rejection Feedback ---") && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded shrink-0">
-                        {t("rejected")}
-                      </span>
-                    )}
-                    {task.status === "done" && usage && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded shrink-0">
-                        ${usage.costUsd.toFixed(2)}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0 ml-3">
-                    {/* Agent assignment */}
-                    {task.assignee_id && agentMap[task.assignee_id] ? (
-                      <span className="text-[10px] text-gray-400 dark:text-gray-400 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600">
-                        {agentMap[task.assignee_id].name}
-                      </span>
-                    ) : assigningTaskId === task.id ? (
-                      <select
-                        autoFocus
-                        defaultValue=""
-                        onChange={(e) => handleAssignSelect(task.id, e.target.value)}
-                        onBlur={() => setAssigningTaskId(null)}
-                        className="text-[10px] text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-blue-300 dark:border-blue-600 rounded px-1 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
-                      >
-                        <option value="" disabled>{t("promptAssignAgent")}</option>
-                        {agents.map((a) => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <button
-                        onClick={() => setAssigningTaskId(task.id)}
-                        className="text-[10px] text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 px-1.5 py-0.5 border border-dashed border-gray-200 dark:border-gray-600 rounded"
-                      >
-                        {t("assign")}
-                      </button>
-                    )}
-
-                    {/* Status dropdown */}
-                    <select
-                      aria-label={t("taskStatus")}
-                      value={task.status}
-                      onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                      className="text-[10px] text-gray-400 dark:text-gray-400 bg-transparent dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5 cursor-pointer"
-                    >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {t(STATUS_LABEL_KEYS[s])}
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Governance: Verify → Approve/Reject for in_review tasks */}
-                    {task.status === "in_review" && (
-                      <>
-                        {task.verification_id ? (
-                          <>
-                            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
-                              {t("verified")}
-                            </span>
-                            <button
-                              onClick={async () => { await api.tasks.approve(task.id); onUpdate?.(); }}
-                              className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600"
-                            >
-                              {t("approve")}
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded">
-                              {t("unverified")}
-                            </span>
-                            <button
-                              onClick={async () => {
-                                setVerifyingTasks((prev) => new Set(prev).add(task.id));
-                                try {
-                                  await api.orchestration.verifyTask(task.id);
-                                } catch { /* result comes via WebSocket */ }
-                              }}
-                              disabled={verifyingTasks.has(task.id)}
-                              className={`text-[10px] px-2 py-0.5 rounded font-medium ${
-                                verifyingTasks.has(task.id)
-                                  ? "bg-purple-50 dark:bg-purple-900/30 text-purple-400 cursor-not-allowed"
-                                  : "bg-purple-500 text-white hover:bg-purple-600"
-                              }`}
-                            >
-                              {verifyingTasks.has(task.id) ? t("verifying") : t("verify")}
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => setRejectingTask({ id: task.id, title: task.title })}
-                          className="text-[10px] px-2 py-0.5 rounded font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
-                        >
-                          {t("reject")}
-                        </button>
-                      </>
-                    )}
-
-                    {/* Run button — only for assigned tasks in todo/blocked */}
-                    {task.assignee_id &&
-                      (task.status === "todo" || task.status === "blocked") && (
-                        <button
-                          onClick={() => handleRunTask(task.id)}
-                          disabled={isRunning}
-                          className={`text-[10px] px-2 py-0.5 rounded font-medium transition-colors flex items-center gap-1 ${
-                            isRunning
-                              ? "bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 cursor-not-allowed"
-                              : "bg-blue-500 text-white hover:bg-blue-600"
-                          }`}
-                        >
-                          {isRunning ? (
-                            <>
-                              <svg
-                                className="animate-spin w-2.5 h-2.5 shrink-0"
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8v8H4z"
-                                />
-                              </svg>
-                              {t("taskRunning", { seconds })}
-                            </>
-                          ) : (
-                            t("run")
-                          )}
-                        </button>
-                      )}
-                  </div>
-                </div>
-                );
-              })}
+              {searchResults.map((task) => renderTaskRow(task))}
             </div>
-            {isDone && !isSearching && doneFiltered.length > DONE_PREVIEW_COUNT && (
-              <button
-                onClick={() => setShowAllDone((v) => !v)}
-                className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              >
-                {showAllDone
-                  ? t("showLessDone")
-                  : t("showMoreDone", { count: hiddenCount })}
-              </button>
-            )}
-          </div>
-        );
-      })}
-    </div>
+          );
+        })()
+      ) : (
+        <div className="space-y-5">
+          {STATUSES.map((status) => {
+            const filtered = groupedTasks[status] ?? [];
+            if (filtered.length === 0) return null;
+            const config = STATUS_COLORS[status];
+            const labelKey = STATUS_LABEL_KEYS[status];
+
+            const isDone = status === "done";
+            const visibleTasks = isDone && !showAllDone && filtered.length > DONE_PREVIEW_COUNT
+              ? filtered.slice(0, DONE_PREVIEW_COUNT)
+              : filtered;
+            const hiddenCount = filtered.length - visibleTasks.length;
+
+            return (
+              <div key={status}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`text-xs font-medium ${config.color}`}>{t(labelKey)}</span>
+                  <span className="text-[10px] text-gray-300">{filtered.length}</span>
+                  {status === "in_review" && filtered.length > 1 && projectId && (
+                    <button
+                      onClick={async () => {
+                        await api.tasks.bulkApprove(projectId);
+                        onUpdate?.();
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded font-medium bg-green-500 text-white hover:bg-green-600 ml-auto"
+                    >
+                      {t("bulkApprove", { count: filtered.length })}
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {visibleTasks.map((task) => renderTaskRow(task))}
+                </div>
+                {isDone && filtered.length > DONE_PREVIEW_COUNT && (
+                  <button
+                    onClick={() => setShowAllDone((v) => !v)}
+                    className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  >
+                    {showAllDone
+                      ? t("showLessDone")
+                      : t("showMoreDone", { count: hiddenCount })}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }

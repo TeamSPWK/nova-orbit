@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
@@ -49,6 +49,10 @@ export function ProjectHome() {
   const [toast, setToast] = useState<string | null>(null);
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
   const [queueToggling, setQueueToggling] = useState(false);
+
+  // Goals 접기 상태
+  const [showCompletedGoals, setShowCompletedGoals] = useState(false);
+  const COMPLETED_GOALS_THRESHOLD = 3;
 
   // Direct prompt state (side panel)
   const [panelPromptMessage, setPanelPromptMessage] = useState("");
@@ -158,6 +162,9 @@ export function ProjectHome() {
       window.removeEventListener("nova:prompt-complete", onSingleComplete);
     };
   }, [multiAgentMode]);
+
+  // useMemo MUST be called before any early returns (Rules of Hooks)
+  const agentMap = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
 
   if (!project) {
     return <WelcomeGuide />;
@@ -342,7 +349,6 @@ export function ProjectHome() {
   };
 
   // Derive in-progress task and its assigned agent for the chat panel
-  const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
   const inProgressTask = tasks.find((t) => t.status === "in_progress") ?? null;
   const inProgressAgent = inProgressTask?.assignee_id
     ? agents.find((a) => a.id === inProgressTask.assignee_id) ?? null
@@ -601,101 +607,168 @@ export function ProjectHome() {
                     </button>
                   </div>
                 )}
-                {goals.map((goal) => {
-                  const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
-                  const doneTasks = goalTasks.filter((tk) => tk.status === "done");
-                  const activeTasks = goalTasks.filter((tk) => tk.status !== "done");
-                  const pct = goalTasks.length > 0 ? Math.round((doneTasks.length / goalTasks.length) * 100) : 0;
-                  const isComplete = pct === 100 && goalTasks.length > 0;
-                  return (
-                  <div
-                    key={goal.id}
-                    className="mb-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] overflow-hidden"
-                  >
-                    <div className="flex items-center justify-between gap-3 px-3 py-2">
-                      <span className={`text-sm font-medium min-w-0 ${isComplete ? "text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-100"}`}>
-                        {goal.description}
-                      </span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                          {doneTasks.length}/{goalTasks.length} ({pct}%)
-                        </span>
-                        <button
-                          onClick={() => handleDeleteGoal(goal.id)}
-                          title={t("deleteGoal")}
-                          className="text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 transition-colors p-0.5"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-                        {tasks.some((t) => t.goal_id === goal.id) ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                            {t("decomposed")}
+                {(() => {
+                  const renderGoalCard = (goal: typeof goals[0]) => {
+                    const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                    const doneTasks = goalTasks.filter((tk) => tk.status === "done");
+                    const activeTasks = goalTasks.filter((tk) => tk.status !== "done");
+                    const pct = goalTasks.length > 0 ? Math.round((doneTasks.length / goalTasks.length) * 100) : 0;
+                    const isComplete = pct === 100 && goalTasks.length > 0;
+                    const TASK_PREVIEW = 3;
+                    const visibleActiveTasks = activeTasks.slice(0, TASK_PREVIEW);
+                    const hiddenTaskCount = activeTasks.length - visibleActiveTasks.length;
+                    return (
+                      <div
+                        key={goal.id}
+                        className="mb-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] overflow-hidden"
+                      >
+                        <div className="flex items-center justify-between gap-3 px-3 py-2">
+                          <span className={`text-sm font-medium min-w-0 ${isComplete ? "text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-100"}`}>
+                            {goal.description}
                           </span>
-                        ) : (
-                          <button
-                            onClick={() => handleDecomposeGoal(goal.id)}
-                            disabled={decomposingGoalId !== null}
-                            className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
-                              decomposingGoalId === goal.id
-                                ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
-                                : decomposingGoalId !== null
-                                  ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
-                                  : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
-                            }`}
-                          >
-                            {decomposingGoalId === goal.id ? (
-                              <>
-                                <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                                </svg>
-                                {t("decomposing")}
-                              </>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                              {doneTasks.length}/{goalTasks.length} ({pct}%)
+                            </span>
+                            <button
+                              onClick={() => handleDeleteGoal(goal.id)}
+                              title={t("deleteGoal")}
+                              className="text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 transition-colors p-0.5"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                              </svg>
+                            </button>
+                            {tasks.some((tk) => tk.goal_id === goal.id) ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                                {t("decomposed")}
+                              </span>
                             ) : (
-                              t("decompose")
+                              <button
+                                onClick={() => handleDecomposeGoal(goal.id)}
+                                disabled={decomposingGoalId !== null}
+                                className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                                  decomposingGoalId === goal.id
+                                    ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
+                                    : decomposingGoalId !== null
+                                      ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
+                                      : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
+                                }`}
+                              >
+                                {decomposingGoalId === goal.id ? (
+                                  <>
+                                    <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                    </svg>
+                                    {t("decomposing")}
+                                  </>
+                                ) : (
+                                  t("decompose")
+                                )}
+                              </button>
                             )}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleAddTask(goal.id)}
-                          className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap"
-                        >
-                          {t("addTask")}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3">
-                      <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                    {/* Inline tasks for this goal */}
-                    {activeTasks.length > 0 && (
-                      <div className="px-3 pb-2 space-y-1">
-                        {activeTasks.map((tk) => (
-                          <div key={tk.id} className="flex items-center gap-2 text-[11px] py-0.5">
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              tk.status === "in_progress" ? "bg-blue-500 animate-pulse"
-                              : tk.status === "in_review" ? "bg-purple-500"
-                              : tk.status === "blocked" ? "bg-red-500"
-                              : "bg-gray-300 dark:bg-gray-600"
-                            }`} />
-                            <span className="text-gray-700 dark:text-gray-300 truncate flex-1">{tk.title}</span>
-                            {tk.assignee_id && agentMap[tk.assignee_id] && (
-                              <span className="text-[9px] text-gray-400 dark:text-gray-500 shrink-0">{agentMap[tk.assignee_id].name}</span>
+                            <button
+                              onClick={() => handleAddTask(goal.id)}
+                              className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap"
+                            >
+                              {t("addTask")}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3">
+                          <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        {/* Inline tasks for this goal — 최대 3개 */}
+                        {visibleActiveTasks.length > 0 && (
+                          <div className="px-3 pb-2 space-y-1">
+                            {visibleActiveTasks.map((tk) => (
+                              <div key={tk.id} className="flex items-center gap-2 text-[11px] py-0.5">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                  tk.status === "in_progress" ? "bg-blue-500 animate-pulse"
+                                  : tk.status === "in_review" ? "bg-purple-500"
+                                  : tk.status === "blocked" ? "bg-red-500"
+                                  : "bg-gray-300 dark:bg-gray-600"
+                                }`} />
+                                <span className="text-gray-700 dark:text-gray-300 truncate flex-1">{tk.title}</span>
+                                {tk.assignee_id && agentMap[tk.assignee_id] && (
+                                  <span className="text-[9px] text-gray-400 dark:text-gray-500 shrink-0">{agentMap[tk.assignee_id].name}</span>
+                                )}
+                              </div>
+                            ))}
+                            {hiddenTaskCount > 0 && (
+                              <span className="text-[10px] text-gray-400 dark:text-gray-500 pl-3.5">
+                                {t("showMoreTasks", { count: hiddenTaskCount })}
+                              </span>
                             )}
                           </div>
-                        ))}
+                        )}
+                        {doneTasks.length > 0 && (
+                          <div className="px-3 pb-2">
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500">{t("doneCount", { count: doneTasks.length })}</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {doneTasks.length > 0 && (
-                      <div className="px-3 pb-2">
-                        <span className="text-[10px] text-gray-400 dark:text-gray-500">{t("doneCount", { count: doneTasks.length })}</span>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  };
+
+                  const activeGoals = goals.filter((g) => {
+                    const goalTasks = tasks.filter((tk) => tk.goal_id === g.id);
+                    const pct = goalTasks.length > 0
+                      ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
+                      : 0;
+                    return !(pct === 100 && goalTasks.length > 0);
+                  });
+                  const completedGoals = goals.filter((g) => {
+                    const goalTasks = tasks.filter((tk) => tk.goal_id === g.id);
+                    const pct = goalTasks.length > 0
+                      ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
+                      : 0;
+                    return pct === 100 && goalTasks.length > 0;
+                  });
+                  const visibleCompleted = showCompletedGoals
+                    ? completedGoals
+                    : completedGoals.slice(0, COMPLETED_GOALS_THRESHOLD);
+                  const hiddenCompletedCount = completedGoals.length - visibleCompleted.length;
+
+                  return (
+                    <>
+                      {/* Active 목표 */}
+                      {activeGoals.map(renderGoalCard)}
+
+                      {/* 완료 목표 섹션 */}
+                      {completedGoals.length > 0 && (
+                        <div className="mt-4">
+                          <button
+                            onClick={() => setShowCompletedGoals((v) => !v)}
+                            className="flex items-center gap-2 mb-2 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          >
+                            <svg
+                              className={`w-3 h-3 transition-transform ${showCompletedGoals ? "rotate-90" : ""}`}
+                              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                            >
+                              <polyline points="9 18 15 12 9 6" />
+                            </svg>
+                            <span>{t("completedGoals")} ({completedGoals.length})</span>
+                          </button>
+                          {showCompletedGoals && (
+                            <>
+                              {visibleCompleted.map(renderGoalCard)}
+                              {hiddenCompletedCount > 0 && (
+                                <button
+                                  onClick={() => setShowCompletedGoals(true)}
+                                  className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                                >
+                                  {t("showMoreGoals", { count: hiddenCompletedCount })}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
                   );
-                })}
+                })()}
               </section>
 
               {/* Tasks Section */}

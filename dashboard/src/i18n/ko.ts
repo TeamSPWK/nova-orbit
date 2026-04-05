@@ -474,6 +474,19 @@ const ko = {
   filterFail: "실패",
   missionPlaceholderDetailed: "프로젝트 미션을 상세히 입력하세요...\n예: 기술 스택, 목표, 제약 조건, 타겟 사용자 등",
   viewGuide: "가이드",
+
+  // large-data-ux-refactor
+  searchAllTasks: "태스크 검색...",
+  noSearchResults: "검색 결과 없음",
+  completedGoals: "완료 목표",
+  activeGoals: "진행 중 목표",
+  showMoreGoals: "완료 {{count}}개 더보기",
+  showMoreTasks: "+ {{count}}개 더",
+  dateGroupToday: "오늘",
+  dateGroupYesterday: "어제",
+  dateGroupThisWeek: "이번 주",
+  dateGroupOlder: "이전",
+  showMoreLogs: "{{count}}개 더보기",
 } as const;
 
 export default ko;

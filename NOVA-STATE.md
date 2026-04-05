@@ -35,9 +35,9 @@
 | Phase 3 에이전트 자동 토론 | 라운드 로빈 토론 | Medium |
 
 ## Last Activity
-- /nova:auto Sprint 1+2+3 → PASS — Agent Prompt Resolution 전체 완료 | 2026-04-05T09:22:00+09:00
+- /nova:auto Sprint 1+2+3 → PASS — 대량 데이터 UX 리팩토링 전체 완료 | 2026-04-05T11:32:00+09:00
 
 ## Refs
 - Plan: docs/PROJECT.md
-- Design: docs/KICKOFF.md, docs/designs/agent-prompt-resolution.md
+- Design: docs/KICKOFF.md, docs/designs/agent-prompt-resolution.md, docs/designs/large-data-ux-refactor.md
 - Last Verification: 빌드 PASS + vitest 44/44 + 멀티에이전트 실사용 테스트

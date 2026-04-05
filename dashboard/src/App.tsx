@@ -38,11 +38,14 @@ function App() {
       setServerUp((e as CustomEvent).detail.up);
     };
     const guideHandler = () => setShowGuide(true);
+    const closeGuideHandler = () => setShowGuide(false);
     window.addEventListener("nova:server-status", handler);
     window.addEventListener("nova:show-guide", guideHandler);
+    window.addEventListener("nova:close-guide", closeGuideHandler);
     return () => {
       window.removeEventListener("nova:server-status", handler);
       window.removeEventListener("nova:show-guide", guideHandler);
+      window.removeEventListener("nova:close-guide", closeGuideHandler);
     };
   }, []);
 

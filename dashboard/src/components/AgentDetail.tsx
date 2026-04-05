@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { AgentTerminal } from "./AgentTerminal";
@@ -103,12 +103,22 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
   const [promptError, setPromptError] = useState<string | null>(null);
   const directTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const agentTasks = tasks.filter((t) => t.assignee_id === agent.id);
+  const HISTORY_THRESHOLD = 10;
+  const [showAllHistory, setShowAllHistory] = useState(false);
+
+  const agentTasks = useMemo(
+    () => tasks.filter((t) => t.assignee_id === agent.id),
+    [tasks, agent.id]
+  );
   const currentTask = tasks.find((t) => t.id === agent.current_task_id);
-  const passCount = agentTasks.filter((t) => t.verification_id !== null).length;
-  const failCount = agentTasks.filter(
-    (t) => t.status === "blocked" && t.verification_id === null
-  ).length;
+  const passCount = useMemo(
+    () => agentTasks.filter((t) => t.verification_id !== null).length,
+    [agentTasks]
+  );
+  const failCount = useMemo(
+    () => agentTasks.filter((t) => t.status === "blocked" && t.verification_id === null).length,
+    [agentTasks]
+  );
 
   // Affected tasks count for delete warning
   const affectedTaskCount = tasks.filter(
@@ -684,28 +694,40 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
             {agentTasks.length === 0 ? (
               <p className="text-xs text-gray-400 dark:text-gray-500">{t("agentDetailNoTasks")}</p>
             ) : (
-              <div className="space-y-1.5">
-                {agentTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700"
-                  >
-                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 mr-2">
-                      {task.title}
-                    </span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {task.verification_id && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
-                          {t("verified")}
-                        </span>
-                      )}
-                      <span className="text-[10px] text-gray-400 dark:text-gray-500 capitalize">
-                        {task.status.replace(/_/g, " ")}
+              <>
+                <div className="space-y-1.5">
+                  {(showAllHistory ? agentTasks : agentTasks.slice(0, HISTORY_THRESHOLD)).map((task) => (
+                    <div
+                      key={task.id}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700"
+                    >
+                      <span className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1 mr-2">
+                        {task.title}
                       </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {task.verification_id && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
+                            {t("verified")}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500 capitalize">
+                          {task.status.replace(/_/g, " ")}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+                {agentTasks.length > HISTORY_THRESHOLD && (
+                  <button
+                    onClick={() => setShowAllHistory((v) => !v)}
+                    className="mt-2 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  >
+                    {showAllHistory
+                      ? t("showLessDone")
+                      : t("showMoreLogs", { count: agentTasks.length - HISTORY_THRESHOLD })}
+                  </button>
+                )}
+              </>
             )}
           </section>
         </div>

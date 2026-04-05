@@ -474,6 +474,19 @@ const en = {
   filterFail: "Fail",
   missionPlaceholderDetailed: "Describe the project mission in detail...\nE.g. tech stack, goals, constraints, target users",
   viewGuide: "Guide",
+
+  // large-data-ux-refactor
+  searchAllTasks: "Search tasks...",
+  noSearchResults: "No search results",
+  completedGoals: "Completed goals",
+  activeGoals: "Active goals",
+  showMoreGoals: "Show {{count}} more completed",
+  showMoreTasks: "+ {{count}} more",
+  dateGroupToday: "Today",
+  dateGroupYesterday: "Yesterday",
+  dateGroupThisWeek: "This week",
+  dateGroupOlder: "Older",
+  showMoreLogs: "Show {{count}} more",
 } as const;
 
 export default en;

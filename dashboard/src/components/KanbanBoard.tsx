@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   DndContext,
@@ -115,12 +115,22 @@ function TaskCard({ task, agents }: { task: Task; agents: Agent[] }) {
 
 const KANBAN_DONE_PREVIEW = 5;
 
+function groupByStatus(tasks: Task[]): Record<string, Task[]> {
+  return tasks.reduce<Record<string, Task[]>>((acc, task) => {
+    if (!acc[task.status]) acc[task.status] = [];
+    acc[task.status].push(task);
+    return acc;
+  }, {});
+}
+
 export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
   const { t } = useTranslation();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showAllDone, setShowAllDone] = useState(false);
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
+
+  const groupedTasks = useMemo(() => groupByStatus(tasks), [tasks]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -177,7 +187,7 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
     >
       <div className="flex gap-3 overflow-x-auto pb-4">
         {COLUMNS.map((col) => {
-          const columnTasks = tasks.filter((t) => t.status === col.id);
+          const columnTasks = groupedTasks[col.id] ?? [];
           const isDone = col.id === "done";
           const visibleTasks = isDone && !showAllDone && columnTasks.length > KANBAN_DONE_PREVIEW
             ? columnTasks.slice(0, KANBAN_DONE_PREVIEW)
@@ -203,7 +213,7 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
                 items={visibleTasks.map((t) => t.id)}
                 strategy={verticalListSortingStrategy}
               >
-                <div className="px-2 pb-2 space-y-2 min-h-[60px]">
+                <div className="px-2 pb-2 space-y-2 min-h-[60px] max-h-[calc(100vh-280px)] overflow-y-auto">
                   {visibleTasks.map((task) => (
                     <SortableCard
                       key={task.id}
