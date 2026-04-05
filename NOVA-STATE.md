@@ -2,9 +2,8 @@
 
 ## Current
 - **Goal**: Nova Orbit v0.1.0 — 전체 기능 + 보안 + CTO 자동화 + 멀티 에이전트
-- **Phase**: building
+- **Phase**: done
 - **Blocker**: none
-- **Next**: Agent Prompt Resolution — 프로젝트 에이전트 우선 전략 구현
 
 ## Tasks
 | Task | Status | Verdict | Note |
@@ -20,19 +19,24 @@
 | 멀티 에이전트 프롬프트 | done | PASS | 순차릴레이+컨텍스트체이닝+CTO자동생성 |
 | 개요 UX 개편 | done | PASS | 칩→텍스트요약/인라인태스크/done접힘 |
 | 상태바 | done | PASS | 모델+토큰+경과시간 |
+| Agent Prompt Resolution | done | PASS | 4단계 Resolution Chain+경로Traversal방어+소스배지 |
+| 에이전트 탭 전면 개편 | done | PASS | 전체삭제/교체/DnD/퀵프롬프트/스마트팀/워크플로우모달 |
+| 대량 데이터 UX 리팩토링 | done | PASS | useMemo전면적용/접기패턴/그리드가이드/검증신뢰도 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
+| 대량 데이터 UX 리팩토링 | 2026-04-05 | PASS | useMemo+접기+그리드가이드+검증로그날짜그룹 |
 | Agent Prompt Resolution | 2026-04-05 | PASS | 4단계 Resolution Chain + UI 배지 |
-| 에이전트 탭 개선 5종 | 2026-04-05 | PASS | 전체삭제/교체/퀵프롬프트/삭제안전/org주입 |
-| 멀티 에이전트 프롬프트 | 2026-04-05 | PASS | FE+CTO 테스트 성공 |
+| 에이전트 탭 전면 개편 | 2026-04-05 | PASS | DnD소속변경/스마트팀/워크플로우모달/프리셋개편 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
 |------|-------------------|----------|
 | npm publish | npmjs.com 미배포 | Low |
 | Phase 3 에이전트 자동 토론 | 라운드 로빈 토론 | Medium |
+| API 페이지네이션 | 서버 API limit/offset 미구현 (프론트 접기로 임시 대응) | Medium |
+| 단위 테스트 | prompt-resolver 등 신규 모듈 테스트 미작성 | Medium |
 
 ## Last Activity
 - /nova:auto Sprint 1+2+3 → PASS — 대량 데이터 UX 리팩토링 전체 완료 | 2026-04-05T11:32:00+09:00
@@ -40,4 +44,4 @@
 ## Refs
 - Plan: docs/PROJECT.md
 - Design: docs/KICKOFF.md, docs/designs/agent-prompt-resolution.md, docs/designs/large-data-ux-refactor.md
-- Last Verification: 빌드 PASS + vitest 44/44 + 멀티에이전트 실사용 테스트
+- Last Verification: 빌드 PASS + tsc --noEmit PASS + Playwright UI 검증
