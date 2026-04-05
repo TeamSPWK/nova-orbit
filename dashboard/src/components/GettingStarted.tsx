@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { WelcomeGuide } from "./WelcomeGuide";
 
 interface GettingStartedProps {
   onClose?: () => void;
@@ -17,6 +18,14 @@ export function GettingStarted({ onClose }: GettingStartedProps) {
           {t("backToProject")}
         </button>
       )}
+
+      {/* Welcome card — always visible from guide page */}
+      <div className="mb-8 flex justify-center">
+        <div className="w-full max-w-sm">
+          <WelcomeGuide embedded />
+        </div>
+      </div>
+
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
         {t("guideTitle")}
       </h1>

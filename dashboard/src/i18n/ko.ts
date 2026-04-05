@@ -467,6 +467,7 @@ const ko = {
   deleteGoalConfirm: "이 목표와 관련 태스크를 삭제하시겠습니까?",
   showMoreDone: "완료 {{count}}개 더보기",
   showLessDone: "접기",
+  searchDoneTasks: "완료 태스크 검색...",
   filterAll: "전체",
   filterPass: "통과",
   filterConditional: "조건부",

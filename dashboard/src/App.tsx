@@ -18,6 +18,7 @@ import { useNotifications } from "./stores/useNotifications";
 function App() {
   const { t, i18n } = useTranslation();
   const { setProjects, setCurrentProject, connected } = useStore();
+  const currentProjectId = useStore((s) => s.currentProjectId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -25,6 +26,11 @@ function App() {
   const { notifications } = useNotifications();
 
   useWebSocket();
+
+  // currentProject가 변경되면 가이드 닫기
+  useEffect(() => {
+    if (currentProjectId) setShowGuide(false);
+  }, [currentProjectId]);
 
   // Listen for server status changes
   useEffect(() => {

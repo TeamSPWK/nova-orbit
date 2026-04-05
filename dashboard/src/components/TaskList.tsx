@@ -48,6 +48,8 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
   const [rejectingTask, setRejectingTask] = useState<{ id: string; title: string } | null>(null);
   const [taskUsage, setTaskUsage] = useState<Map<string, { costUsd: number; totalTokens: number }>>(new Map());
   const [showAllDone, setShowAllDone] = useState(false);
+  const [doneSearch, setDoneSearch] = useState("");
+  const [showDoneSearch, setShowDoneSearch] = useState(false);
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
 
@@ -191,18 +193,47 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
         const config = STATUS_COLORS[status];
         const labelKey = STATUS_LABEL_KEYS[status];
 
-        // done 상태: 5개 초과 시 접기
+        // done 상태: 검색 또는 5개 초과 시 접기
         const isDone = status === "done";
-        const visibleTasks = isDone && !showAllDone && filtered.length > DONE_PREVIEW_COUNT
-          ? filtered.slice(0, DONE_PREVIEW_COUNT)
+        const isSearching = isDone && doneSearch.trim() !== "";
+        const doneFiltered = isSearching
+          ? filtered.filter((task) => task.title.toLowerCase().includes(doneSearch.toLowerCase()))
           : filtered;
-        const hiddenCount = filtered.length - visibleTasks.length;
+        const visibleTasks = isDone && !showAllDone && !isSearching && doneFiltered.length > DONE_PREVIEW_COUNT
+          ? doneFiltered.slice(0, DONE_PREVIEW_COUNT)
+          : doneFiltered;
+        const hiddenCount = doneFiltered.length - visibleTasks.length;
 
         return (
           <div key={status}>
             <div className="flex items-center gap-2 mb-2">
               <span className={`text-xs font-medium ${config.color}`}>{t(labelKey)}</span>
               <span className="text-[10px] text-gray-300">{filtered.length}</span>
+              {isDone && (
+                <div className="ml-auto flex items-center gap-1">
+                  {showDoneSearch && (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={doneSearch}
+                      onChange={(e) => setDoneSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Escape") { setDoneSearch(""); setShowDoneSearch(false); } }}
+                      placeholder={t("searchDoneTasks")}
+                      className="text-[11px] px-2 py-0.5 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-400 w-36"
+                    />
+                  )}
+                  <button
+                    onClick={() => { setShowDoneSearch((v) => !v); if (showDoneSearch) setDoneSearch(""); }}
+                    className="text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 transition-colors"
+                    aria-label={t("searchDoneTasks")}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  </button>
+                </div>
+              )}
               {status === "in_review" && filtered.length > 1 && projectId && (
                 <button
                   onClick={async () => {
@@ -384,7 +415,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
                 );
               })}
             </div>
-            {isDone && filtered.length > DONE_PREVIEW_COUNT && (
+            {isDone && !isSearching && doneFiltered.length > DONE_PREVIEW_COUNT && (
               <button
                 onClick={() => setShowAllDone((v) => !v)}
                 className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"

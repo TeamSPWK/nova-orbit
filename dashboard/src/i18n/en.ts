@@ -467,6 +467,7 @@ const en = {
   deleteGoalConfirm: "Delete this goal and its related tasks?",
   showMoreDone: "Show {{count}} more done",
   showLessDone: "Collapse",
+  searchDoneTasks: "Search done tasks...",
   filterAll: "All",
   filterPass: "Pass",
   filterConditional: "Conditional",

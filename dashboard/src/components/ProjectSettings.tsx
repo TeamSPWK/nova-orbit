@@ -48,8 +48,8 @@ export function ProjectSettings({ projectId }: Props) {
     finally { setSaving(false); }
   };
 
-  const handleMissionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") saveMission();
+  const handleMissionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); saveMission(); }
     if (e.key === "Escape") cancelEditMission();
   };
 
@@ -92,22 +92,24 @@ export function ProjectSettings({ projectId }: Props) {
         </h2>
         <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d]">
           {editingMission ? (
-            <div className="flex items-center gap-2">
-              <input
-                autoFocus type="text" value={missionDraft}
+            <div className="flex flex-col gap-2">
+              <textarea
+                autoFocus rows={3} value={missionDraft}
                 onChange={(e) => setMissionDraft(e.target.value)}
                 onKeyDown={handleMissionKeyDown} disabled={saving}
-                className="flex-1 text-sm border border-blue-400 rounded px-2 py-1 bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                placeholder={t("projectMissionPlaceholder")}
+                className="w-full text-sm border border-blue-400 rounded px-2 py-1 bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
+                placeholder={t("missionPlaceholderDetailed")}
               />
-              <button onClick={saveMission} disabled={saving}
-                className="text-xs px-3 py-1 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 rounded hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50">
-                {saving ? t("settingsSaving") : t("settingsSave")}
-              </button>
-              <button onClick={cancelEditMission} disabled={saving}
-                className="text-xs px-3 py-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                {t("settingsCancel")}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={saveMission} disabled={saving}
+                  className="text-xs px-3 py-1 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 rounded hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50">
+                  {saving ? t("settingsSaving") : t("settingsSave")}
+                </button>
+                <button onClick={cancelEditMission} disabled={saving}
+                  className="text-xs px-3 py-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+                  {t("settingsCancel")}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex items-start gap-2 group cursor-pointer" onClick={startEditMission} title={t("clickToEdit")}>

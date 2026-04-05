@@ -13,7 +13,11 @@ const STEPS: Step[] = [
   { icon: "▶️", titleKey: "welcomeStep4Title", descKey: "welcomeStep4Desc" },
 ];
 
-export function WelcomeGuide() {
+interface WelcomeGuideProps {
+  embedded?: boolean;
+}
+
+export function WelcomeGuide({ embedded }: WelcomeGuideProps) {
   const { t } = useTranslation();
 
   const handleNewProject = () => {
@@ -24,9 +28,8 @@ export function WelcomeGuide() {
     window.dispatchEvent(new CustomEvent("nova:open-import"));
   };
 
-  return (
-    <div className="flex-1 flex items-center justify-center p-8">
-      <div className="w-full max-w-sm bg-white dark:bg-[#25253d] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm p-8">
+  const card = (
+    <div className="w-full max-w-sm bg-white dark:bg-[#25253d] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm p-8">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🚀</div>
@@ -84,6 +87,13 @@ export function WelcomeGuide() {
           {t("welcomeCmdK")}
         </p>
       </div>
+  );
+
+  if (embedded) return card;
+
+  return (
+    <div className="flex-1 flex items-center justify-center p-8">
+      {card}
     </div>
   );
 }
