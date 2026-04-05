@@ -89,6 +89,140 @@ export function createGoalRoutes(ctx: AppContext): Router {
     res.json({ success: true });
   });
 
+  // ─── Goal Spec endpoints ───────────────────────────────
+
+  // Get spec for a goal
+  router.get("/:id/spec", (req, res) => {
+    const spec = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(req.params.id) as any;
+    if (!spec) return res.status(404).json({ error: "Spec not found for this goal" });
+    res.json({
+      id: spec.id,
+      goal_id: spec.goal_id,
+      prd_summary: JSON.parse(spec.prd_summary || "{}"),
+      feature_specs: JSON.parse(spec.feature_specs || "[]"),
+      user_flow: JSON.parse(spec.user_flow || "[]"),
+      acceptance_criteria: JSON.parse(spec.acceptance_criteria || "[]"),
+      tech_considerations: JSON.parse(spec.tech_considerations || "[]"),
+      generated_by: spec.generated_by,
+      version: spec.version,
+      created_at: spec.created_at,
+      updated_at: spec.updated_at,
+    });
+  });
+
+  // Update spec manually
+  router.patch("/:id/spec", (req, res) => {
+    const goalId = req.params.id;
+    const existing = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+    if (!existing) return res.status(404).json({ error: "Spec not found" });
+
+    const { prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations } = req.body;
+
+    try {
+      db.prepare(`
+        UPDATE goal_specs SET
+          prd_summary = COALESCE(?, prd_summary),
+          feature_specs = COALESCE(?, feature_specs),
+          user_flow = COALESCE(?, user_flow),
+          acceptance_criteria = COALESCE(?, acceptance_criteria),
+          tech_considerations = COALESCE(?, tech_considerations),
+          generated_by = 'manual',
+          version = version + 1,
+          updated_at = datetime('now')
+        WHERE goal_id = ?
+      `).run(
+        prd_summary ? JSON.stringify(prd_summary) : null,
+        feature_specs ? JSON.stringify(feature_specs) : null,
+        user_flow ? JSON.stringify(user_flow) : null,
+        acceptance_criteria ? JSON.stringify(acceptance_criteria) : null,
+        tech_considerations ? JSON.stringify(tech_considerations) : null,
+        goalId,
+      );
+
+      const updated = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+      res.json({
+        ...updated,
+        prd_summary: JSON.parse(updated.prd_summary),
+        feature_specs: JSON.parse(updated.feature_specs),
+        user_flow: JSON.parse(updated.user_flow),
+        acceptance_criteria: JSON.parse(updated.acceptance_criteria),
+        tech_considerations: JSON.parse(updated.tech_considerations),
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Generate spec using AI — fire-and-forget pattern
+  // Returns 202 immediately, generation continues in background.
+  // Client polls GET /goals/:id/spec for result.
+  router.post("/:id/generate-spec", (req, res) => {
+    const goalId = req.params.id;
+    const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
+    if (!goal) return res.status(404).json({ error: "Goal not found" });
+
+    if (!ctx.generateGoalSpec) {
+      return res.status(503).json({ error: "Orchestration engine not ready" });
+    }
+
+    // Mark as generating (client can check this)
+    const existing = db.prepare("SELECT id FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+    if (!existing) {
+      db.prepare(
+        "INSERT INTO goal_specs (goal_id, prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations, generated_by) VALUES (?, '{\"_status\":\"generating\"}', '[]', '[]', '[]', '[]', 'ai')"
+      ).run(goalId);
+    } else {
+      db.prepare("UPDATE goal_specs SET prd_summary = '{\"_status\":\"generating\"}', updated_at = datetime('now') WHERE goal_id = ?").run(goalId);
+    }
+
+    // Return immediately
+    res.status(202).json({ status: "generating", goalId });
+
+    // Background generation
+    ctx.generateGoalSpec(goalId).then(() => {
+      log.info(`Spec generated for goal ${goalId}`);
+      broadcast("project:updated", { projectId: goal.project_id });
+    }).catch((err: any) => {
+      log.error(`Failed to generate spec for goal ${goalId}`, err);
+      // Clean up the placeholder on failure
+      db.prepare("UPDATE goal_specs SET prd_summary = '{\"_status\":\"failed\",\"_error\":\"' || ? || '\"}', updated_at = datetime('now') WHERE goal_id = ?")
+        .run((err.message || "Unknown error").slice(0, 200), goalId);
+      broadcast("project:updated", { projectId: goal.project_id });
+    });
+  });
+
+  // AI Refine — user sends a custom prompt to modify existing spec
+  router.post("/:id/refine-spec", async (req, res) => {
+    const goalId = req.params.id;
+    const { prompt } = req.body;
+    if (!prompt || typeof prompt !== "string") {
+      return res.status(400).json({ error: "prompt is required" });
+    }
+
+    const specRow = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+    if (!specRow) return res.status(404).json({ error: "No spec to refine — generate one first" });
+
+    const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
+    if (!goal) return res.status(404).json({ error: "Goal not found" });
+
+    if (!ctx.generateGoalSpec) {
+      return res.status(503).json({ error: "Orchestration engine not ready" });
+    }
+
+    // Use the refine function (registered from orchestration routes)
+    if (!(ctx as any).refineGoalSpec) {
+      return res.status(503).json({ error: "Refine not available" });
+    }
+
+    try {
+      const result = await (ctx as any).refineGoalSpec(goalId, prompt);
+      res.json(result);
+    } catch (err: any) {
+      log.error(`Failed to refine spec for goal ${goalId}`, err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- Internal: autopilot decompose + queue start ---
   async function triggerAutopilotDecompose(goalId: string, projectId: string) {
     // Guard: ensure engine and scheduler are available (lazy import from ctx)

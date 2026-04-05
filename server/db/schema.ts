@@ -308,6 +308,24 @@ export function migrate(db: Database.Database): void {
   // Composite index for session context chain queries (Sprint 6)
   db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_assignee_done ON tasks(assignee_id, status, updated_at DESC)");
 
+  // Goal Specs table (Structured Planning — ManyFast-inspired)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goal_specs (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+      goal_id TEXT NOT NULL UNIQUE REFERENCES goals(id) ON DELETE CASCADE,
+      prd_summary TEXT NOT NULL DEFAULT '{}',
+      feature_specs TEXT NOT NULL DEFAULT '[]',
+      user_flow TEXT NOT NULL DEFAULT '[]',
+      acceptance_criteria TEXT NOT NULL DEFAULT '[]',
+      tech_considerations TEXT NOT NULL DEFAULT '[]',
+      generated_by TEXT NOT NULL DEFAULT 'ai' CHECK (generated_by IN ('ai', 'manual')),
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_specs_goal ON goal_specs(goal_id);
+  `);
+
 }
 
 export function generateId(): string {

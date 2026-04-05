@@ -6,6 +6,7 @@ import { createOrchestrationEngine } from "../../core/orchestration/engine.js";
 import { createScheduler } from "../../core/orchestration/scheduler.js";
 import { createQualityGate } from "../../core/quality-gate/evaluator.js";
 import { MAX_PROMPT_LEN, MAX_TITLE_LEN, MAX_DESC_LEN } from "../../utils/constants.js";
+import { parseStreamJson } from "../../core/agent/adapters/stream-parser.js";
 
 export function createOrchestrationRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -629,8 +630,247 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     res.json({ approved: result.changes });
   });
 
-  // Expose engine & scheduler on ctx for autopilot triggers in goals.ts / projects.ts
+  // ─── Goal Spec Generator (ManyFast-inspired structured planning) ───
+
+  async function generateGoalSpec(goalId: string): Promise<any> {
+    const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
+    if (!goal) throw new Error(`Goal ${goalId} not found`);
+
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as any;
+
+    // Use CTO or first agent for spec generation
+    const agent = (db.prepare(
+      "SELECT * FROM agents WHERE project_id = ? AND role = 'cto' LIMIT 1",
+    ).get(goal.project_id) as any)
+      ?? (db.prepare(
+        "SELECT * FROM agents WHERE project_id = ? LIMIT 1",
+      ).get(goal.project_id) as any);
+
+    if (!agent) throw new Error("No agents available for spec generation");
+
+    const techStack = project?.tech_stack ? JSON.parse(project.tech_stack) : null;
+    const techInfo = techStack
+      ? `\nTech Stack: ${techStack.languages?.join(", ")} / ${techStack.frameworks?.join(", ")}`
+      : "";
+
+    const specPrompt = `
+# Structured Spec Generation
+
+You are a senior product manager. Generate a structured specification for this goal.
+
+**Project**: ${project?.name || "Unknown"}${techInfo}
+**Goal**: "${goal.description}"
+
+Generate a comprehensive spec in this EXACT JSON format:
+\`\`\`json
+{
+  "prd_summary": {
+    "background": "Why this goal exists — context and motivation",
+    "objective": "Core objective in one sentence",
+    "scope": "What is included and excluded",
+    "success_metrics": ["Metric 1", "Metric 2"]
+  },
+  "feature_specs": [
+    {
+      "name": "Feature name",
+      "description": "What this feature does",
+      "requirements": ["Req 1", "Req 2"],
+      "priority": "must"
+    }
+  ],
+  "user_flow": [
+    {
+      "step": 1,
+      "action": "User does X",
+      "expected": "System responds with Y"
+    }
+  ],
+  "acceptance_criteria": [
+    "Given X, when Y, then Z"
+  ],
+  "tech_considerations": [
+    "Consider X for performance",
+    "Use Y pattern for maintainability"
+  ]
+}
+\`\`\`
+
+Rules:
+- Be specific to this project and goal, not generic
+- Feature priority: "must" (essential), "should" (important), "could" (nice to have)
+- Acceptance criteria in Given/When/Then format
+- Tech considerations should reference the actual tech stack
+- Keep it concise but comprehensive (3-7 features, 5-10 flow steps)
+`;
+
+    let session;
+    try {
+      session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd());
+      const result = await session.send(specPrompt);
+      const parsed = parseStreamJson(result.stdout);
+
+      const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) throw new Error("No JSON found in spec generation response");
+
+      const specData = JSON.parse(jsonMatch[1]);
+
+      // Upsert into goal_specs
+      const existing = db.prepare("SELECT id, version FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+
+      if (existing) {
+        db.prepare(`
+          UPDATE goal_specs SET
+            prd_summary = ?, feature_specs = ?, user_flow = ?,
+            acceptance_criteria = ?, tech_considerations = ?,
+            generated_by = 'ai', version = version + 1, updated_at = datetime('now')
+          WHERE goal_id = ?
+        `).run(
+          JSON.stringify(specData.prd_summary || {}),
+          JSON.stringify(specData.feature_specs || []),
+          JSON.stringify(specData.user_flow || []),
+          JSON.stringify(specData.acceptance_criteria || []),
+          JSON.stringify(specData.tech_considerations || []),
+          goalId,
+        );
+      } else {
+        db.prepare(`
+          INSERT INTO goal_specs (goal_id, prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations, generated_by)
+          VALUES (?, ?, ?, ?, ?, ?, 'ai')
+        `).run(
+          goalId,
+          JSON.stringify(specData.prd_summary || {}),
+          JSON.stringify(specData.feature_specs || []),
+          JSON.stringify(specData.user_flow || []),
+          JSON.stringify(specData.acceptance_criteria || []),
+          JSON.stringify(specData.tech_considerations || []),
+        );
+      }
+
+      const saved = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+
+      broadcast("project:updated", { projectId: goal.project_id });
+
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'spec_generated', ?)",
+      ).run(goal.project_id, `Structured spec generated for goal: "${goal.description.slice(0, 80)}"`);
+
+      return {
+        ...saved,
+        prd_summary: JSON.parse(saved.prd_summary),
+        feature_specs: JSON.parse(saved.feature_specs),
+        user_flow: JSON.parse(saved.user_flow),
+        acceptance_criteria: JSON.parse(saved.acceptance_criteria),
+        tech_considerations: JSON.parse(saved.tech_considerations),
+      };
+    } finally {
+      if (session) sessionManager.killSession(agent.id);
+    }
+  }
+
+  // ─── Refine Goal Spec with custom prompt ───
+  async function refineGoalSpec(goalId: string, userPrompt: string): Promise<any> {
+    const specRow = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+    if (!specRow) throw new Error("No spec to refine");
+
+    const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
+    if (!goal) throw new Error("Goal not found");
+
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as any;
+
+    const agent = (db.prepare(
+      "SELECT * FROM agents WHERE project_id = ? AND role = 'cto' LIMIT 1",
+    ).get(goal.project_id) as any)
+      ?? (db.prepare(
+        "SELECT * FROM agents WHERE project_id = ? LIMIT 1",
+      ).get(goal.project_id) as any);
+
+    if (!agent) throw new Error("No agents available");
+
+    const currentSpec = {
+      prd_summary: JSON.parse(specRow.prd_summary || "{}"),
+      feature_specs: JSON.parse(specRow.feature_specs || "[]"),
+      user_flow: JSON.parse(specRow.user_flow || "[]"),
+      acceptance_criteria: JSON.parse(specRow.acceptance_criteria || "[]"),
+      tech_considerations: JSON.parse(specRow.tech_considerations || "[]"),
+    };
+
+    const refinePrompt = `
+# Spec Refinement
+
+You are refining an existing structured spec based on the user's request.
+
+**Goal**: "${goal.description}"
+
+**Current Spec**:
+\`\`\`json
+${JSON.stringify(currentSpec, null, 2)}
+\`\`\`
+
+**User's Request**: "${userPrompt}"
+
+Apply the user's request to modify the spec. Return the COMPLETE updated spec in this EXACT JSON format:
+\`\`\`json
+{
+  "prd_summary": { "background": "...", "objective": "...", "scope": "...", "success_metrics": ["..."] },
+  "feature_specs": [{ "name": "...", "description": "...", "requirements": ["..."], "priority": "must|should|could" }],
+  "user_flow": [{ "step": 1, "action": "...", "expected": "..." }],
+  "acceptance_criteria": ["Given X, when Y, then Z"],
+  "tech_considerations": ["..."]
+}
+\`\`\`
+
+Rules:
+- Only change what the user asked for — preserve everything else
+- Return the COMPLETE spec, not just the changed parts
+- Keep existing items unless explicitly asked to remove them
+`;
+
+    let session;
+    try {
+      session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd());
+      const result = await session.send(refinePrompt);
+      const parsed = parseStreamJson(result.stdout);
+
+      const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) throw new Error("No JSON found in refine response");
+
+      const refined = JSON.parse(jsonMatch[1]);
+
+      db.prepare(`
+        UPDATE goal_specs SET
+          prd_summary = ?, feature_specs = ?, user_flow = ?,
+          acceptance_criteria = ?, tech_considerations = ?,
+          generated_by = 'ai', version = version + 1, updated_at = datetime('now')
+        WHERE goal_id = ?
+      `).run(
+        JSON.stringify(refined.prd_summary || currentSpec.prd_summary),
+        JSON.stringify(refined.feature_specs || currentSpec.feature_specs),
+        JSON.stringify(refined.user_flow || currentSpec.user_flow),
+        JSON.stringify(refined.acceptance_criteria || currentSpec.acceptance_criteria),
+        JSON.stringify(refined.tech_considerations || currentSpec.tech_considerations),
+        goalId,
+      );
+
+      const saved = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
+      broadcast("project:updated", { projectId: goal.project_id });
+
+      return {
+        ...saved,
+        prd_summary: JSON.parse(saved.prd_summary),
+        feature_specs: JSON.parse(saved.feature_specs),
+        user_flow: JSON.parse(saved.user_flow),
+        acceptance_criteria: JSON.parse(saved.acceptance_criteria),
+        tech_considerations: JSON.parse(saved.tech_considerations),
+      };
+    } finally {
+      if (session) sessionManager.killSession(agent.id);
+    }
+  }
+
+  // Expose engine, scheduler, spec generator, and refiner on ctx
   ctx.orchestrationEngine = engine;
+  ctx.generateGoalSpec = generateGoalSpec;
+  (ctx as any).refineGoalSpec = refineGoalSpec;
   ctx.scheduler = scheduler;
 
   return router;

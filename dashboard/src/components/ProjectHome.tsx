@@ -16,6 +16,7 @@ import { Toast } from "./Toast";
 import { WelcomeGuide } from "./WelcomeGuide";
 import { ProjectStats } from "./ProjectStats";
 import { AutopilotModal } from "./AutopilotModal";
+import GoalSpecPanel from "./GoalSpecPanel";
 
 type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
 
@@ -65,6 +66,9 @@ export function ProjectHome() {
   // Goals 접기 상태
   const [showCompletedGoals, setShowCompletedGoals] = useState(false);
   const COMPLETED_GOALS_THRESHOLD = 3;
+
+  // Goal Spec state
+  const [specGoalId, setSpecGoalId] = useState<string | null>(null);
 
   // Direct prompt state (side panel)
   const [panelPromptMessage, setPanelPromptMessage] = useState("");
@@ -475,6 +479,9 @@ export function ProjectHome() {
         />
       )}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+      {specGoalId && (
+        <GoalSpecPanel goalId={specGoalId} onClose={() => setSpecGoalId(null)} />
+      )}
       {showAutopilotModal && (
         <AutopilotModal
           currentMode={autopilotMode}
@@ -753,9 +760,18 @@ export function ProjectHome() {
               {/* Goals Section */}
               <section className="mb-8">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-                    {t("goals")}
-                  </h2>
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+                      {t("goals")}
+                    </h2>
+                    <div className="relative group">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 dark:bg-gray-700 text-[9px] font-bold text-gray-500 dark:text-gray-400 cursor-help">?</span>
+                      <div className="absolute left-0 top-6 z-50 w-64 p-3 bg-white dark:bg-[#2a2a3d] border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg text-xs text-gray-600 dark:text-gray-300 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity">
+                        <p className="font-semibold text-gray-800 dark:text-gray-100 mb-1">{t("specGuideTitle")}</p>
+                        <p>{t("specGuideBody")}</p>
+                      </div>
+                    </div>
+                  </div>
                   <button
                     onClick={handleAddGoal}
                     className="text-xs text-gray-400 hover:text-gray-600"
@@ -811,6 +827,12 @@ export function ProjectHome() {
                               <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                               </svg>
+                            </button>
+                            <button
+                              onClick={() => setSpecGoalId(goal.id)}
+                              className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors whitespace-nowrap"
+                            >
+                              {t("specView")}
                             </button>
                             {tasks.some((tk) => tk.goal_id === goal.id) ? (
                               <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">

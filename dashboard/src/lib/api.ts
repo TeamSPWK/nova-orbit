@@ -113,6 +113,13 @@ export const api = {
     update: (id: string, data: any) =>
       request<any>(`/goals/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) => request<any>(`/goals/${id}`, { method: "DELETE" }),
+    getSpec: (goalId: string) => request<any>(`/goals/${goalId}/spec`),
+    updateSpec: (goalId: string, data: any) =>
+      request<any>(`/goals/${goalId}/spec`, { method: "PATCH", body: JSON.stringify(data) }),
+    generateSpec: (goalId: string) =>
+      request<any>(`/goals/${goalId}/generate-spec`, { method: "POST" }),
+    refineSpec: (goalId: string, prompt: string) =>
+      request<any>(`/goals/${goalId}/refine-spec`, { method: "POST", body: JSON.stringify({ prompt }) }),
   },
   tasks: {
     list: (projectId: string) => request<any[]>(`/tasks?projectId=${projectId}`),

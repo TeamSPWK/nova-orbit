@@ -37,6 +37,7 @@ export interface AppContext {
     generateGoalsFromMission: (projectId: string) => Promise<{ goalIds: string[] }>;
     executeTask: (taskId: string, config?: any) => Promise<{ success: boolean; verdict: string }>;
   };
+  generateGoalSpec?: (goalId: string) => Promise<any>;
   scheduler?: Scheduler;
 }
 

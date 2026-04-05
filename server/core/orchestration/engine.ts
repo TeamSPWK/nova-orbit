@@ -449,12 +449,48 @@ Fix ONLY these issues. Do not modify other code.
       ).all(goal.project_id) as { name: string; role: string }[];
       const roleList = availableAgents.map((a) => `"${a.role}" (${a.name})`).join(", ");
 
+      // Check if goal has a structured spec for richer context
+      const goalSpec = db.prepare("SELECT * FROM goal_specs WHERE goal_id = ?").get(goal.id) as any;
+      let specContext = "";
+      if (goalSpec) {
+        try {
+          const prd = JSON.parse(goalSpec.prd_summary || "{}");
+          const features = JSON.parse(goalSpec.feature_specs || "[]");
+          const flow = JSON.parse(goalSpec.user_flow || "[]");
+          const criteria = JSON.parse(goalSpec.acceptance_criteria || "[]");
+          const tech = JSON.parse(goalSpec.tech_considerations || "[]");
+
+          specContext = `
+
+## Structured Spec (use this to create better tasks)
+
+### PRD Summary
+- **Background**: ${prd.background || "N/A"}
+- **Objective**: ${prd.objective || "N/A"}
+- **Scope**: ${prd.scope || "N/A"}
+- **Success Metrics**: ${(prd.success_metrics || prd.successMetrics || []).join("; ")}
+
+### Features (${features.length})
+${features.map((f: any) => `- [${f.priority}] **${f.name}**: ${f.description}\n  Requirements: ${(f.requirements || []).join("; ")}`).join("\n")}
+
+### User Flow
+${flow.map((s: any) => `${s.step}. ${s.action} → ${s.expected}`).join("\n")}
+
+### Acceptance Criteria
+${criteria.map((c: string) => `- ${c}`).join("\n")}
+
+### Tech Considerations
+${tech.map((t: string) => `- ${t}`).join("\n")}
+`;
+        } catch { /* ignore parse errors, use basic prompt */ }
+      }
+
       const decomposePrompt = `
 # Goal Decomposition
 
 Break down this goal into concrete, actionable tasks:
 "${goal.description}"
-
+${specContext}
 Available team members: ${roleList || "coder"}
 
 Rules:
@@ -462,7 +498,7 @@ Rules:
 - Tasks should be ordered by dependency
 - Include clear acceptance criteria in each task description
 - Keep tasks small and focused (1-4 hours each)
-- Use the "role" field to assign tasks to available team members
+- Use the "role" field to assign tasks to available team members${goalSpec ? "\n- Reference the structured spec above to ensure complete coverage of all features and acceptance criteria" : ""}
 
 Respond in this EXACT JSON format:
 \`\`\`json

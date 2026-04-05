@@ -148,6 +148,36 @@ export interface VerificationIssue {
   suggestion?: string;
 }
 
+// ─── Goal Spec (Structured Planning) ─────────────────────
+
+export interface GoalSpec {
+  id: string;
+  goalId: string;
+  prdSummary: {
+    background: string;
+    objective: string;
+    scope: string;
+    successMetrics: string[];
+  };
+  featureSpecs: Array<{
+    name: string;
+    description: string;
+    requirements: string[];
+    priority: "must" | "should" | "could";
+  }>;
+  userFlow: Array<{
+    step: number;
+    action: string;
+    expected: string;
+  }>;
+  acceptanceCriteria: string[];
+  techConsiderations: string[];
+  generatedBy: "ai" | "manual";
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── WebSocket Events ──────────────────────────────────
 
 export type WSEventType =

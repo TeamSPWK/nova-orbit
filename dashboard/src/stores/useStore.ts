@@ -17,6 +17,7 @@ interface Project {
   workdir: string;
   created_at: string;
   github?: GitHubConfig;
+  dev_port?: number;
 }
 
 interface Agent {
