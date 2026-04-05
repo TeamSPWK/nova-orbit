@@ -6,7 +6,7 @@ import { createLogger } from "../../utils/logger.js";
 import {
   POLL_INTERVAL_MS, BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   MAX_CONSECUTIVE_RATE_LIMITS, DEFAULT_MAX_CONCURRENCY,
-  MAX_TASK_RETRIES, BLOCKED_RETRY_DELAY_MS,
+  MAX_TASK_RETRIES, MAX_REASSIGNS, BLOCKED_RETRY_DELAY_MS,
 } from "../../utils/constants.js";
 
 const log = createLogger("scheduler");
@@ -94,12 +94,18 @@ export function createScheduler(
   }
 
   /**
-   * Auto-retry blocked tasks that haven't exceeded MAX_TASK_RETRIES.
-   * Moves them back to 'todo' with incremented retry_count after a cooldown.
+   * Auto-retry blocked tasks with escalation strategy:
+   * 1. retry_count < MAX → same agent retry (after cooldown)
+   * 2. retry_count >= MAX → reassign to a DIFFERENT agent, reset retry_count
+   * 3. Already reassigned + retry exhausted again → give up (permanent blocked)
+   *
+   * Permanent blocked tasks are excluded from goal progress calculation
+   * so the goal can still complete with the remaining tasks.
    */
   function retryBlockedTasks(projectId: string): void {
-    // Only retry tasks that have been blocked for at least BLOCKED_RETRY_DELAY_MS
     const cooldownSeconds = Math.round(BLOCKED_RETRY_DELAY_MS / 1000);
+
+    // Step 1: Retry tasks that still have attempts left (same agent)
     const retried = db.prepare(`
       UPDATE tasks SET status = 'todo', retry_count = retry_count + 1, updated_at = datetime('now')
       WHERE project_id = ? AND status = 'blocked' AND retry_count < ?
@@ -107,8 +113,102 @@ export function createScheduler(
     `).run(projectId, MAX_TASK_RETRIES);
 
     if (retried.changes > 0) {
-      log.info(`Auto-retried ${retried.changes} blocked tasks in project ${projectId} (max retries: ${MAX_TASK_RETRIES})`);
+      log.info(`Auto-retried ${retried.changes} blocked tasks (same agent)`);
       broadcast("project:updated", { projectId });
+    }
+
+    // Step 2: Escalate — reassign retry-exhausted tasks to a different agent
+    // Only if reassign_count < MAX_REASSIGNS (prevents infinite agent-switching loop)
+    const exhausted = db.prepare(`
+      SELECT t.id, t.assignee_id, t.title, t.reassign_count FROM tasks t
+      WHERE t.project_id = ? AND t.status = 'blocked' AND t.retry_count >= ? AND t.reassign_count < ?
+        AND t.updated_at <= datetime('now', '-${cooldownSeconds} seconds')
+    `).all(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { id: string; assignee_id: string | null; title: string; reassign_count: number }[];
+
+    if (exhausted.length === 0) return;
+
+    // Get all available agents for reassignment
+    const agents = db.prepare(
+      "SELECT id, role FROM agents WHERE project_id = ?",
+    ).all(projectId) as { id: string; role: string }[];
+
+    if (agents.length <= 1) {
+      // Only one agent — can't reassign, give up on these tasks
+      for (const t of exhausted) {
+        log.warn(`Task "${t.title}" permanently blocked — no alternative agent available`);
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_skipped', ?)",
+        ).run(projectId, `Permanently blocked (no alt agent): ${t.title}`);
+      }
+      // Update goal progress to exclude permanently blocked tasks
+      updateGoalProgressExcludingBlocked(projectId);
+      return;
+    }
+
+    let reassigned = 0;
+    for (const t of exhausted) {
+      // Find a different agent than the current assignee
+      const altAgent = agents.find((a) => a.id !== t.assignee_id)
+        ?? agents.find((a) => a.role !== "cto" && a.role !== "reviewer")
+        ?? agents[0];
+
+      if (!altAgent || altAgent.id === t.assignee_id) {
+        // No alternative — permanently blocked
+        log.warn(`Task "${t.title}" permanently blocked — no different agent`);
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_skipped', ?)",
+        ).run(projectId, `Permanently blocked: ${t.title}`);
+        continue;
+      }
+
+      // Reassign + reset retry_count for fresh attempts with new agent
+      db.prepare(`
+        UPDATE tasks SET status = 'todo', assignee_id = ?, retry_count = 0,
+          reassign_count = reassign_count + 1, updated_at = datetime('now')
+        WHERE id = ? AND status = 'blocked'
+      `).run(altAgent.id, t.id);
+
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_reassigned', ?)",
+      ).run(projectId, `Escalated "${t.title}" to different agent (retry exhausted)`);
+      reassigned++;
+    }
+
+    if (reassigned > 0) {
+      log.info(`Escalated ${reassigned} blocked tasks to different agents`);
+      broadcast("project:updated", { projectId });
+    }
+
+    // Update goal progress for any permanently stuck tasks
+    updateGoalProgressExcludingBlocked(projectId);
+  }
+
+  /**
+   * Update goal progress for goals that have permanently blocked tasks.
+   * Permanently blocked = blocked + retry exhausted + reassign exhausted.
+   * These tasks are excluded from the denominator so the goal can still complete.
+   */
+  function updateGoalProgressExcludingBlocked(projectId: string): void {
+    const goals = db.prepare(
+      "SELECT DISTINCT goal_id FROM tasks WHERE project_id = ? AND status = 'blocked' AND retry_count >= ? AND reassign_count >= ?",
+    ).all(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { goal_id: string }[];
+
+    for (const { goal_id } of goals) {
+      const stats = db.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done,
+          SUM(CASE WHEN status = 'blocked' AND retry_count >= ? AND reassign_count >= ? THEN 1 ELSE 0 END) as permanently_blocked
+        FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+      `).get(MAX_TASK_RETRIES, MAX_REASSIGNS, goal_id) as { total: number; done: number; permanently_blocked: number };
+
+      const effective = stats.total - stats.permanently_blocked;
+      const progress = effective > 0 ? Math.round((stats.done / effective) * 100) : (stats.total === stats.permanently_blocked ? 100 : 0);
+      db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goal_id);
+
+      if (stats.permanently_blocked > 0) {
+        log.warn(`Goal ${goal_id}: ${stats.permanently_blocked} tasks permanently blocked, progress based on ${effective} remaining tasks`);
+      }
     }
   }
 

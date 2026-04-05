@@ -226,9 +226,12 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE tasks ADD COLUMN result_summary TEXT");
   }
 
-  // retry_count on tasks (auto-retry blocked tasks)
+  // retry_count + reassign_count on tasks (auto-retry blocked tasks)
   if (!taskColumns.some((c) => c.name === "retry_count")) {
     db.exec("ALTER TABLE tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!taskColumns.some((c) => c.name === "reassign_count")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN reassign_count INTEGER NOT NULL DEFAULT 0");
   }
 
   // pending_approval status on tasks (Sprint 5: Trust UX)
@@ -265,12 +268,13 @@ export function migrate(db: Database.Database): void {
           started_at TEXT,
           result_summary TEXT,
           retry_count INTEGER NOT NULL DEFAULT 0,
+          reassign_count INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
-        INSERT INTO tasks_new (id, goal_id, project_id, title, description, assignee_id, parent_task_id, status, verification_id, started_at, result_summary, retry_count, created_at, updated_at)
+        INSERT INTO tasks_new (id, goal_id, project_id, title, description, assignee_id, parent_task_id, status, verification_id, started_at, result_summary, retry_count, reassign_count, created_at, updated_at)
           SELECT id, goal_id, project_id, title, COALESCE(description, ''), assignee_id, parent_task_id,
-                 COALESCE(status, 'todo'), verification_id, started_at, result_summary, 0,
+                 COALESCE(status, 'todo'), verification_id, started_at, result_summary, 0, 0,
                  COALESCE(created_at, datetime('now')), COALESCE(updated_at, datetime('now'))
           FROM tasks;
         DROP TABLE tasks;
