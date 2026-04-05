@@ -36,8 +36,9 @@ let eventCounter = 0;
 export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
   const { t } = useTranslation();
   const [events, setEvents] = useState<TimelineEvent[]>([]);
-  // Track last output snippet per agent for live activity display
-  const [agentOutputs, setAgentOutputs] = useState<Record<string, string>>({});
+  // Track last output per agent: short (1-line) + full (recent history)
+  const [agentOutputs, setAgentOutputs] = useState<Record<string, { short: string; full: string[] }>>({});
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -45,19 +46,26 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
 
   // Listen for real-time agent output — parse stream-json into readable messages
   useEffect(() => {
+    const ICONS: Record<string, string> = {
+      tool: "⚡", thinking: "💭", text: "💬", error: "⚠️", result: "✅",
+    };
     const onOutput = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (!d?.agentId || !d?.output) return;
       const activity = parseAgentOutput(d.output);
       if (activity) {
-        const ICONS: Record<string, string> = {
-          tool: "⚡", thinking: "💭", text: "💬", error: "⚠️", result: "✅",
-        };
         const icon = ICONS[activity.type] ?? "";
-        setAgentOutputs((prev) => ({
-          ...prev,
-          [d.agentId]: `${icon} ${activity.message}`,
-        }));
+        const line = `${icon} ${activity.message}`;
+        setAgentOutputs((prev) => {
+          const existing = prev[d.agentId] ?? { short: "", full: [] };
+          return {
+            ...prev,
+            [d.agentId]: {
+              short: line,
+              full: [...existing.full.slice(-19), line], // keep last 20
+            },
+          };
+        });
       }
     };
     window.addEventListener("nova:agent-output", onOutput);
@@ -188,7 +196,8 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
         <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-700 space-y-2">
           {inProgressTasks.map((task) => {
             const agent = task.assignee_id ? agentMap[task.assignee_id] : null;
-            const lastOutput = task.assignee_id ? agentOutputs[task.assignee_id] : null;
+            const output = task.assignee_id ? agentOutputs[task.assignee_id] : null;
+            const isExpanded = task.assignee_id ? expandedAgents.has(task.assignee_id) : false;
             return (
               <div key={task.id} className="space-y-0.5">
                 <div className="flex items-center gap-2">
@@ -198,9 +207,29 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
                     <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{agent.name}</span>
                   )}
                 </div>
-                {lastOutput && (
-                  <div className="ml-3.5 px-2 py-0.5 bg-gray-50 dark:bg-gray-800 rounded text-[10px] text-gray-500 dark:text-gray-400 font-mono truncate">
-                    {lastOutput}
+                {output && (
+                  <div
+                    className="ml-3.5 px-2 py-0.5 bg-gray-50 dark:bg-gray-800 rounded text-[10px] text-gray-500 dark:text-gray-400 font-mono cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors"
+                    onClick={() => {
+                      if (!task.assignee_id) return;
+                      setExpandedAgents((prev) => {
+                        const next = new Set(prev);
+                        next.has(task.assignee_id!) ? next.delete(task.assignee_id!) : next.add(task.assignee_id!);
+                        return next;
+                      });
+                    }}
+                  >
+                    {isExpanded ? (
+                      <div className="max-h-40 overflow-y-auto space-y-0.5 py-0.5">
+                        {output.full.map((line, i) => (
+                          <div key={i} className={`truncate ${i === output.full.length - 1 ? "text-gray-600 dark:text-gray-300" : ""}`}>
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="truncate">{output.short}</div>
+                    )}
                   </div>
                 )}
               </div>
