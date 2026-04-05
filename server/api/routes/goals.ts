@@ -100,6 +100,12 @@ export function createGoalRoutes(ctx: AppContext): Router {
       const result = await ctx.orchestrationEngine.decomposeGoal(goalId);
 
       if (result.taskCount > 0) {
+        // Autopilot: auto-approve tasks so scheduler can pick them up immediately
+        const approved = db.prepare(
+          "UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'"
+        ).run(goalId);
+        log.info(`Autopilot: auto-approved ${approved.changes} tasks for goal ${goalId}`);
+
         // Auto-start queue if not already running
         if (!ctx.scheduler.isRunning(projectId)) {
           log.info(`Autopilot: auto-starting queue for project ${projectId}`);

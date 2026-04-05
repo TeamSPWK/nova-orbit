@@ -344,11 +344,15 @@ export function createAgentRoutes(ctx: AppContext): Router {
     for (const a of agents) {
       ctx.sessionManager?.killSession?.(a.id);
     }
-    // Reset in-progress tasks back to todo
+    // Clear assignee for all non-done tasks (not just in_progress)
     const agentIds = agents.map(a => a.id);
     if (agentIds.length > 0) {
       const placeholders = agentIds.map(() => "?").join(",");
-      db.prepare(`UPDATE tasks SET status = 'todo', assignee_id = NULL WHERE assignee_id IN (${placeholders}) AND status = 'in_progress'`).run(...agentIds);
+      db.prepare(`
+        UPDATE tasks SET assignee_id = NULL,
+          status = CASE WHEN status = 'in_progress' THEN 'todo' ELSE status END
+        WHERE assignee_id IN (${placeholders}) AND status NOT IN ('done', 'verified')
+      `).run(...agentIds);
     }
     const result = db.prepare("DELETE FROM agents WHERE project_id = ?").run(projectId);
     broadcast("project:updated", { projectId });
@@ -362,8 +366,12 @@ export function createAgentRoutes(ctx: AppContext): Router {
     if (!agent) return res.status(404).json({ error: "Agent not found" });
     // Kill any running session for this agent (prevents orphaned processes)
     ctx.sessionManager?.killSession?.(agentId);
-    // Reset in-progress tasks back to todo before deletion
-    db.prepare("UPDATE tasks SET status = 'todo', assignee_id = NULL WHERE assignee_id = ? AND status = 'in_progress'").run(agentId);
+    // Clear assignee for all non-done tasks (not just in_progress)
+    db.prepare(`
+      UPDATE tasks SET assignee_id = NULL,
+        status = CASE WHEN status = 'in_progress' THEN 'todo' ELSE status END
+      WHERE assignee_id = ? AND status NOT IN ('done', 'verified')
+    `).run(agentId);
     // Reassign children to this agent's parent (prevents orphaned subtree)
     db.prepare("UPDATE agents SET parent_id = ? WHERE parent_id = ?").run(agent.parent_id ?? null, agentId);
     const result = db.prepare("DELETE FROM agents WHERE id = ?").run(agentId);

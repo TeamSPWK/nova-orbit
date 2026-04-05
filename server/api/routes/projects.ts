@@ -342,6 +342,12 @@ export function createProjectRoutes(ctx: AppContext): Router {
         }
       }
 
+      // Step 2.5: Auto-approve all pending tasks for execution
+      const approved = db.prepare(
+        "UPDATE tasks SET status = 'todo' WHERE project_id = ? AND status = 'pending_approval'"
+      ).run(projectId);
+      log.info(`Full autopilot: auto-approved ${approved.changes} tasks`);
+
       // Step 3: Start queue
       if (!ctx.scheduler.isRunning(projectId)) {
         ctx.scheduler.startQueue(projectId);

@@ -78,10 +78,30 @@ export function createScheduler(
   }
 
   /**
+   * Fix dangling assignee_ids — tasks assigned to agents that no longer exist.
+   * Clears assignee so autoAssignUnassigned can reassign them.
+   */
+  function fixDanglingAssignees(projectId: string): void {
+    const fixed = db.prepare(`
+      UPDATE tasks SET assignee_id = NULL
+      WHERE project_id = ? AND assignee_id IS NOT NULL
+        AND status NOT IN ('done', 'verified')
+        AND assignee_id NOT IN (SELECT id FROM agents WHERE project_id = ?)
+    `).run(projectId, projectId);
+
+    if (fixed.changes > 0) {
+      log.warn(`Fixed ${fixed.changes} tasks with dangling assignee in project ${projectId}`);
+    }
+  }
+
+  /**
    * Auto-assign unassigned todo tasks to available agents.
-   * Uses role matching similar to decompose logic.
+   * Prefers worker agents, falls back to CTO/reviewer if no workers exist.
    */
   function autoAssignUnassigned(projectId: string): void {
+    // First fix any dangling assignees from deleted agents
+    fixDanglingAssignees(projectId);
+
     // Only auto-assign todo tasks (blocked tasks need human review)
     const unassigned = db.prepare(
       "SELECT id, title FROM tasks WHERE project_id = ? AND status = 'todo' AND assignee_id IS NULL",
@@ -89,13 +109,21 @@ export function createScheduler(
 
     if (unassigned.length === 0) return;
 
-    const agents = db.prepare(
+    // Prefer worker agents, fall back to any agent if no workers
+    let agents = db.prepare(
       "SELECT id, role FROM agents WHERE project_id = ? AND role NOT IN ('cto', 'reviewer')",
     ).all(projectId) as { id: string; role: string }[];
 
+    if (agents.length === 0) {
+      // Fallback: use any agent including CTO/reviewer — better than no execution
+      agents = db.prepare(
+        "SELECT id, role FROM agents WHERE project_id = ?",
+      ).all(projectId) as { id: string; role: string }[];
+    }
+
     if (agents.length === 0) return;
 
-    // Round-robin assignment among worker agents
+    // Round-robin assignment among available agents
     for (let i = 0; i < unassigned.length; i++) {
       const agent = agents[i % agents.length];
       db.prepare("UPDATE tasks SET assignee_id = ?, updated_at = datetime('now') WHERE id = ?")
