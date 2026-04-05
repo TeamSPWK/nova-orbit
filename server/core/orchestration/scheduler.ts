@@ -6,6 +6,7 @@ import { createLogger } from "../../utils/logger.js";
 import {
   POLL_INTERVAL_MS, BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   MAX_CONSECUTIVE_RATE_LIMITS, DEFAULT_MAX_CONCURRENCY,
+  MAX_TASK_RETRIES, BLOCKED_RETRY_DELAY_MS,
 } from "../../utils/constants.js";
 
 const log = createLogger("scheduler");
@@ -93,6 +94,25 @@ export function createScheduler(
   }
 
   /**
+   * Auto-retry blocked tasks that haven't exceeded MAX_TASK_RETRIES.
+   * Moves them back to 'todo' with incremented retry_count after a cooldown.
+   */
+  function retryBlockedTasks(projectId: string): void {
+    // Only retry tasks that have been blocked for at least BLOCKED_RETRY_DELAY_MS
+    const cooldownSeconds = Math.round(BLOCKED_RETRY_DELAY_MS / 1000);
+    const retried = db.prepare(`
+      UPDATE tasks SET status = 'todo', retry_count = retry_count + 1, updated_at = datetime('now')
+      WHERE project_id = ? AND status = 'blocked' AND retry_count < ?
+        AND updated_at <= datetime('now', '-${cooldownSeconds} seconds')
+    `).run(projectId, MAX_TASK_RETRIES);
+
+    if (retried.changes > 0) {
+      log.info(`Auto-retried ${retried.changes} blocked tasks in project ${projectId} (max retries: ${MAX_TASK_RETRIES})`);
+      broadcast("project:updated", { projectId });
+    }
+  }
+
+  /**
    * Auto-assign unassigned todo tasks to available agents.
    * Prefers worker agents, falls back to CTO/reviewer if no workers exist.
    */
@@ -139,7 +159,10 @@ export function createScheduler(
   function pickNextTasks(projectId: string, maxSlots: number): any[] {
     if (maxSlots <= 0) return [];
 
-    // First, auto-assign any unassigned tasks
+    // Auto-retry blocked tasks that haven't exceeded retry limit
+    retryBlockedTasks(projectId);
+
+    // Then auto-assign any unassigned tasks
     autoAssignUnassigned(projectId);
 
     const busy = getBusyAgents(projectId);

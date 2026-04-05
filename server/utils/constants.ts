@@ -24,3 +24,7 @@ export const DEFAULT_MAX_CONCURRENCY = parseInt(process.env.NOVA_MAX_CONCURRENCY
 export const TASK_TIMEOUT_MS = parseInt(process.env.NOVA_TASK_TIMEOUT_MS ?? "300000", 10); // 5 min default
 export const RATE_LIMIT_WAIT_MS = parseInt(process.env.NOVA_RATE_LIMIT_WAIT_MS ?? "60000", 10);
 export const SIGKILL_TIMEOUT_MS = 5000;
+
+// --- Task retry ---
+export const MAX_TASK_RETRIES = parseInt(process.env.NOVA_MAX_TASK_RETRIES ?? "2", 10);
+export const BLOCKED_RETRY_DELAY_MS = parseInt(process.env.NOVA_BLOCKED_RETRY_DELAY_MS ?? "10000", 10); // 10s cooldown

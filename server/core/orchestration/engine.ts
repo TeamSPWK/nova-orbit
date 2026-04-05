@@ -367,7 +367,15 @@ Fix ONLY these issues. Do not modify other code.
           err.message?.toLowerCase().includes("too many requests");
         const fallbackStatus = isRateLimit ? "todo" : "blocked";
         transitionTask(db, broadcast, task, fallbackStatus);
-        if (isRateLimit) {
+
+        if (fallbackStatus === "blocked") {
+          // Log failure reason for retry context
+          const retryInfo = db.prepare("SELECT retry_count FROM tasks WHERE id = ?").get(task.id) as { retry_count: number } | undefined;
+          db.prepare(
+            "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_blocked', ?)",
+          ).run(task.project_id, task.assignee_id, `Blocked (retry ${retryInfo?.retry_count ?? 0}): ${task.title} — ${err.message?.slice(0, 200)}`);
+          log.warn(`Task "${task.title}" blocked — scheduler will auto-retry if retries remain`);
+        } else {
           log.warn(`Task "${task.title}" returned to todo due to rate limit — will retry on next queue poll`);
         }
         throw err;
