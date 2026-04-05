@@ -148,7 +148,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(agent.project_id) as any;
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const workdir = project.workdir || process.cwd();
+    const workdir = project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
 
     // Build org context so the agent knows the team structure
     const projectAgents = db.prepare("SELECT id, name, role, parent_id FROM agents WHERE project_id = ?").all(agent.project_id) as any[];
@@ -306,7 +306,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     res.json({ status: "started", sessionId });
 
     (async () => {
-      const workdir = project.workdir || process.cwd();
+      const workdir = project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
       const results: { agentId: string; agentName: string; result: string }[] = [];
 
       for (let i = 0; i < agentList.length; i++) {
@@ -513,6 +513,97 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
     scheduler.resumeQueue(projectId);
     res.json({ status: "queue_resumed", projectId });
+  });
+
+  // ─── Approval Gate (Sprint 5) ──────────────────────────────────────────────
+
+  // Approve a single pending_approval task → todo
+  router.post("/:projectId/tasks/:taskId/approve", (req, res) => {
+    const { projectId, taskId } = req.params;
+
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ? AND project_id = ?")
+      .get(taskId, projectId) as any;
+    if (!task) return res.status(404).json({ error: "Task not found" });
+    if (task.status !== "pending_approval") {
+      return res.status(400).json({ error: `Task is not pending approval. Current status: '${task.status}'` });
+    }
+
+    db.prepare("UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?")
+      .run(taskId);
+
+    const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
+    broadcast("task:updated", updated);
+    broadcast("project:updated", { projectId });
+
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
+    ).run(projectId, `Approved for execution: ${task.title}`);
+
+    res.json({ success: true, task: updated });
+  });
+
+  // Reject a single pending_approval task → blocked (with optional reason)
+  router.post("/:projectId/tasks/:taskId/reject", (req, res) => {
+    const { projectId, taskId } = req.params;
+    const { reason } = req.body ?? {};
+
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ? AND project_id = ?")
+      .get(taskId, projectId) as any;
+    if (!task) return res.status(404).json({ error: "Task not found" });
+    if (task.status !== "pending_approval") {
+      return res.status(400).json({ error: `Task is not pending approval. Current status: '${task.status}'` });
+    }
+
+    // Append rejection reason to description if provided
+    const newDesc = reason
+      ? `${task.description}\n\n--- Rejection Reason ---\n${reason}`
+      : task.description;
+
+    db.prepare(
+      "UPDATE tasks SET status = 'blocked', description = ?, updated_at = datetime('now') WHERE id = ?",
+    ).run(newDesc, taskId);
+
+    const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
+    broadcast("task:updated", updated);
+    broadcast("project:updated", { projectId });
+
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_rejected', ?)",
+    ).run(projectId, `Rejected: ${task.title}${reason ? ` — ${reason}` : ""}`);
+
+    res.json({ success: true, task: updated });
+  });
+
+  // Approve all pending_approval tasks for a project → todo
+  router.post("/:projectId/tasks/approve-all", (req, res) => {
+    const { projectId } = req.params;
+
+    const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // Fetch tasks before update for individual broadcast
+    const pendingTasks = db.prepare(
+      "SELECT id FROM tasks WHERE project_id = ? AND status = 'pending_approval'",
+    ).all(projectId) as { id: string }[];
+
+    const result = db.prepare(
+      "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE project_id = ? AND status = 'pending_approval'",
+    ).run(projectId);
+
+    // Broadcast individual task updates for real-time UI
+    for (const t of pendingTasks) {
+      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(t.id);
+      broadcast("task:updated", updated);
+    }
+    broadcast("project:updated", { projectId });
+
+    if (result.changes > 0) {
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
+      ).run(projectId, `Approved all ${result.changes} pending tasks`);
+    }
+
+    res.json({ approved: result.changes });
   });
 
   // Expose engine & scheduler on ctx for autopilot triggers in goals.ts / projects.ts

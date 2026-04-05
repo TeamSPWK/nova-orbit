@@ -5,6 +5,7 @@ dist/
 *.db-wal
 *.sqlite
 .nova-orbit/
+.nova-worktrees/
 .env
 .env.local
 .DS_Store

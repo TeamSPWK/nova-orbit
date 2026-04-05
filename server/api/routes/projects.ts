@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { existsSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
-import { homedir } from "node:os";
 import type { AppContext } from "../../index.js";
+import { validateWorkdir } from "../../utils/validate-path.js";
 import { analyzeProject } from "../../core/project/analyzer.js";
 import { connectGitHub } from "../../core/project/github.js";
 import { createLogger } from "../../utils/logger.js";
@@ -32,6 +31,16 @@ export function createProjectRoutes(ctx: AppContext): Router {
 
     if (!name) return res.status(400).json({ error: "name is required" });
 
+    // Validate workdir if provided
+    let validatedWorkdir = workdir;
+    if (workdir && workdir.trim()) {
+      try {
+        validatedWorkdir = validateWorkdir(workdir);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     const result = db.prepare(`
       INSERT INTO projects (name, mission, source, workdir, github_config, tech_stack)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -39,7 +48,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
       name,
       mission ?? "",
       source,
-      workdir,
+      validatedWorkdir,
       github_config ? JSON.stringify(github_config) : null,
       tech_stack ? JSON.stringify(tech_stack) : null,
     );
@@ -51,9 +60,21 @@ export function createProjectRoutes(ctx: AppContext): Router {
 
   // Update project
   router.patch("/:id", (req, res) => {
-    const { name, mission, status, workdir, github_config, tech_stack, autopilot } = req.body;
+    // Accept both `github_config` (snake_case) and `github` (camelCase from dashboard)
+    const { name, mission, status, workdir: rawWorkdir, tech_stack, autopilot } = req.body;
+    const github_config = req.body.github_config ?? req.body.github;
     const existing = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Project not found" });
+
+    // Validate workdir if provided
+    let workdir = rawWorkdir;
+    if (rawWorkdir !== undefined && rawWorkdir !== "") {
+      try {
+        workdir = validateWorkdir(rawWorkdir);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
 
     // Validate autopilot mode
     const VALID_AUTOPILOT = ["off", "goal", "full"];
@@ -112,10 +133,11 @@ export function createProjectRoutes(ctx: AppContext): Router {
     const { path: inputPath } = req.body;
     if (!inputPath) return res.status(400).json({ error: "path is required" });
 
-    // Resolve to absolute and prevent path traversal
-    const resolved = resolvePath(inputPath);
-    if (!resolved.startsWith(homedir()) && !resolved.startsWith("/tmp")) {
-      return res.status(400).json({ error: "Path must be within home directory" });
+    let resolved: string;
+    try {
+      resolved = validateWorkdir(inputPath);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
     }
 
     if (!existsSync(resolved)) return res.status(400).json({ error: "Directory not found" });
@@ -133,10 +155,11 @@ export function createProjectRoutes(ctx: AppContext): Router {
     const { path: dirPath, name } = req.body;
     if (!dirPath) return res.status(400).json({ error: "path is required" });
 
-    // Resolve to absolute and prevent path traversal
-    const resolvedImport = resolvePath(dirPath);
-    if (!resolvedImport.startsWith(homedir()) && !resolvedImport.startsWith("/tmp")) {
-      return res.status(400).json({ error: "Path must be within home directory" });
+    let resolvedImport: string;
+    try {
+      resolvedImport = validateWorkdir(dirPath);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
     }
     if (!existsSync(resolvedImport)) return res.status(400).json({ error: "Directory not found" });
 
@@ -183,13 +206,16 @@ export function createProjectRoutes(ctx: AppContext): Router {
       const result = connectGitHub(url, dataDir);
       const projectName = name || url.split("/").pop()?.replace(/\.git$/, "") || "GitHub Project";
 
+      // Validate localPath is within allowed directories
+      const validatedPath = validateWorkdir(result.localPath);
+
       // Create project
       const dbResult = db.prepare(`
         INSERT INTO projects (name, source, workdir, github_config, tech_stack)
         VALUES (?, 'github', ?, ?, ?)
       `).run(
         projectName,
-        result.localPath,
+        validatedPath,
         JSON.stringify({ repoUrl: result.repoUrl, branch: result.branch, autoPush: false, prMode: true }),
         JSON.stringify(result.analysis.techStack),
       );
@@ -218,6 +244,28 @@ export function createProjectRoutes(ctx: AppContext): Router {
     ctx.devServerManager.stop(req.params.id);
     broadcast("project:updated", { id: req.params.id, deleted: true });
     res.json({ success: true });
+  });
+
+  // Cost tracking: token usage and cost per agent for a project (Sprint 5)
+  router.get("/:id/cost", (req, res) => {
+    const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const costs = db.prepare(`
+      SELECT
+        a.id        AS agentId,
+        a.name      AS agentName,
+        a.role,
+        COALESCE(SUM(s.token_usage), 0) AS totalTokens,
+        COALESCE(SUM(s.cost_usd), 0)    AS totalCost
+      FROM agents a
+      LEFT JOIN sessions s ON s.agent_id = a.id
+      WHERE a.project_id = ?
+      GROUP BY a.id
+      ORDER BY totalCost DESC
+    `).all(req.params.id);
+
+    res.json({ costs });
   });
 
   // Dev server routes

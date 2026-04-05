@@ -118,6 +118,9 @@ export function createScheduler(
 
     const busy = getBusyAgents(projectId);
 
+    // Sprint 5: status = 'todo' naturally excludes 'pending_approval' tasks.
+    // pending_approval tasks must be explicitly approved (→ todo) via the Approval Gate API
+    // before the scheduler picks them up.
     const candidates = db.prepare(`
       SELECT t.* FROM tasks t
       LEFT JOIN goals g ON t.goal_id = g.id

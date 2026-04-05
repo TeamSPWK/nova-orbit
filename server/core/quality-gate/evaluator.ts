@@ -43,7 +43,7 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
      */
     async verify(
       taskId: string,
-      config: Partial<QualityGateConfig> = {},
+      config: Partial<QualityGateConfig> & { workdir?: string } = {},
     ): Promise<VerificationResult> {
       const opts = { ...DEFAULT_CONFIG, ...config };
       const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
@@ -91,9 +91,10 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
       }
 
       try {
+        const evalWorkdir = config.workdir || project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
         const session = sessionManager.spawnAgent(
           evaluatorAgent.id,
-          project.workdir || process.cwd(),
+          evalWorkdir,
         );
 
         const runResult = await session.send(evaluationPrompt);

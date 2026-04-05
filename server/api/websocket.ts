@@ -1,12 +1,21 @@
+import type { IncomingMessage } from "node:http";
 import type { WebSocketServer, WebSocket } from "ws";
 
-export function createWSHandler(wss: WebSocketServer): void {
+export function createWSHandler(wss: WebSocketServer, apiKey: string): void {
   // Prevent server crash on WebSocket errors
   wss.on("error", (err) => {
     console.error("[WS Server] Error:", err.message);
   });
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    // Token verification
+    const url = new URL(req.url ?? "", "http://localhost");
+    const token = url.searchParams.get("token");
+    if (token !== apiKey) {
+      ws.close(4001, "Unauthorized");
+      return;
+    }
+
     // Handle client errors gracefully
     ws.on("error", (err) => {
       console.error("[WS Client] Error:", err.message);

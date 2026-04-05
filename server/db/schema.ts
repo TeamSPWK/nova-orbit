@@ -7,6 +7,7 @@ export function createDatabase(dbPath: string): Database.Database {
   // Enable WAL mode for better concurrent read performance
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
 
   return db;
 }
@@ -207,6 +208,65 @@ export function migrate(db: Database.Database): void {
   if (!taskColumns.some((c) => c.name === "parent_task_id")) {
     db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE");
   }
+
+  // started_at on tasks (Sprint 2: crash recovery)
+  if (!taskColumns.some((c) => c.name === "started_at")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN started_at TEXT");
+  }
+
+  // result_summary on tasks (Sprint 6: context chain, added here early)
+  if (!taskColumns.some((c) => c.name === "result_summary")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN result_summary TEXT");
+  }
+
+  // pending_approval status on tasks (Sprint 5: Trust UX)
+  // SQLite cannot ALTER CHECK constraints — test with FK disabled to avoid false positive
+  let needsTasksRecreate = false;
+  try {
+    db.pragma("foreign_keys = OFF");
+    db.exec("INSERT INTO tasks (goal_id, project_id, title, status) VALUES ('__check__', '__check__', '__check__', 'pending_approval')");
+    db.exec("DELETE FROM tasks WHERE goal_id = '__check__'");
+  } catch {
+    needsTasksRecreate = true;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+
+  if (needsTasksRecreate) {
+    // CHECK failed — recreate tasks table with expanded status values
+    // FK must be OFF during data migration to avoid self-reference violations
+    db.pragma("foreign_keys = OFF");
+    db.exec("DROP TABLE IF EXISTS tasks_new");
+    db.exec(`
+      CREATE TABLE tasks_new (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+        parent_task_id TEXT,
+        status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'pending_approval', 'in_progress', 'in_review', 'done', 'blocked')),
+        verification_id TEXT,
+        started_at TEXT,
+        result_summary TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO tasks_new (id, goal_id, project_id, title, description, assignee_id, parent_task_id, status, verification_id, started_at, result_summary, created_at, updated_at)
+        SELECT id, goal_id, project_id, title, COALESCE(description, ''), assignee_id, parent_task_id,
+               COALESCE(status, 'todo'), verification_id, started_at, result_summary,
+               COALESCE(created_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+        FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_new RENAME TO tasks;
+      CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_goal ON tasks(goal_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
+    `);
+    db.pragma("foreign_keys = ON");
+  }
+
 }
 
 export function generateId(): string {

@@ -10,20 +10,38 @@ export function createTaskRoutes(ctx: AppContext): Router {
     const goalId = typeof req.query.goalId === "string" ? req.query.goalId : undefined;
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
+    // Join verification verdict so the dashboard can render verification badges
+    const withVerification = `
+      SELECT t.*,
+             v.verdict        AS verification_verdict,
+             v.severity       AS verification_severity,
+             v.scope          AS verification_scope
+      FROM tasks t
+      LEFT JOIN verifications v ON v.id = t.verification_id
+    `;
+
     let tasks;
     if (goalId) {
-      tasks = db.prepare("SELECT * FROM tasks WHERE goal_id = ? ORDER BY created_at").all(goalId);
+      tasks = db.prepare(`${withVerification} WHERE t.goal_id = ? ORDER BY t.created_at`).all(goalId);
     } else if (projectId) {
-      tasks = db.prepare("SELECT * FROM tasks WHERE project_id = ? ORDER BY status, created_at").all(projectId);
+      tasks = db.prepare(`${withVerification} WHERE t.project_id = ? ORDER BY t.status, t.created_at`).all(projectId);
     } else {
       return res.status(400).json({ error: "projectId or goalId query param required" });
     }
     res.json(tasks);
   });
 
-  // Get single task
+  // Get single task (includes verification badge fields)
   router.get("/:id", (req, res) => {
-    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+    const task = db.prepare(`
+      SELECT t.*,
+             v.verdict        AS verification_verdict,
+             v.severity       AS verification_severity,
+             v.scope          AS verification_scope
+      FROM tasks t
+      LEFT JOIN verifications v ON v.id = t.verification_id
+      WHERE t.id = ?
+    `).get(req.params.id);
     if (!task) return res.status(404).json({ error: "Task not found" });
     res.json(task);
   });
@@ -49,15 +67,16 @@ export function createTaskRoutes(ctx: AppContext): Router {
     }
   });
 
-  // Valid status transitions
+  // Valid status transitions (Sprint 5: pending_approval added)
   const VALID_TRANSITIONS: Record<string, string[]> = {
-    todo: ["in_progress", "blocked"],
+    pending_approval: ["todo", "blocked"],
+    todo: ["in_progress", "blocked", "pending_approval"],
     in_progress: ["in_review", "blocked", "todo"],
     in_review: ["done", "todo", "blocked"],
     done: ["todo"],
-    blocked: ["todo", "in_progress"],
+    blocked: ["todo", "in_progress", "pending_approval"],
   };
-  const VALID_STATUSES = ["todo", "in_progress", "in_review", "done", "blocked"];
+  const VALID_STATUSES = ["todo", "pending_approval", "in_progress", "in_review", "done", "blocked"];
 
   // Update task
   router.patch("/:id", (req, res) => {

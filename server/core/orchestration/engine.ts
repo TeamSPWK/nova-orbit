@@ -1,10 +1,14 @@
 import type { Database } from "better-sqlite3";
+import { join } from "node:path";
 import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createDelegationEngine } from "./delegation.js";
+import { executeGitWorkflow, type GitHubConfig } from "../project/git-workflow.js";
+import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
 import type { VerificationScope } from "../../../shared/types.js";
+import { appendMemory } from "../agent/memory.js";
 
 const log = createLogger("orchestration");
 
@@ -93,7 +97,7 @@ export function createOrchestrationEngine(
 
       const agent = db.prepare("SELECT name FROM agents WHERE id = ?").get(task.assignee_id) as { name: string } | undefined;
       const agentName = agent?.name ?? "";
-      const workdir = project.workdir || process.cwd();
+      const workdir = project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
       const { existsSync } = await import("node:fs");
       if (!existsSync(workdir)) {
         throw new Error(`Working directory does not exist: ${workdir}`);
@@ -115,10 +119,25 @@ export function createOrchestrationEngine(
       // Phase 1: Set task to in_progress
       transitionTask(db, broadcast, task, "in_progress");
 
+      // Worktree isolation (Sprint 4): git repo가 있으면 격리된 worktree에서 실행
+      let effectiveWorkdir = workdir;
+      let worktreeInfo: WorktreeInfo | null = null;
+
+      try {
+        const { createWorktree } = await import("../project/worktree.js");
+        worktreeInfo = createWorktree(workdir, agentName, task.title);
+        if (worktreeInfo) {
+          effectiveWorkdir = worktreeInfo.path;
+          log.info(`Using worktree: ${effectiveWorkdir}`);
+        }
+      } catch (err: any) {
+        log.warn(`Worktree creation failed, using direct workdir: ${err.message}`);
+      }
+
       // Phase 2: Execute via assigned agent
       let session;
       try {
-        session = sessionManager.spawnAgent(task.assignee_id, workdir);
+        session = sessionManager.spawnAgent(task.assignee_id, effectiveWorkdir);
       } catch (spawnErr: any) {
         log.error(`Failed to spawn agent for task "${task.title}"`, spawnErr);
         throw new Error(`Agent spawn failed: ${spawnErr.message}`);
@@ -136,6 +155,16 @@ export function createOrchestrationEngine(
           taskId,
           waitMs: info.waitMs,
           message: info.stderr,
+        });
+      });
+
+      // Sprint 5: broadcast structured errors for Trust UX
+      session.on("nova:error", (error: unknown) => {
+        broadcast("system:error", {
+          agentId: task.assignee_id,
+          agentName,
+          taskId,
+          error,
         });
       });
       db.prepare("UPDATE agents SET status = 'working', current_task_id = ? WHERE id = ?")
@@ -165,6 +194,21 @@ When complete, provide a summary of changes made.
           tokens: implParsed.usage ? implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens : 0,
           duration: implParsed.usage?.durationMs,
         });
+
+        // Sprint 6: result_summary 저장 (마지막 500자)
+        const summary = (implParsed.text ?? "").slice(-500);
+        db.prepare("UPDATE tasks SET result_summary = ? WHERE id = ?").run(summary, task.id);
+
+        // Sprint 6: 에이전트 메모리에 태스크 완료 기록
+        if (task.assignee_id) {
+          const dataDir = process.env.NOVA_ORBIT_DATA_DIR || join(process.cwd(), ".nova-orbit");
+          const memoryEntry = `Task "${task.title}" completed. Summary: ${summary}`;
+          try {
+            appendMemory(dataDir, task.assignee_id, memoryEntry);
+          } catch (memErr: any) {
+            log.warn(`Failed to append agent memory: ${memErr.message}`);
+          }
+        }
 
         // Broadcast usage data for dashboard
         if (implParsed.usage) {
@@ -205,9 +249,10 @@ When complete, provide a summary of changes made.
         // Phase 3: Move to review
         transitionTask(db, broadcast, task, "in_review");
 
-        // Phase 4: Quality Gate verification
+        // Phase 4: Quality Gate verification (worktree 경로 전달)
         const verification = await qualityGate.verify(taskId, {
           scope: opts.verificationScope,
+          workdir: effectiveWorkdir,
         });
 
         broadcast("verification:result", verification);
@@ -216,8 +261,26 @@ When complete, provide a summary of changes made.
         if (verification.verdict === "fail" && opts.autoFix && opts.maxFixRetries > 0) {
           log.info("Verification FAIL — attempting auto-fix");
 
+          // Sprint 6: Smart Resume — 이전 실패 이력 조회
+          const previousFailures = db.prepare(`
+            SELECT v.issues FROM verifications v
+            WHERE v.task_id = ? AND v.verdict = 'fail'
+            ORDER BY v.created_at DESC LIMIT 2
+          `).all(task.id) as { issues: string }[];
+
+          const failureContext = previousFailures.length > 0
+            ? `\n\n## Previous Failure History\n` +
+              previousFailures.map((f, i) => {
+                try {
+                  const issues = JSON.parse(f.issues);
+                  return `### Attempt ${i + 1}\n` + issues.map((issue: any) => `- [${issue.severity}] ${issue.message}`).join("\n");
+                } catch { return `### Attempt ${i + 1}\n- ${f.issues}`; }
+              }).join("\n\n")
+            : "";
+
           const fixPrompt = `
-# Fix Required
+# Fix Required (Smart Resume)
+${failureContext}
 
 The following issues were found during verification:
 ${verification.issues.map((i) => `- [${i.severity}] ${i.file ?? ""}:${i.line ?? ""} — ${i.message}`).join("\n")}
@@ -225,21 +288,31 @@ ${verification.issues.map((i) => `- [${i.severity}] ${i.file ?? ""}:${i.line ?? 
 Fix ONLY these issues. Do not modify other code.
 `;
           // Spawn a NEW session for fix (prevent context pollution — Nova rule)
-          const fixSession = sessionManager.spawnAgent(task.assignee_id, project.workdir || process.cwd());
+          const fixSession = sessionManager.spawnAgent(task.assignee_id, effectiveWorkdir);
           try {
             await fixSession.send(fixPrompt);
           } finally {
             sessionManager.killSession(task.assignee_id);
           }
 
-          // Re-verify
+          // Re-verify (worktree 경로 전달)
           const reVerification = await qualityGate.verify(taskId, {
             scope: opts.verificationScope,
+            workdir: effectiveWorkdir,
           });
           broadcast("verification:result", reVerification);
 
           // Update task status based on re-verification result
           const rePass = reVerification.verdict === "pass" || reVerification.verdict === "conditional";
+
+          if (rePass) {
+            const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
+            if (gitResult?.error) {
+              transitionTask(db, broadcast, task, "blocked");
+              return { success: false, verdict: "git-error" };
+            }
+          }
+
           transitionTask(db, broadcast, task, rePass ? "done" : "blocked");
 
           return {
@@ -251,6 +324,15 @@ Fix ONLY these issues. Do not modify other code.
         // Update task status based on verification result
         // pass + conditional → done, fail → blocked
         const passed = verification.verdict === "pass" || verification.verdict === "conditional";
+
+        if (passed) {
+          const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
+          if (gitResult?.error) {
+            transitionTask(db, broadcast, task, "blocked");
+            return { success: false, verdict: "git-error" };
+          }
+        }
+
         transitionTask(db, broadcast, task, passed ? "done" : "blocked");
 
         return {
@@ -274,6 +356,14 @@ Fix ONLY these issues. Do not modify other code.
         db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
           .run(task.assignee_id);
         broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
+
+        // Worktree 정리 (Sprint 4)
+        if (worktreeInfo) {
+          try {
+            const { removeWorktree } = await import("../project/worktree.js");
+            removeWorktree(workdir, worktreeInfo.path);
+          } catch { /* 정리 실패는 무시 */ }
+        }
       }
     },
 
@@ -389,9 +479,11 @@ Respond in this EXACT JSON format:
           const title = t.title.slice(0, MAX_TITLE_LEN);
           const description = typeof t.description === "string" ? t.description.slice(0, MAX_DESC_LEN) : "";
           const agent = findAgent(t.role ?? "coder");
+          // Sprint 5: tasks created from decomposition start as pending_approval
+          // so the user can review the plan before execution begins
           db.prepare(`
-            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status)
+            VALUES (?, ?, ?, ?, ?, 'pending_approval')
           `).run(goal.id, goal.project_id, title, description, agent?.id ?? null);
           created++;
         }
@@ -444,7 +536,7 @@ Respond in this EXACT JSON format:
 
       log.info(`Full autopilot: generating goals from mission "${project.mission.slice(0, 50)}..."`);
 
-      const session = sessionManager.spawnAgent(ctoAgent.id, project.workdir || process.cwd());
+      const session = sessionManager.spawnAgent(ctoAgent.id, project.workdir || (() => { throw new Error("Project has no workdir configured"); })());
 
       const prompt = `
 # Mission Analysis — Goal Generation
@@ -521,6 +613,68 @@ function transitionTask(
   if (newStatus === "done" && !task.parent_task_id) {
     updateGoalProgress(db, task.goal_id);
   }
+}
+
+/** Read github_config JSON from projects table. Returns null if not set. */
+function getGitHubConfig(db: Database, projectId: string): GitHubConfig | null {
+  const row = db
+    .prepare("SELECT github_config FROM projects WHERE id = ?")
+    .get(projectId) as { github_config: string | null } | undefined;
+  if (!row?.github_config) return null;
+  try {
+    return JSON.parse(row.github_config) as GitHubConfig;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run git workflow after a task passes verification.
+ * Returns null when github config is absent (workflow skipped).
+ * Returns the workflow result (including error field) otherwise.
+ * Never throws — git failures must not corrupt already-verified code.
+ */
+async function runGitWorkflow(
+  db: Database,
+  broadcast: (event: string, data: unknown) => void,
+  task: TaskRow,
+  _project: ProjectRow,
+  agentName: string,
+  workdir: string,
+  worktreeBranch?: string,
+): Promise<{ error?: string } | null> {
+  const githubConfig = getGitHubConfig(db, task.project_id);
+  if (!githubConfig) return null;
+
+  const result = executeGitWorkflow(workdir, task.title, agentName, githubConfig, {
+    overrideBranch: worktreeBranch,
+  });
+
+  broadcast("task:git", {
+    taskId: task.id,
+    committed: result.committed,
+    pushed: result.pushed,
+    prUrl: result.prUrl,
+    branch: result.branch,
+    filesChanged: result.filesChanged,
+    error: result.error,
+  });
+
+  if (result.error) {
+    log.error(`Git workflow failed for task "${task.title}": ${result.error}`);
+    db.prepare(`
+      INSERT INTO activities (project_id, agent_id, type, message)
+      VALUES (?, ?, 'git_error', ?)
+    `).run(task.project_id, task.assignee_id, `Git error on task "${task.title}": ${result.error}`);
+  } else {
+    log.info(`Git workflow complete for task "${task.title}"`, {
+      committed: result.committed,
+      pushed: result.pushed,
+      prUrl: result.prUrl,
+    });
+  }
+
+  return result;
 }
 
 function updateGoalProgress(db: Database, goalId: string): void {

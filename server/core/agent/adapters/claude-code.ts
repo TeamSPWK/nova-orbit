@@ -1,13 +1,20 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   mkdirSync, mkdtempSync, writeFileSync, symlinkSync,
-  existsSync, rmSync, readdirSync,
+  existsSync, rmSync, readdirSync, readFileSync,
 } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createLogger } from "../../../utils/logger.js";
+import {
+  makeRateLimitError,
+  makeSessionExpiredError,
+  makeSpawnFailedError,
+  makeTimeoutError,
+  type NovaAgentErrorData,
+} from "../../../utils/errors.js";
 
 const log = createLogger("claude-code-adapter");
 
@@ -21,6 +28,7 @@ export interface ClaudeCodeConfig {
   allowedTools?: string[];
   maxTurns?: number;
   dangerouslySkipPermissions?: boolean;
+  memoryContent?: string;
 }
 
 export interface RunResult {
@@ -89,14 +97,23 @@ export function createClaudeCodeAdapter() {
 
             const TIMEOUT_MS = 5 * 60 * 1000; // 5 min timeout per task
 
+            const ALLOWED_ENV_KEYS = [
+              "PATH", "HOME", "SHELL", "USER", "LANG", "LC_ALL", "TERM",
+              "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK",
+              "NODE_ENV", "TMPDIR", "XDG_CONFIG_HOME",
+            ];
+            const safeEnv: Record<string, string> = {
+              BROWSER: "none",
+              NOVA_ORBIT_AGENT_ID: session.id,
+            };
+            for (const key of ALLOWED_ENV_KEYS) {
+              if (process.env[key]) safeEnv[key] = process.env[key]!;
+            }
+
             const proc: ChildProcess = spawn("claude", args, {
               cwd: resolvePath(config.workdir),
               stdio: ["pipe", "pipe", "pipe"] as const,
-              env: {
-                ...process.env,
-                BROWSER: "none",
-                NOVA_ORBIT_AGENT_ID: session.id,
-              },
+              env: safeEnv,
             });
 
             session.process = proc;
@@ -106,6 +123,8 @@ export function createClaudeCodeAdapter() {
               if (session.process) {
                 log.warn(`Session ${session.id} timed out after ${TIMEOUT_MS / 1000}s, sending SIGTERM`);
                 session.process.kill("SIGTERM");
+                const novaError = makeTimeoutError(TIMEOUT_MS);
+                session.emit("nova:error", novaError.toJSON());
                 // SIGKILL fallback if process doesn't exit within 5s
                 setTimeout(() => {
                   if (session.process) {
@@ -163,6 +182,8 @@ export function createClaudeCodeAdapter() {
               session.status = "failed";
               session.emit("status", "failed");
               log.error("Failed to spawn Claude Code", err);
+              const novaError = makeSpawnFailedError(err.message);
+              session.emit("nova:error", novaError.toJSON());
               reject(err);
             });
           });
@@ -185,6 +206,8 @@ export function createClaudeCodeAdapter() {
           log.info(
             `Session "${resumeId}" unavailable, retrying with fresh session`,
           );
+          const novaError = makeSessionExpiredError(resumeId);
+          session.emit("nova:error", novaError.toJSON());
           session.lastSessionId = null;
           return runAttempt(null);
         }
@@ -193,8 +216,10 @@ export function createClaudeCodeAdapter() {
         if (result.exitCode !== 0 && isRateLimitError(result.stderr)) {
           const waitMs = 60_000; // Wait 1 minute before retry
           log.warn(`Rate limit hit, waiting ${waitMs / 1000}s before retry`);
+          const novaError = makeRateLimitError(result.stderr.slice(0, 200));
           session.emit("rate-limit", { waitMs, stderr: result.stderr.slice(0, 200) });
-          session.emit("output", `\n⏳ Rate limit reached. Waiting ${waitMs / 1000}s before retry...\n`);
+          session.emit("nova:error", novaError.toJSON());
+          session.emit("output", `\n[Rate limit reached. Waiting ${waitMs / 1000}s before retry...]\n`);
           await new Promise((r) => setTimeout(r, waitMs));
           session.lastSessionId = null;
           return runAttempt(null);
@@ -273,9 +298,22 @@ function buildArgs(
     args.push("--allowedTools", config.allowedTools.join(","));
   }
 
-  // Skip permissions (use with caution)
+  // Skip permissions — requires explicit opt-in in ~/.nova-orbit/config.json
   if (config.dangerouslySkipPermissions) {
-    args.push("--dangerously-skip-permissions");
+    const configPath = join(homedir(), ".nova-orbit", "config.json");
+    let allowed = false;
+    try {
+      const cfg = JSON.parse(readFileSync(configPath, "utf-8"));
+      allowed = cfg.allowDangerousPermissions === true;
+    } catch {
+      // config 없음 = 불허
+    }
+    if (allowed) {
+      args.push("--dangerously-skip-permissions");
+      log.warn("dangerouslySkipPermissions ENABLED — agent has unrestricted access");
+    } else {
+      log.info("dangerouslySkipPermissions requested but not allowed in config — ignoring");
+    }
   }
 
   return args;
@@ -296,6 +334,11 @@ function buildTempDir(config: ClaudeCodeConfig): string | null {
   // Write system prompt to file
   if (config.systemPrompt) {
     writeFileSync(join(tempDir, ".nova-system-prompt"), config.systemPrompt);
+  }
+
+  // Write agent memory file for --add-dir injection (Sprint 6)
+  if (config.memoryContent) {
+    writeFileSync(join(tempDir, ".nova-agent-memory.md"), config.memoryContent);
   }
 
   // Create .claude/skills/ structure and symlink skills

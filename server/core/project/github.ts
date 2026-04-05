@@ -107,18 +107,26 @@ export function createAgentBranch(
 
   const branch = `agent/${sanitizedAgent}/${slug}`;
 
-  try {
-    const result = spawnSync("git", ["checkout", "-b", branch], {
+  // Try creating new branch; if it already exists, switch to it
+  const createResult = spawnSync("git", ["checkout", "-b", branch], {
+    cwd: workdir,
+    stdio: "pipe",
+    timeout: 15000,
+  });
+
+  if (createResult.status !== 0) {
+    // Branch may already exist — try switching to it
+    const switchResult = spawnSync("git", ["checkout", branch], {
       cwd: workdir,
       stdio: "pipe",
       timeout: 15000,
     });
-    if (result.status !== 0) {
-      throw new Error(result.stderr?.toString() || "git checkout -b failed");
+    if (switchResult.status !== 0) {
+      throw new Error(`git checkout failed: ${switchResult.stderr?.toString() || "unknown error"}`);
     }
+    log.info(`Switched to existing branch: ${branch}`);
+  } else {
     log.info(`Created branch: ${branch}`);
-  } catch (err: any) {
-    throw new Error(`git checkout -b failed: ${err.message}`);
   }
 
   return branch;

@@ -4,6 +4,7 @@ import { WebSocketServer } from "ws";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { createDatabase, migrate } from "./db/schema.js";
+import { recoverOnStartup } from "./core/recovery.js";
 import { createProjectRoutes } from "./api/routes/projects.js";
 import { createAgentRoutes } from "./api/routes/agents.js";
 import { createTaskRoutes } from "./api/routes/tasks.js";
@@ -13,6 +14,7 @@ import { createOrchestrationRoutes } from "./api/routes/orchestration.js";
 import { createActivityRoutes } from "./api/routes/activities.js";
 import { createWSHandler } from "./api/websocket.js";
 import { createDevServerManager, type DevServerManager } from "./core/project/dev-server.js";
+import { loadOrCreateApiKey, authMiddleware } from "./api/middleware/auth.js";
 import type { Database } from "better-sqlite3";
 import type { SessionManager } from "./core/agent/session.js";
 import type { Scheduler } from "./core/orchestration/scheduler.js";
@@ -50,21 +52,39 @@ export async function startServer(config: ServerConfig): Promise<void> {
   migrate(db);
   console.log(`  Database: ${dbPath}`);
 
+  const recovery = recoverOnStartup(db);
+  if (recovery.recoveredTasks > 0 || recovery.killedProcesses > 0) {
+    console.log(`  Recovery: ${recovery.recoveredTasks} tasks restored, ${recovery.killedProcesses} orphan processes killed`);
+  }
+
   // Express app
   const app = express();
   app.use(express.json());
 
-  // CORS for dashboard dev server
+  // CORS for dashboard dev server — localhost origins only
+  const ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+  ];
   app.use((_req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
+    const origin = _req.headers.origin;
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+    }
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (_req.method === "OPTIONS") {
       res.sendStatus(204);
       return;
     }
     next();
   });
+
+  // API authentication
+  const apiKey = loadOrCreateApiKey(dataDir);
+  app.use(authMiddleware(apiKey));
 
   // HTTP + WebSocket server
   const server = createServer(app);
@@ -83,7 +103,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
   const ctx: AppContext = { db, wss, broadcast, devServerManager };
 
   // WebSocket handler
-  createWSHandler(wss);
+  createWSHandler(wss, apiKey);
 
   // API routes
   app.use("/api/projects", createProjectRoutes(ctx));
@@ -127,16 +147,37 @@ export async function startServer(config: ServerConfig): Promise<void> {
   });
 
   // Graceful shutdown
-  const shutdown = () => {
-    console.log("\n  Shutting down...");
+  const shutdown = async () => {
+    console.log("\n  Shutting down gracefully...");
+
+    // 1. 실행 중인 에이전트 세션 종료
+    if (ctx.sessionManager) {
+      ctx.sessionManager.killAll();
+    }
+
+    // 2. 스케줄러 정지: 모든 active 프로젝트 큐 중단
+    if (ctx.scheduler) {
+      const projects = db.prepare("SELECT id FROM projects WHERE status = 'active'").all() as { id: string }[];
+      for (const p of projects) ctx.scheduler.stopQueue(p.id);
+    }
+
+    // 3. Dev server 정리
     devServerManager.stopAll();
+
+    // 4. WebSocket / HTTP 종료
     wss.close();
     server.close();
+
+    // 5. DB 정리: active 세션 → killed, DB 닫기
+    db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE status = 'active'").run();
     db.close();
+
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+
+  // 5초 timeout 후 강제 종료 (shutdown이 hang하는 경우 대비)
+  process.on("SIGINT", () => { shutdown().finally(() => setTimeout(() => process.exit(1), 5000)); });
+  process.on("SIGTERM", () => { shutdown().finally(() => setTimeout(() => process.exit(1), 5000)); });
 
   // Prevent server crash on unhandled errors
   process.on("uncaughtException", (err) => {

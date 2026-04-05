@@ -77,6 +77,7 @@ export interface AgentConfig {
 export type Priority = "critical" | "high" | "medium" | "low";
 export type TaskStatus =
   | "todo"
+  | "pending_approval"
   | "in_progress"
   | "in_review"
   | "done"
@@ -150,11 +151,17 @@ export type WSEventType =
   | "agent:output"
   | "task:updated"
   | "task:delegated"
+  | "task:started"
+  | "task:completed"
+  | "task:usage"
+  | "task:git"
   | "verification:result"
   | "project:updated"
   | "queue:paused"
   | "queue:resumed"
   | "queue:stopped"
+  | "system:rate-limit"
+  | "system:error"
   | "autopilot:mode-changed"
   | "autopilot:full-completed";
 
