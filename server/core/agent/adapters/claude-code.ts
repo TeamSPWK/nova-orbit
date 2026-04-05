@@ -110,6 +110,13 @@ export function createClaudeCodeAdapter() {
             for (const key of ALLOWED_ENV_KEYS) {
               if (process.env[key]) safeEnv[key] = process.env[key]!;
             }
+            // Ensure common binary paths are in PATH (npm/tsx may strip them)
+            const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+            const currentPath = safeEnv.PATH ?? "";
+            const missingPaths = extraPaths.filter((p) => !currentPath.includes(p));
+            if (missingPaths.length > 0) {
+              safeEnv.PATH = [currentPath, ...missingPaths].filter(Boolean).join(":");
+            }
 
             const proc: ChildProcess = spawn("claude", args, {
               cwd: resolvePath(config.workdir),
@@ -195,6 +202,10 @@ export function createClaudeCodeAdapter() {
               session.process = null;
               session.status = "failed";
               session.emit("status", "failed");
+              const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
+              if (isNotFound) {
+                log.error(`Claude Code CLI not found in PATH: ${safeEnv.PATH}`);
+              }
               log.error("Failed to spawn Claude Code", err);
               const novaError = makeSpawnFailedError(err.message);
               session.emit("nova:error", novaError.toJSON());

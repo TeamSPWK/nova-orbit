@@ -364,20 +364,28 @@ Fix ONLY these issues. Do not modify other code.
         };
       } catch (err: any) {
         log.error(`Task execution failed: ${task.title}`, err);
-        // Rate limit errors → back to todo for retry, not blocked
-        const isRateLimit = err.message?.toLowerCase().includes("rate limit") ||
-          err.message?.toLowerCase().includes("429") ||
-          err.message?.toLowerCase().includes("too many requests");
+
+        const errMsg = err.message?.toLowerCase() ?? "";
+        const isRateLimit = errMsg.includes("rate limit") || errMsg.includes("429") || errMsg.includes("too many requests");
+        // Environment errors (CLI not found, permission denied) are not retryable
+        const isEnvError = errMsg.includes("enoent") || errMsg.includes("eacces") || errMsg.includes("not found") || errMsg.includes("not installed");
+
         const fallbackStatus = isRateLimit ? "todo" : "blocked";
         transitionTask(db, broadcast, task, fallbackStatus);
 
         if (fallbackStatus === "blocked") {
-          // Log failure reason for retry context
           const retryInfo = db.prepare("SELECT retry_count FROM tasks WHERE id = ?").get(task.id) as { retry_count: number } | undefined;
           db.prepare(
             "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_blocked', ?)",
           ).run(task.project_id, task.assignee_id, `Blocked (retry ${retryInfo?.retry_count ?? 0}): ${task.title} — ${err.message?.slice(0, 200)}`);
-          log.warn(`Task "${task.title}" blocked — scheduler will auto-retry if retries remain`);
+
+          if (isEnvError) {
+            // Environment errors won't resolve with retries — exhaust retry count immediately
+            db.prepare("UPDATE tasks SET retry_count = 999, reassign_count = 999 WHERE id = ?").run(task.id);
+            log.error(`Task "${task.title}" permanently blocked — environment error (${err.message?.slice(0, 100)})`);
+          } else {
+            log.warn(`Task "${task.title}" blocked — scheduler will auto-retry if retries remain`);
+          }
         } else {
           log.warn(`Task "${task.title}" returned to todo due to rate limit — will retry on next queue poll`);
         }
