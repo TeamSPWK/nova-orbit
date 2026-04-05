@@ -4,7 +4,6 @@ import { getApiKey } from "../lib/api";
 interface ClaudeStatus {
   raw: string | null;
   model: string | null;
-  contextPercent: number | null;
   inputTokensK: number | null;
   outputTokensK: number | null;
   costUsd: number | null;
@@ -95,16 +94,6 @@ export function StatusBar() {
       <span className="text-gray-500 dark:text-gray-400 font-sans font-medium text-[10px] truncate max-w-[120px]">
         {status.model ?? "Claude"}
       </span>
-
-      {status.contextPercent != null && (
-        <>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span className="flex items-center gap-1" title="Context window usage">
-            <span className="text-gray-500 dark:text-gray-500 text-[9px]">ctx</span>
-            <Gauge percent={status.contextPercent} segments={5} />
-          </span>
-        </>
-      )}
 
       {(status.inputTokensK != null || status.outputTokensK != null) && (
         <>

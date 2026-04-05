@@ -12,17 +12,28 @@ export function createProjectRoutes(ctx: AppContext): Router {
   const router = Router();
   const { db, broadcast } = ctx;
 
+  /** Transform raw DB row: parse github_config JSON string → github object for dashboard */
+  function toProjectResponse(row: any): any {
+    if (!row) return row;
+    const { github_config, tech_stack, ...rest } = row;
+    return {
+      ...rest,
+      github: github_config ? (() => { try { return JSON.parse(github_config); } catch { return null; } })() : null,
+      tech_stack: tech_stack ? (() => { try { return JSON.parse(tech_stack); } catch { return null; } })() : null,
+    };
+  }
+
   // List all projects
   router.get("/", (_req, res) => {
     const projects = db.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all();
-    res.json(projects);
+    res.json(projects.map(toProjectResponse));
   });
 
   // Get single project
   router.get("/:id", (req, res) => {
     const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
     if (!project) return res.status(404).json({ error: "Project not found" });
-    res.json(project);
+    res.json(toProjectResponse(project));
   });
 
   // Create project
@@ -53,7 +64,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
       tech_stack ? JSON.stringify(tech_stack) : null,
     );
 
-    const project = db.prepare("SELECT * FROM projects WHERE rowid = ?").get(result.lastInsertRowid);
+    const project = toProjectResponse(db.prepare("SELECT * FROM projects WHERE rowid = ?").get(result.lastInsertRowid));
     broadcast("project:updated", project);
     res.status(201).json(project);
   });
@@ -61,7 +72,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
   // Update project
   router.patch("/:id", (req, res) => {
     // Accept both `github_config` (snake_case) and `github` (camelCase from dashboard)
-    const { name, mission, status, workdir: rawWorkdir, tech_stack, autopilot } = req.body;
+    const { name, mission, status, workdir: rawWorkdir, tech_stack, autopilot, dev_port } = req.body;
     const github_config = req.body.github_config ?? req.body.github;
     const existing = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Project not found" });
@@ -95,6 +106,10 @@ export function createProjectRoutes(ctx: AppContext): Router {
       }
     }
 
+    // dev_port: undefined = 변경 없음, null = 초기화(자동할당), number = 지정
+    const devPortClause = dev_port !== undefined ? "dev_port = ?," : "";
+    const devPortParams = dev_port !== undefined ? [dev_port] : [];
+
     db.prepare(`
       UPDATE projects SET
         name = COALESCE(?, name),
@@ -104,6 +119,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
         github_config = COALESCE(?, github_config),
         tech_stack = COALESCE(?, tech_stack),
         autopilot = COALESCE(?, autopilot),
+        ${devPortClause}
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -114,10 +130,11 @@ export function createProjectRoutes(ctx: AppContext): Router {
       github_config ? JSON.stringify(github_config) : null,
       tech_stack ? JSON.stringify(tech_stack) : null,
       autopilot ?? null,
+      ...devPortParams,
       req.params.id,
     );
 
-    const updated = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
+    const updated = toProjectResponse(db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id));
     broadcast("project:updated", updated);
     broadcast("autopilot:mode-changed", { projectId: req.params.id, mode: autopilot ?? existing.autopilot });
     res.json(updated);
@@ -226,7 +243,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
         JSON.stringify(result.analysis.techStack),
       );
 
-      const project = db.prepare("SELECT * FROM projects WHERE rowid = ?").get(dbResult.lastInsertRowid) as any;
+      const project = toProjectResponse(db.prepare("SELECT * FROM projects WHERE rowid = ?").get(dbResult.lastInsertRowid));
 
       // Create suggested agents
       for (const agent of result.analysis.suggestedAgents) {
@@ -289,7 +306,12 @@ export function createProjectRoutes(ctx: AppContext): Router {
     if (!project.workdir) return res.status(400).json({ error: "Project has no workdir configured" });
 
     try {
-      const { port, url } = await ctx.devServerManager.start(req.params.id, project.workdir);
+      // 요청 body에 port가 있으면 우선, 없으면 프로젝트 설정의 dev_port, 없으면 자동 할당
+      const preferredPort = req.body?.port ?? project.dev_port ?? undefined;
+      const force = req.body?.force ?? false;
+      const { port, url } = await ctx.devServerManager.start(
+        req.params.id, project.workdir, { port: preferredPort, force },
+      );
       res.json({ status: "started", port, url });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

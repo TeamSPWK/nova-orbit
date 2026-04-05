@@ -201,7 +201,8 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
     // Build org context so the agent knows the team structure
     const projectAgents = db.prepare("SELECT id, name, role, parent_id FROM agents WHERE project_id = ?").all(agent.project_id) as any[];
-    let orgContext = "";
+    const contextParts: string[] = [];
+
     if (projectAgents.length > 1) {
       const parent = projectAgents.find((a: any) => a.id === agent.parent_id);
       const subordinates = projectAgents.filter((a: any) => a.parent_id === agentId);
@@ -217,8 +218,34 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       if (peers.length > 0) {
         lines.push(`Peers: ${peers.map((p: any) => `${p.name}(${p.role})`).join(", ")}.`);
       }
-      orgContext = lines.join(" ") + "\n\n";
+      contextParts.push(lines.join(" "));
     }
+
+    // Build project state context — goals, tasks, blockers
+    const goals = db.prepare("SELECT id, description, priority, progress FROM goals WHERE project_id = ? ORDER BY created_at DESC LIMIT 5").all(agent.project_id) as any[];
+    if (goals.length > 0) {
+      const goalLines = goals.map((g: any) => {
+        const desc = (g.description || "").slice(0, 80);
+        return `- "${desc}" (${g.progress}%, priority: ${g.priority})`;
+      });
+      contextParts.push(`[Current Goals]\n${goalLines.join("\n")}`);
+    }
+
+    const activeTasks = db.prepare(`
+      SELECT t.id, t.title, t.status, t.assignee_id, a.name AS assignee_name
+      FROM tasks t LEFT JOIN agents a ON a.id = t.assignee_id
+      WHERE t.project_id = ? AND t.status NOT IN ('done')
+      ORDER BY t.created_at DESC LIMIT 20
+    `).all(agent.project_id) as any[];
+    if (activeTasks.length > 0) {
+      const taskLines = activeTasks.map((t: any) => {
+        const assignee = t.assignee_name ? ` → ${t.assignee_name}` : " (unassigned)";
+        return `- [${t.status}] "${t.title}"${assignee}`;
+      });
+      contextParts.push(`[Active Tasks]\n${taskLines.join("\n")}`);
+    }
+
+    const orgContext = contextParts.length > 0 ? contextParts.join("\n\n") + "\n\n" : "";
 
     // Return immediately — run asynchronously
     res.json({ status: "started", agentId });

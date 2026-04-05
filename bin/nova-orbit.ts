@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { exec } from "node:child_process";
 
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 7200;
 
 async function main() {
   const args = process.argv.slice(2);

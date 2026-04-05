@@ -12,7 +12,7 @@ Claude Code sessions as agents, goal-based orchestration, Nova Quality Gate veri
 ```bash
 # Development
 npm run dev:server          # tsx watch server
-npm run dev:dashboard       # vite dev (port 5173, proxy → 3000)
+npm run dev:dashboard       # vite dev (port 5173, proxy → 7200)
 
 # Production build
 npm run build               # server (tsup) + dashboard (vite)

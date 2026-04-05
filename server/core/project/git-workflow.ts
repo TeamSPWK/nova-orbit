@@ -112,6 +112,29 @@ export function mergeBranch(projectWorkdir: string, sourceBranch: string, target
 }
 
 /**
+ * Sequential merge — 동시 merge 호출 시 큐잉하여 순서대로 실행.
+ * git checkout + merge는 atomic하지 않으므로 동시 실행 시 깨질 수 있음.
+ * Node.js 단일 프로세스이므로 모듈 레벨 Promise chain이면 충분.
+ */
+let mergeLock: Promise<void> = Promise.resolve();
+
+export function mergeBranchSequential(
+  projectWorkdir: string,
+  sourceBranch: string,
+  targetBranch: string,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    mergeLock = mergeLock
+      .then(() => {
+        resolve(mergeBranch(projectWorkdir, sourceBranch, targetBranch));
+      })
+      .catch(() => {
+        resolve(false);
+      });
+  });
+}
+
+/**
  * Create a pull request via the gh CLI.
  * Returns the PR URL on success, null on failure.
  */

@@ -210,6 +210,11 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE projects ADD COLUMN autopilot TEXT NOT NULL DEFAULT 'off'");
   }
 
+  // dev_port on projects — 사용자 지정 dev server 포트 (NULL이면 자동 할당 4001-4099)
+  if (!projectColumns.some((c) => c.name === "dev_port")) {
+    db.exec("ALTER TABLE projects ADD COLUMN dev_port INTEGER");
+  }
+
   // parent_task_id on tasks (for hierarchical delegation subtasks)
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
   if (!taskColumns.some((c) => c.name === "parent_task_id")) {
@@ -287,6 +292,18 @@ export function migrate(db: Database.Database): void {
       db.pragma("foreign_keys = ON");
     }
   }
+
+  // needs_worktree on agents — false for read-only roles (reviewer, qa) or user-configured
+  // 사용자가 커스텀 에이전트를 만들 때도 직접 설정 가능
+  const agentCols2 = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
+  if (!agentCols2.some((c) => c.name === "needs_worktree")) {
+    db.exec("ALTER TABLE agents ADD COLUMN needs_worktree INTEGER NOT NULL DEFAULT 1");
+    // 기존 reviewer/qa 에이전트는 워크트리 불필요로 설정
+    db.exec("UPDATE agents SET needs_worktree = 0 WHERE role IN ('reviewer', 'qa')");
+  }
+
+  // 기존 트리거 제거 — needs_worktree는 사용자가 UI에서 직접 설정
+  db.exec("DROP TRIGGER IF EXISTS trg_agent_needs_worktree");
 
   // Composite index for session context chain queries (Sprint 6)
   db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_assignee_done ON tasks(assignee_id, status, updated_at DESC)");

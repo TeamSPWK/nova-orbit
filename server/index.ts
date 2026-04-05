@@ -63,11 +63,12 @@ export async function startServer(config: ServerConfig): Promise<void> {
   app.use(express.json());
 
   // CORS for dashboard dev server — localhost origins only
+  // CORS: 대시보드 dev (5173) + 서버 자체 (동적 포트)
   const ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://localhost:3000",
+    `http://localhost:${port}`,
     "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
+    `http://127.0.0.1:${port}`,
   ];
   app.use((_req, res, next) => {
     const origin = _req.headers.origin;
@@ -101,7 +102,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
     }
   };
 
-  const devServerManager = createDevServerManager();
+  const devServerManager = createDevServerManager(port);
   const ctx: AppContext = { db, wss, broadcast, devServerManager };
 
   // WebSocket handler
@@ -133,7 +134,6 @@ export async function startServer(config: ServerConfig): Promise<void> {
       const raw = readFileSync(claudeStatusPath, "utf-8").trim();
       const stat = statSync(claudeStatusPath);
       // Parse: " Opus 4.6 (1M context) │ ctx:8% │ ↑6K ↓24K │ $1.87 │ 5h:8%"
-      const ctxMatch = raw.match(/ctx:(\d+)%/);
       const tokenMatch = raw.match(/↑(\d+)K\s*↓(\d+)K/);
       const costMatch = raw.match(/\$([0-9.]+)/);
       const rateMatch = raw.match(/5h:(\d+)%/);
@@ -141,7 +141,6 @@ export async function startServer(config: ServerConfig): Promise<void> {
       res.json({
         raw,
         model: modelMatch?.[1]?.trim() ?? null,
-        contextPercent: ctxMatch ? Number(ctxMatch[1]) : null,
         inputTokensK: tokenMatch ? Number(tokenMatch[1]) : null,
         outputTokensK: tokenMatch ? Number(tokenMatch[2]) : null,
         costUsd: costMatch ? Number(costMatch[1]) : null,
@@ -240,7 +239,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
 const isDirectRun = process.argv[1]?.endsWith("server/index.ts") ||
                     process.argv[1]?.endsWith("server/index.js");
 if (isDirectRun) {
-  const port = parseInt(process.env.PORT || "3000", 10);
+  const port = parseInt(process.env.PORT || "7200", 10);
   const dataDir = resolve(process.cwd(), process.env.NOVA_ORBIT_DATA_DIR || ".nova-orbit");
   startServer({ port, dataDir }).catch((err) => {
     console.error("Failed to start server:", err);

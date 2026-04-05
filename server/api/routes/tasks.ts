@@ -22,9 +22,9 @@ export function createTaskRoutes(ctx: AppContext): Router {
 
     let tasks;
     if (goalId) {
-      tasks = db.prepare(`${withVerification} WHERE t.goal_id = ? ORDER BY t.created_at`).all(goalId);
+      tasks = db.prepare(`${withVerification} WHERE t.goal_id = ? ORDER BY t.created_at DESC`).all(goalId);
     } else if (projectId) {
-      tasks = db.prepare(`${withVerification} WHERE t.project_id = ? ORDER BY t.status, t.created_at`).all(projectId);
+      tasks = db.prepare(`${withVerification} WHERE t.project_id = ? ORDER BY t.status, t.created_at DESC`).all(projectId);
     } else {
       return res.status(400).json({ error: "projectId or goalId query param required" });
     }

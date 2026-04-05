@@ -4,7 +4,7 @@ import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createDelegationEngine } from "./delegation.js";
-import { executeGitWorkflow, mergeBranch, type GitHubConfig } from "../project/git-workflow.js";
+import { executeGitWorkflow, type GitHubConfig } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
 import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL } from "../../utils/constants.js";
@@ -96,8 +96,9 @@ export function createOrchestrationEngine(
         throw new Error("Task has no assigned agent");
       }
 
-      const agent = db.prepare("SELECT name FROM agents WHERE id = ?").get(task.assignee_id) as { name: string } | undefined;
+      const agent = db.prepare("SELECT name, role, needs_worktree FROM agents WHERE id = ?").get(task.assignee_id) as { name: string; role: string; needs_worktree: number } | undefined;
       const agentName = agent?.name ?? "";
+      const needsWorktree = agent?.needs_worktree ?? 1; // 기본값: 워크트리 생성
       const workdir = project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
       const { existsSync } = await import("node:fs");
       if (!existsSync(workdir)) {
@@ -126,18 +127,23 @@ export function createOrchestrationEngine(
       transitionTask(db, broadcast, task, "in_progress");
 
       // Worktree isolation (Sprint 4): git repo가 있으면 격리된 worktree에서 실행
+      // needs_worktree=0인 에이전트(reviewer, qa, 또는 사용자 설정)는 프로젝트 루트에서 실행
       let effectiveWorkdir = workdir;
       let worktreeInfo: WorktreeInfo | null = null;
 
-      try {
-        const { createWorktree } = await import("../project/worktree.js");
-        worktreeInfo = createWorktree(workdir, agentName, task.title);
-        if (worktreeInfo) {
-          effectiveWorkdir = worktreeInfo.path;
-          log.info(`Using worktree: ${effectiveWorkdir}`);
+      if (!needsWorktree) {
+        log.info(`Skipping worktree for agent "${agentName}" (needs_worktree=0) — using project root`);
+      } else {
+        try {
+          const { createWorktree } = await import("../project/worktree.js");
+          worktreeInfo = createWorktree(workdir, agentName, task.title);
+          if (worktreeInfo) {
+            effectiveWorkdir = worktreeInfo.path;
+            log.info(`Using worktree: ${effectiveWorkdir}`);
+          }
+        } catch (err: any) {
+          log.warn(`Worktree creation failed, using direct workdir: ${err.message}`);
         }
-      } catch (err: any) {
-        log.warn(`Worktree creation failed, using direct workdir: ${err.message}`);
       }
 
       // Phase 2: Execute via assigned agent
@@ -712,20 +718,31 @@ async function runGitWorkflow(
       VALUES (?, ?, 'git_error', ?)
     `).run(task.project_id, task.assignee_id, `Git error on task "${task.title}": ${result.error}`);
   } else {
-    // main_direct + worktree: merge worktree branch into main at project root
+    // 워크트리 변경사항을 main에 반영 — 후속 태스크(reviewer, qa 등)가 접근할 수 있도록
+    // 모든 git 모드에서 로컬 머지 수행, push는 main_direct에서만
     const gitMode = effectiveConfig.gitMode ??
       (effectiveConfig.prMode ? "pr" : effectiveConfig.autoPush ? "main_direct" : "branch_only");
-    if (gitMode === "main_direct" && worktreeBranch && result.committed) {
+    if (worktreeBranch && result.committed) {
       const projectRoot = _project.workdir;
       if (projectRoot) {
-        const merged = mergeBranch(projectRoot, worktreeBranch, effectiveConfig.branch || "main");
+        const { mergeBranchSequential } = await import("../project/git-workflow.js");
+        const targetBranch = effectiveConfig.branch || "main";
+        const merged = await mergeBranchSequential(projectRoot, worktreeBranch, targetBranch);
         if (merged) {
-          log.info(`Merged ${worktreeBranch} → ${effectiveConfig.branch || "main"}`);
-          // Push main
-          const { pushBranch } = await import("../project/git-workflow.js");
-          pushBranch(projectRoot, effectiveConfig.branch || "main");
+          log.info(`Merged ${worktreeBranch} → ${targetBranch}`);
+          // main_direct 모드에서만 push (다른 모드에서는 로컬 머지만)
+          if (gitMode === "main_direct") {
+            const { pushBranch } = await import("../project/git-workflow.js");
+            pushBranch(projectRoot, targetBranch);
+          }
         } else {
           log.warn(`Merge failed — worktree branch ${worktreeBranch} preserved for manual merge`);
+          // 머지 실패를 activity log에 기록하여 대시보드에서 확인 가능
+          db.prepare(`
+            INSERT INTO activities (project_id, agent_id, type, message)
+            VALUES (?, ?, 'git_merge_conflict', ?)
+          `).run(task.project_id, task.assignee_id,
+            `Auto-merge failed for ${worktreeBranch} → ${targetBranch}. Manual resolution may be needed.`);
         }
       }
     }

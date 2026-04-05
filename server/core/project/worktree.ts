@@ -30,6 +30,17 @@ export function createWorktree(
     return null;
   }
 
+  // HEAD에 커밋이 있는지 확인 (빈 repo에서 worktree 생성 불가)
+  const headCheck = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: projectWorkdir,
+    stdio: "pipe",
+    timeout: 5_000,
+  });
+  if (headCheck.status !== 0) {
+    log.warn("No commits in repo — skipping worktree isolation");
+    return null;
+  }
+
   const agentSlug = slugify(agentName).slice(0, 50) || "agent";
   const safeTaskSlug = slugify(taskSlug).slice(0, 40) || "task";
   const uid = randomBytes(4).toString("hex"); // 유일성 보장 — slug 충돌 방지

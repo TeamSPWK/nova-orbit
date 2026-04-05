@@ -23,6 +23,8 @@ export function ProjectSettings({ projectId }: Props) {
   const [autoPush, setAutoPush] = useState(project?.github?.autoPush ?? false);
   const [prMode, setPrMode] = useState(project?.github?.prMode ?? false);
   const [gitMode, setGitMode] = useState<string>(project?.github?.gitMode ?? "local_only");
+  const [devPort, setDevPort] = useState<string>(project?.dev_port?.toString() ?? "");
+  const [devPortSaving, setDevPortSaving] = useState(false);
 
   if (!project) return null;
 
@@ -174,6 +176,48 @@ export function ProjectSettings({ projectId }: Props) {
             {gitMode === "branch_only" && "에이전트별 브랜치(agent/...)에 커밋합니다. 나중에 수동으로 머지하세요."}
             {gitMode === "pr" && "에이전트 브랜치를 push하고 PR을 자동 생성합니다. GitHub 연결이 필요합니다."}
             {gitMode === "main_direct" && "메인 브랜치에 직접 커밋하고 push합니다. Solo 개발자에게 적합합니다."}
+          </p>
+        </div>
+      </section>
+
+      {/* Dev Server Port */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          Dev Server
+        </h2>
+        <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">포트</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1024"
+                max="65535"
+                placeholder="자동 (4001-4099)"
+                value={devPort}
+                onChange={(e) => setDevPort(e.target.value)}
+                onBlur={async () => {
+                  const val = devPort.trim();
+                  const numVal = val === "" ? null : parseInt(val, 10);
+                  if (numVal !== null && (isNaN(numVal) || numVal < 1024 || numVal > 65535)) {
+                    setToast("포트 범위: 1024 ~ 65535");
+                    return;
+                  }
+                  setDevPortSaving(true);
+                  try {
+                    const updated = await api.projects.update(projectId, { dev_port: numVal });
+                    updateProject(updated);
+                  } catch { setToast("포트 저장 실패"); }
+                  finally { setDevPortSaving(false); }
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                className="w-32 text-sm text-right px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-[#1a1a2e] text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              {devPortSaving && <span className="text-[10px] text-gray-400">저장 중...</span>}
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            {devPort.trim() ? `포트 ${devPort}에서 dev server를 시작합니다.` : "비워두면 4001-4099 범위에서 자동 할당됩니다."}
           </p>
         </div>
       </section>

@@ -10,7 +10,7 @@
     "predev": "bash scripts/predev.sh",
     "dev": "concurrently --kill-others \"npm run dev:server\" \"npm run dev:dashboard\"",
     "dev:server": "tsx watch server/index.ts",
-    "dev:dashboard": "wait-on http://127.0.0.1:3000/api/health && cd dashboard && VITE_WS_URL=ws://127.0.0.1:3000 npx vite --port 5173",
+    "dev:dashboard": "wait-on http://127.0.0.1:7200/api/health && cd dashboard && VITE_WS_URL=ws://127.0.0.1:7200 npx vite --port 5173",
     "build": "npm run build:server && npm run build:dashboard",
     "build:server": "tsup",
     "build:dashboard": "cd dashboard && npm run build && mkdir -p ../dist/dashboard && cp -r dist/* ../dist/dashboard/",

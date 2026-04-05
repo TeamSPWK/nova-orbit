@@ -274,7 +274,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
 
   // Update agent
   router.patch("/:id", (req, res) => {
-    const { status, current_task_id, system_prompt, name, role, parent_id, prompt_source } = req.body;
+    const { status, current_task_id, system_prompt, name, role, parent_id, prompt_source, needs_worktree } = req.body;
     const existing = db.prepare("SELECT * FROM agents WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Agent not found" });
 
@@ -323,6 +323,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
     if (name != null) { updates.push("name = ?"); params.push(name); }
     if (role != null) { updates.push("role = ?"); params.push(role); }
     if (parent_id !== undefined) { updates.push("parent_id = ?"); params.push(parent_id); }
+    if (needs_worktree != null) { updates.push("needs_worktree = ?"); params.push(needs_worktree ? 1 : 0); }
     // 명시적 prompt_source 변경 (동기화 복원: 'auto'로 전환 등)
     if (prompt_source != null) { updates.push("prompt_source = ?"); params.push(prompt_source); }
 

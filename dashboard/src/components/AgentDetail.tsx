@@ -17,6 +17,7 @@ interface Agent {
   prompt_source?: string;
   resolved_prompt_source?: string;
   resolved_prompt_file?: string;
+  needs_worktree?: number;
 }
 
 interface Task {
@@ -536,6 +537,42 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
           {agent.status === "working" && (
             <AgentTerminal agentId={agent.id} />
           )}
+
+          {/* Worktree Toggle */}
+          <section className="px-3 py-2.5 border border-gray-100 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">워크트리 격리</span>
+              <button
+                onClick={async () => {
+                  const next = agent.needs_worktree ? 0 : 1;
+                  await api.agents.update(agent.id, { needs_worktree: next });
+                  window.dispatchEvent(new CustomEvent("nova:refresh"));
+                }}
+                role="switch"
+                aria-checked={!!agent.needs_worktree}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                  agent.needs_worktree ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-600"
+                }`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  agent.needs_worktree ? "translate-x-4.5" : "translate-x-0.5"
+                }`} />
+              </button>
+            </div>
+            <div className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed space-y-1">
+              {agent.needs_worktree ? (
+                <>
+                  <p>ON — 별도 복사본에서 코드를 수정합니다. 다른 에이전트 작업과 충돌하지 않습니다.</p>
+                  <p className="text-gray-300 dark:text-gray-600">ex) backend-dev, frontend-dev 등 코드를 작성하는 에이전트</p>
+                </>
+              ) : (
+                <>
+                  <p>OFF — 프로젝트 원본에서 직접 읽습니다. 다른 에이전트가 만든 파일도 바로 볼 수 있습니다.</p>
+                  <p className="text-gray-300 dark:text-gray-600">ex) 코드 리뷰어, QA 등 파일을 읽기만 하는 에이전트</p>
+                </>
+              )}
+            </div>
+          </section>
 
           {/* System Prompt */}
           <section>
