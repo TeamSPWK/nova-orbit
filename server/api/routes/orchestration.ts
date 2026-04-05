@@ -137,6 +137,9 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     if (!message || typeof message !== "string" || message.trim() === "") {
       return res.status(400).json({ error: "message is required" });
     }
+    if (message.length > 50_000) {
+      return res.status(400).json({ error: "Message too long (max 50,000 chars)" });
+    }
 
     const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as any;
     if (!agent) return res.status(404).json({ error: "Agent not found" });
@@ -279,8 +282,14 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     if (!Array.isArray(agentIds) || agentIds.length < 2) {
       return res.status(400).json({ error: "agentIds must be an array of at least 2" });
     }
+    if (agentIds.length > 10) {
+      return res.status(400).json({ error: "Maximum 10 agents per multi-prompt" });
+    }
     if (!message || typeof message !== "string" || message.trim() === "") {
       return res.status(400).json({ error: "message is required" });
+    }
+    if (message.length > 50_000) {
+      return res.status(400).json({ error: "Message too long (max 50,000 chars)" });
     }
     if (!projectId || typeof projectId !== "string") {
       return res.status(400).json({ error: "projectId is required" });

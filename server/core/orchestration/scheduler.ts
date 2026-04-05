@@ -254,7 +254,7 @@ export function createScheduler(
 
     const state = getPauseState(projectId);
     if (state.paused) {
-      scheduleNextPoll(projectId);
+      // paused 상태에서는 poll 재등록하지 않음 — resumeTimer 만료 시 자동 재개
       return;
     }
 

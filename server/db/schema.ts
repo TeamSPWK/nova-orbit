@@ -62,7 +62,7 @@ export function migrate(db: Database.Database): void {
       description TEXT NOT NULL DEFAULT '',
       assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
       parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-      status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'in_progress', 'in_review', 'done', 'blocked')),
+      status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'pending_approval', 'in_progress', 'in_review', 'done', 'blocked')),
       verification_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))

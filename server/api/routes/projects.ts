@@ -201,6 +201,12 @@ export function createProjectRoutes(ctx: AppContext): Router {
     const { url, name } = req.body;
     if (!url) return res.status(400).json({ error: "url is required" });
 
+    // SSRF 방어: HTTP/HTTPS + github.com만 허용
+    const trimmedUrl = String(url).trim();
+    if (!/^https?:\/\/github\.com\//i.test(trimmedUrl) && !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(trimmedUrl)) {
+      return res.status(400).json({ error: "Only GitHub HTTPS URLs or owner/repo format allowed" });
+    }
+
     try {
       const dataDir = process.env.NOVA_ORBIT_DATA_DIR || ".nova-orbit";
       const result = connectGitHub(url, dataDir);

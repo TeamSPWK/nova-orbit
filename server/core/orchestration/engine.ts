@@ -188,6 +188,8 @@ When complete, provide a summary of changes made.
 `;
 
         const implResult = await session.send(implementationPrompt);
+        // 구현 세션 즉시 정리 — verification에서 같은 agentId 충돌 방지
+        sessionManager.killSession(task.assignee_id);
         const implParsed = parseStreamJson(implResult.stdout);
         log.info(`Implementation complete for task "${task.title}"`, {
           cost: implParsed.usage?.totalCostUsd,
@@ -536,8 +538,10 @@ Respond in this EXACT JSON format:
 
       log.info(`Full autopilot: generating goals from mission "${project.mission.slice(0, 50)}..."`);
 
-      const session = sessionManager.spawnAgent(ctoAgent.id, project.workdir || (() => { throw new Error("Project has no workdir configured"); })());
+      const ctoWorkdir = project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
+      const session = sessionManager.spawnAgent(ctoAgent.id, ctoWorkdir);
 
+      try {
       const prompt = `
 # Mission Analysis — Goal Generation
 
@@ -592,10 +596,11 @@ Respond in this EXACT JSON format:
         "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'goal_created', ?)",
       ).run(projectId, ctoAgent.id, `CTO auto-generated ${goalIds.length} goals from mission`);
 
-      // Cleanup CTO session
-      sessionManager.killSession(ctoAgent.id);
-
       return { goalIds };
+      } finally {
+        // Cleanup CTO session — 성공/실패 모두
+        sessionManager.killSession(ctoAgent.id);
+      }
     },
   };
 }
