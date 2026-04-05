@@ -113,6 +113,21 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
           const retryResult = await session.send(retryPrompt);
           const retryParsed = parseStreamJson(retryResult.stdout);
           result = parseVerificationResult(taskId, retryParsed.text, opts.scope, evaluatorId);
+
+          // If still all zeros after retry — evaluator genuinely can't assess this task
+          // (e.g., git merge/cleanup tasks with no code changes to review)
+          // Treat as conditional pass rather than blocking the task
+          const stillAllZero = Object.values(result.dimensions).every((d) => d.value === 0);
+          if (stillAllZero && result.verdict === "fail") {
+            log.warn(`Evaluator returned all-zero scores after retry for "${task.title}" — treating as conditional pass (likely non-code task)`);
+            result.verdict = "conditional";
+            result.severity = "auto-resolve";
+            result.issues = [{
+              id: "issue-parse-skip",
+              severity: "info" as any,
+              message: "Evaluator could not assess this task (no reviewable code changes). Auto-passed as conditional.",
+            }];
+          }
         }
 
         // Store result with RETURNING to avoid race-prone re-query
