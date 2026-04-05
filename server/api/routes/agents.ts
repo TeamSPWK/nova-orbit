@@ -6,6 +6,7 @@ import { getAgentPresets } from "../../core/agent/roles.js";
 import { suggestAgentsFromMission, suggestFromProject, getTeamPresets } from "../../core/agent/suggest.js";
 import { resolvePrompt } from "../../core/agent/prompt-resolver.js";
 import { getPreset } from "../../core/agent/roles.js";
+import { VALID_ROLES } from "../../utils/constants.js";
 
 export function createAgentRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -252,8 +253,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: "project_id, name, and role are required" });
     }
 
-    const VALID_ROLES = ["coder", "reviewer", "marketer", "designer", "qa", "custom", "cto", "pm", "backend", "frontend", "ux", "devops"];
-    if (!VALID_ROLES.includes(role)) {
+    if (!(VALID_ROLES as readonly string[]).includes(role)) {
       return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
     }
 

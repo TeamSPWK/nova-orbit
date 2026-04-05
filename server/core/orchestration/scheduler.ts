@@ -3,14 +3,12 @@ import type { SessionManager } from "../agent/session.js";
 import { createOrchestrationEngine } from "./engine.js";
 import { createDelegationEngine } from "./delegation.js";
 import { createLogger } from "../../utils/logger.js";
+import {
+  POLL_INTERVAL_MS, BACKOFF_BASE_MS, BACKOFF_MAX_MS,
+  MAX_CONSECUTIVE_RATE_LIMITS, DEFAULT_MAX_CONCURRENCY,
+} from "../../utils/constants.js";
 
 const log = createLogger("scheduler");
-
-const POLL_INTERVAL_MS = 3000;
-const BACKOFF_BASE_MS = 60_000;
-const BACKOFF_MAX_MS = 300_000;
-const MAX_CONSECUTIVE_RATE_LIMITS = 3;
-const DEFAULT_MAX_CONCURRENCY = 3; // max parallel tasks per project
 
 export interface Scheduler {
   startQueue: (projectId: string) => void;

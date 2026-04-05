@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { randomUUID } from "node:crypto";
 import type { AppContext } from "../../index.js";
 import { createSessionManager } from "../../core/agent/session.js";
 import { createOrchestrationEngine } from "../../core/orchestration/engine.js";
 import { createScheduler } from "../../core/orchestration/scheduler.js";
 import { createQualityGate } from "../../core/quality-gate/evaluator.js";
+import { MAX_PROMPT_LEN, MAX_TITLE_LEN, MAX_DESC_LEN } from "../../utils/constants.js";
 
 export function createOrchestrationRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -16,6 +18,59 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
   // Expose sessionManager on ctx so other routes (e.g. agent delete) can kill sessions
   ctx.sessionManager = sessionManager;
+
+  /**
+   * Extract goal + tasks from CTO agent JSON response and auto-create them.
+   * Shared by /agents/:agentId/prompt and /multi-prompt.
+   */
+  function extractAndCreateCtoGoal(
+    projectId: string,
+    agentId: string,
+    text: string,
+    fallbackDesc: string,
+  ): boolean {
+    const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) ??
+                      text.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
+    if (!jsonMatch) return false;
+
+    const jsonStr = jsonMatch[1] ?? jsonMatch[0];
+    const data = JSON.parse(jsonStr);
+    const tasks = data.tasks ?? [];
+    if (tasks.length === 0) return false;
+
+    const goalDesc = data.goal ?? data.analysis ?? fallbackDesc.slice(0, 200);
+    const goalRow = db.prepare(
+      "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, 'high') RETURNING id",
+    ).get(projectId, goalDesc) as { id: string } | undefined;
+
+    if (!goalRow) return false;
+
+    const projectAgents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(projectId) as any[];
+    const ctoAgent = projectAgents.find((a: any) => a.role === "cto");
+    const candidates = ctoAgent
+      ? projectAgents.filter((a: any) => a.parent_id === ctoAgent.id)
+      : projectAgents.filter((a: any) => a.role !== "cto");
+
+    const findAgentForRole = (role: string) =>
+      candidates.find((a: any) => a.role === role) ??
+      candidates.find((a: any) => a.role === "coder") ??
+      candidates[0] ?? null;
+
+    for (const t of tasks) {
+      if (!t.title || typeof t.title !== "string") continue;
+      const assignee = findAgentForRole(t.role ?? "coder");
+      db.prepare(
+        "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id) VALUES (?, ?, ?, ?, ?)",
+      ).run(goalRow.id, projectId, t.title.slice(0, MAX_TITLE_LEN), (t.description ?? "").slice(0, MAX_DESC_LEN), assignee?.id ?? null);
+    }
+
+    broadcast("project:updated", { projectId });
+    db.prepare(
+      "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
+    ).run(projectId, agentId, `CTO created goal "${goalDesc.slice(0, 50)}" with ${tasks.length} tasks`);
+
+    return true;
+  }
 
   // Execute a single task
   router.post("/tasks/:taskId/execute", async (req, res) => {
@@ -89,16 +144,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     try {
       const result = await qualityGate.verify(taskId, { scope });
       broadcast("verification:result", result);
-
-      // Link verification to task
-      const verification = db.prepare(
-        "SELECT id FROM verifications WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
-      ).get(taskId) as any;
-
-      if (verification) {
-        db.prepare("UPDATE tasks SET verification_id = ?, updated_at = datetime('now') WHERE id = ?")
-          .run(verification.id, taskId);
-      }
+      // verification_id linkage is handled inside qualityGate.verify() via RETURNING
 
       // Auto-approve on pass
       if (result.verdict === "pass") {
@@ -137,8 +183,8 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     if (!message || typeof message !== "string" || message.trim() === "") {
       return res.status(400).json({ error: "message is required" });
     }
-    if (message.length > 50_000) {
-      return res.status(400).json({ error: "Message too long (max 50,000 chars)" });
+    if (message.length > MAX_PROMPT_LEN) {
+      return res.status(400).json({ error: `Message too long (max ${MAX_PROMPT_LEN.toLocaleString()} chars)` });
     }
 
     const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as any;
@@ -213,52 +259,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
         let autoCreated = false;
         if (agent.role === "cto" && parsed.text !== "") {
           try {
-            const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/) ??
-                              parsed.text.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
-            if (jsonMatch) {
-              const jsonStr = jsonMatch[1] ?? jsonMatch[0];
-              const data = JSON.parse(jsonStr);
-              const tasks = data.tasks ?? [];
-              if (tasks.length > 0) {
-                // Create goal from CTO's analysis
-                const goalDesc = data.goal ?? data.analysis ?? message.trim().slice(0, 200);
-                const goalResult = db.prepare(
-                  "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, 'high')",
-                ).run(project.id, goalDesc);
-                const goalId = (db.prepare("SELECT id FROM goals WHERE rowid = ?").get(goalResult.lastInsertRowid) as any)?.id;
-
-                if (goalId) {
-                  // Get project agents for role matching
-                  const projectAgents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(project.id) as any[];
-                  const ctoAgent = projectAgents.find((a: any) => a.role === "cto");
-                  const candidates = ctoAgent
-                    ? projectAgents.filter((a: any) => a.parent_id === ctoAgent.id)
-                    : projectAgents.filter((a: any) => a.role !== "cto");
-
-                  const findAgentForRole = (role: string) =>
-                    candidates.find((a: any) => a.role === role) ??
-                    candidates.find((a: any) => a.role === "coder") ??
-                    candidates[0] ?? null;
-
-                  for (const t of tasks) {
-                    if (!t.title || typeof t.title !== "string") continue;
-                    const assignee = findAgentForRole(t.role ?? "coder");
-                    db.prepare(
-                      "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id) VALUES (?, ?, ?, ?, ?)",
-                    ).run(goalId, project.id, t.title.slice(0, 200), (t.description ?? "").slice(0, 2000), assignee?.id ?? null);
-                  }
-
-                  autoCreated = true;
-                  broadcast("project:updated", { projectId: project.id });
-
-                  db.prepare(
-                    "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
-                  ).run(project.id, agentId, `CTO created goal "${goalDesc.slice(0, 50)}" with ${tasks.length} tasks`);
-                }
-              }
-            } else {
-              console.warn(`[orchestration] CTO agent responded but no JSON block found — text response will be shown as-is`);
-            }
+            autoCreated = extractAndCreateCtoGoal(project.id, agentId, parsed.text, message.trim());
           } catch (ctoErr: any) {
             console.error(`[orchestration] CTO JSON extraction failed:`, ctoErr.message);
           }
@@ -303,7 +304,9 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
           error: err.message,
         });
       } finally {
-        db.prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(agentId);
+        // Always kill session and reset agent status — prevents stuck 'working' state
+        sessionManager.killSession(agentId);
+        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?").run(agentId);
         broadcast("agent:status", { id: agentId, name: agent.name, status: "idle" });
       }
     })();
@@ -322,8 +325,8 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     if (!message || typeof message !== "string" || message.trim() === "") {
       return res.status(400).json({ error: "message is required" });
     }
-    if (message.length > 50_000) {
-      return res.status(400).json({ error: "Message too long (max 50,000 chars)" });
+    if (message.length > MAX_PROMPT_LEN) {
+      return res.status(400).json({ error: `Message too long (max ${MAX_PROMPT_LEN.toLocaleString()} chars)` });
     }
     if (!projectId || typeof projectId !== "string") {
       return res.status(400).json({ error: "projectId is required" });
@@ -343,7 +346,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       agentList.push(agent);
     }
 
-    const sessionId = `multi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const sessionId = `multi-${randomUUID().slice(0, 12)}`;
 
     // Return immediately — run asynchronously
     res.json({ status: "started", sessionId });
@@ -412,48 +415,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       if (lastAgent.role === "cto") {
         try {
           const lastResult = results[results.length - 1].result;
-          const jsonMatch = lastResult.match(/```json\s*([\s\S]*?)\s*```/) ??
-                            lastResult.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
-          if (jsonMatch) {
-            const jsonStr = jsonMatch[1] ?? jsonMatch[0];
-            const data = JSON.parse(jsonStr);
-            const tasks = data.tasks ?? [];
-            if (tasks.length > 0) {
-              const goalDesc = data.goal ?? data.analysis ?? message.trim().slice(0, 200);
-              const goalResult = db.prepare(
-                "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, 'high')",
-              ).run(project.id, goalDesc);
-              const goalId = (db.prepare("SELECT id FROM goals WHERE rowid = ?").get(goalResult.lastInsertRowid) as any)?.id;
-
-              if (goalId) {
-                const projectAgents = db.prepare("SELECT * FROM agents WHERE project_id = ?").all(project.id) as any[];
-                const ctoAgent = projectAgents.find((a: any) => a.role === "cto");
-                const candidates = ctoAgent
-                  ? projectAgents.filter((a: any) => a.parent_id === ctoAgent.id)
-                  : projectAgents.filter((a: any) => a.role !== "cto");
-
-                const findAgentForRole = (role: string) =>
-                  candidates.find((a: any) => a.role === role) ??
-                  candidates.find((a: any) => a.role === "coder") ??
-                  candidates[0] ?? null;
-
-                for (const t of tasks) {
-                  if (!t.title || typeof t.title !== "string") continue;
-                  const assignee = findAgentForRole(t.role ?? "coder");
-                  db.prepare(
-                    "INSERT INTO tasks (goal_id, project_id, title, description, assignee_id) VALUES (?, ?, ?, ?, ?)",
-                  ).run(goalId, project.id, t.title.slice(0, 200), (t.description ?? "").slice(0, 2000), assignee?.id ?? null);
-                }
-
-                autoCreated = true;
-                broadcast("project:updated", { projectId: project.id });
-
-                db.prepare(
-                  "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_completed', ?)",
-                ).run(project.id, lastAgent.id, `CTO created goal "${goalDesc.slice(0, 50)}" with ${tasks.length} tasks (multi-prompt)`);
-              }
-            }
-          }
+          autoCreated = extractAndCreateCtoGoal(project.id, lastAgent.id, lastResult, message.trim());
         } catch {
           // JSON parsing failed — show text result only
         }
@@ -624,20 +586,11 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId) as any;
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    // Fetch tasks before update for individual broadcast
-    const pendingTasks = db.prepare(
-      "SELECT id FROM tasks WHERE project_id = ? AND status = 'pending_approval'",
-    ).all(projectId) as { id: string }[];
-
     const result = db.prepare(
       "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE project_id = ? AND status = 'pending_approval'",
     ).run(projectId);
 
-    // Broadcast individual task updates for real-time UI
-    for (const t of pendingTasks) {
-      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(t.id);
-      broadcast("task:updated", updated);
-    }
+    // Single batch broadcast instead of N+1 individual queries
     broadcast("project:updated", { projectId });
 
     if (result.changes > 0) {

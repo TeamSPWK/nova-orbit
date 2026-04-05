@@ -167,10 +167,17 @@ export function migrate(db: Database.Database): void {
     `);
   } else {
     // parent_id exists but CHECK might still be old — test by inserting a dummy
+    let needsAgentsRecreate = false;
     try {
+      db.pragma("foreign_keys = OFF");
       db.exec("INSERT INTO agents (project_id, name, role) VALUES ('__check__', '__check__', 'cto')");
       db.exec("DELETE FROM agents WHERE project_id = '__check__'");
     } catch {
+      needsAgentsRecreate = true;
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
+    if (needsAgentsRecreate) {
       // CHECK failed — recreate
       db.exec("DROP TABLE IF EXISTS agents_new");
       db.exec(`
@@ -235,37 +242,44 @@ export function migrate(db: Database.Database): void {
   if (needsTasksRecreate) {
     // CHECK failed — recreate tasks table with expanded status values
     // FK must be OFF during data migration to avoid self-reference violations
-    db.pragma("foreign_keys = OFF");
-    db.exec("DROP TABLE IF EXISTS tasks_new");
-    db.exec(`
-      CREATE TABLE tasks_new (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
-        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
-        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
-        parent_task_id TEXT,
-        status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'pending_approval', 'in_progress', 'in_review', 'done', 'blocked')),
-        verification_id TEXT,
-        started_at TEXT,
-        result_summary TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-      INSERT INTO tasks_new (id, goal_id, project_id, title, description, assignee_id, parent_task_id, status, verification_id, started_at, result_summary, created_at, updated_at)
-        SELECT id, goal_id, project_id, title, COALESCE(description, ''), assignee_id, parent_task_id,
-               COALESCE(status, 'todo'), verification_id, started_at, result_summary,
-               COALESCE(created_at, datetime('now')), COALESCE(updated_at, datetime('now'))
-        FROM tasks;
-      DROP TABLE tasks;
-      ALTER TABLE tasks_new RENAME TO tasks;
-      CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_goal ON tasks(goal_id);
-      CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
-    `);
-    db.pragma("foreign_keys = ON");
+    // Wrapped in try/finally to guarantee FK is re-enabled even on crash
+    try {
+      db.pragma("foreign_keys = OFF");
+      db.exec("DROP TABLE IF EXISTS tasks_new");
+      db.exec(`
+        CREATE TABLE tasks_new (
+          id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+          goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          parent_task_id TEXT,
+          status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'pending_approval', 'in_progress', 'in_review', 'done', 'blocked')),
+          verification_id TEXT,
+          started_at TEXT,
+          result_summary TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO tasks_new (id, goal_id, project_id, title, description, assignee_id, parent_task_id, status, verification_id, started_at, result_summary, created_at, updated_at)
+          SELECT id, goal_id, project_id, title, COALESCE(description, ''), assignee_id, parent_task_id,
+                 COALESCE(status, 'todo'), verification_id, started_at, result_summary,
+                 COALESCE(created_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+          FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+        CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_goal ON tasks(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
+      `);
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
   }
+
+  // Composite index for session context chain queries (Sprint 6)
+  db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_assignee_done ON tasks(assignee_id, status, updated_at DESC)");
 
 }
 

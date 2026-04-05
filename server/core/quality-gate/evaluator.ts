@@ -62,32 +62,26 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
       const evaluatorId = `evaluator-${taskId}`;
 
       // Find reviewer agent — Generator-Evaluator separation requires a DIFFERENT agent
+      // Always exclude the task's assignee (Generator) to prevent self-review
       let evaluatorAgent = db.prepare(
-        "SELECT * FROM agents WHERE project_id = ? AND role = 'reviewer'",
-      ).get(task.project_id) as any;
+        "SELECT * FROM agents WHERE project_id = ? AND role = 'reviewer' AND id != ?",
+      ).get(task.project_id, task.assignee_id) as any;
 
       if (!evaluatorAgent) {
-        // Find any agent that is NOT the task's assignee (Generator)
         evaluatorAgent = db.prepare(
           "SELECT * FROM agents WHERE project_id = ? AND id != ? LIMIT 1",
         ).get(task.project_id, task.assignee_id) as any;
       }
 
       if (!evaluatorAgent) {
-        // Last resort: reuse or create a system reviewer agent (name prefixed to distinguish from user-created)
+        // Last resort: reuse or create a system reviewer agent
+        // INSERT OR IGNORE to prevent race condition when multiple tasks verify simultaneously
+        db.prepare(
+          "INSERT OR IGNORE INTO agents (project_id, name, role, system_prompt) VALUES (?, '[Nova] Evaluator', 'reviewer', ?)",
+        ).run(task.project_id, "You are a code reviewer with an adversarial mindset. Find problems, don't pass them.");
         evaluatorAgent = db.prepare(
           "SELECT * FROM agents WHERE project_id = ? AND name = '[Nova] Evaluator' LIMIT 1",
         ).get(task.project_id) as any;
-
-        if (!evaluatorAgent) {
-          log.info("No separate evaluator agent found, creating system reviewer");
-          db.prepare(
-            "INSERT INTO agents (project_id, name, role, system_prompt) VALUES (?, '[Nova] Evaluator', 'reviewer', ?)",
-          ).run(task.project_id, "You are a code reviewer with an adversarial mindset. Find problems, don't pass them.");
-          evaluatorAgent = db.prepare(
-            "SELECT * FROM agents WHERE project_id = ? AND name = '[Nova] Evaluator' LIMIT 1",
-          ).get(task.project_id) as any;
-        }
       }
 
       try {
@@ -111,11 +105,11 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
           result = parseVerificationResult(taskId, retryParsed.text, opts.scope, evaluatorId);
         }
 
-        // Store result
-        db.prepare(`
+        // Store result with RETURNING to avoid race-prone re-query
+        const verRow = db.prepare(`
           INSERT INTO verifications (task_id, verdict, scope, dimensions, issues, severity, evaluator_session_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
+          VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+        `).get(
           taskId,
           result.verdict,
           result.scope,
@@ -123,16 +117,11 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
           JSON.stringify(result.issues),
           result.severity,
           evaluatorId,
-        );
+        ) as { id: string };
 
-          // Link verification to task (don't change task status — engine handles it)
-        const verId = db.prepare(
-          "SELECT id FROM verifications WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
-        ).get(taskId) as { id: string } | undefined;
-        if (verId) {
-          db.prepare("UPDATE tasks SET verification_id = ?, updated_at = datetime('now') WHERE id = ?")
-            .run(verId.id, taskId);
-        }
+        // Link verification to task
+        db.prepare("UPDATE tasks SET verification_id = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(verRow.id, taskId);
 
         log.info(`Verification complete: ${result.verdict.toUpperCase()} [${result.severity}]`);
         return result;

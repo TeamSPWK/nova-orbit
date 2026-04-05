@@ -26,12 +26,14 @@ export function createVerificationRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: "taskId or projectId query param required" });
     }
 
-    // Parse JSON fields
-    const parsed = (verifications as any[]).map((v) => ({
-      ...v,
-      dimensions: JSON.parse(v.dimensions),
-      issues: JSON.parse(v.issues),
-    }));
+    // Parse JSON fields safely — malformed JSON returns empty defaults
+    const parsed = (verifications as any[]).map((v) => {
+      let dimensions = {};
+      let issues: unknown[] = [];
+      try { dimensions = JSON.parse(v.dimensions); } catch { /* invalid JSON */ }
+      try { issues = JSON.parse(v.issues); } catch { /* invalid JSON */ }
+      return { ...v, dimensions, issues };
+    });
 
     res.json(parsed);
   });

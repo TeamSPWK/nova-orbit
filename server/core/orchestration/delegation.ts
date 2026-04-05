@@ -2,11 +2,12 @@ import type { Database } from "better-sqlite3";
 import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createLogger } from "../../utils/logger.js";
+import { MAX_TITLE_LEN, MAX_DESC_LEN } from "../../utils/constants.js";
 
 const log = createLogger("delegation");
 
 const MAX_SUBTASKS = 5;
-const MAX_DELEGATION_DEPTH = 1; // Only 2nd→3rd depth, no deeper
+const MAX_DELEGATION_DEPTH = 1;
 
 interface AgentRow {
   id: string;
@@ -43,6 +44,15 @@ export interface DelegationResult {
  * - Delegation failure → fallback to direct execution
  * - Subtask failure → parent task blocked
  */
+function updateGoalProgress(db: Database, goalId: string): void {
+  const stats = db.prepare(`
+    SELECT COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
+    FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+  `).get(goalId) as { total: number; done: number };
+  const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+  db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalId);
+}
+
 export function createDelegationEngine(
   db: Database,
   sessionManager: SessionManager,
@@ -162,18 +172,17 @@ Respond in this EXACT JSON format:
         for (const st of subtasks) {
           if (!st.title || typeof st.title !== "string") continue;
           const assignee = findSubordinate(st.role ?? subordinates[0].role);
-          const result = db.prepare(`
+          const row = db.prepare(`
             INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, parent_task_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `).run(
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+          `).get(
             task.goal_id,
             task.project_id,
-            st.title.slice(0, 200),
-            (st.description ?? "").slice(0, 2000),
+            st.title.slice(0, MAX_TITLE_LEN),
+            (st.description ?? "").slice(0, MAX_DESC_LEN),
             assignee.id,
             taskId,
-          );
-          const row = db.prepare("SELECT id FROM tasks WHERE rowid = ?").get(result.lastInsertRowid) as { id: string };
+          ) as { id: string };
           subtaskIds.push(row.id);
         }
 
@@ -220,31 +229,25 @@ Respond in this EXACT JSON format:
 
       const allDone = subtasks.every((s) => s.status === "done");
       const anyBlocked = subtasks.some((s) => s.status === "blocked");
+      const allFinished = subtasks.every((s) => s.status === "done" || s.status === "blocked");
+
+      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(parentTaskId) as TaskRow;
+      if (!task) return;
 
       if (allDone) {
         db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
           .run(parentTaskId);
-        const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(parentTaskId) as TaskRow;
         broadcast("task:updated", { ...task, status: "done" });
-
-        // Update goal progress
-        if (task?.goal_id) {
-          const stats = db.prepare(`
-            SELECT COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
-            FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
-          `).get(task.goal_id) as { total: number; done: number };
-          const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
-          db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, task.goal_id);
-        }
-
+        updateGoalProgress(db, task.goal_id);
         log.info(`Parent task ${parentTaskId} completed — all subtasks done`);
-      } else if (anyBlocked) {
+      } else if (anyBlocked && allFinished) {
+        // Only block parent when all subtasks have finished (some done, some blocked)
         db.prepare("UPDATE tasks SET status = 'blocked', updated_at = datetime('now') WHERE id = ?")
           .run(parentTaskId);
-        const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(parentTaskId) as TaskRow;
         broadcast("task:updated", { ...task, status: "blocked" });
         log.warn(`Parent task ${parentTaskId} blocked — subtask(s) failed`);
       }
+      // else: subtasks still in progress/in_review — do nothing, wait for next check
     },
   };
 }

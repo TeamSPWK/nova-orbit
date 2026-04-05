@@ -7,6 +7,7 @@ import { createDelegationEngine } from "./delegation.js";
 import { executeGitWorkflow, mergeBranch, type GitHubConfig } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
+import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL } from "../../utils/constants.js";
 import type { VerificationScope } from "../../../shared/types.js";
 import { appendMemory } from "../agent/memory.js";
 
@@ -109,6 +110,11 @@ export function createOrchestrationEngine(
           const delegation = await delegationEngine.attemptDelegation(taskId);
           if (delegation.delegated) {
             log.info(`Task "${task.title}" delegated to ${delegation.subtaskIds.length} subtasks`);
+            // Reset agent status — delegation engine's finally already handles this,
+            // but ensure it's clean on the return path
+            db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
+              .run(task.assignee_id);
+            broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
             return { success: true, verdict: "delegated" };
           }
         } catch (delegationErr: any) {
@@ -198,7 +204,7 @@ When complete, provide a summary of changes made.
         });
 
         // Sprint 6: result_summary 저장 (마지막 500자)
-        const summary = (implParsed.text ?? "").slice(-500);
+        const summary = (implParsed.text ?? "").slice(-MAX_SUMMARY_LEN);
         db.prepare("UPDATE tasks SET result_summary = ? WHERE id = ?").run(summary, task.id);
 
         // Sprint 6: 에이전트 메모리에 태스크 완료 기록
@@ -290,7 +296,19 @@ ${verification.issues.map((i) => `- [${i.severity}] ${i.file ?? ""}:${i.line ?? 
 Fix ONLY these issues. Do not modify other code.
 `;
           // Spawn a NEW session for fix (prevent context pollution — Nova rule)
+          // Keep agent in 'working' state during fix to prevent scheduler double-assignment
+          db.prepare("UPDATE agents SET status = 'working', current_task_id = ? WHERE id = ?")
+            .run(taskId, task.assignee_id);
           const fixSession = sessionManager.spawnAgent(task.assignee_id, effectiveWorkdir);
+          fixSession.on("rate-limit", (info: { waitMs: number; stderr: string }) => {
+            broadcast("system:rate-limit", {
+              agentId: task.assignee_id, agentName, taskId,
+              waitMs: info.waitMs, message: info.stderr,
+            });
+          });
+          fixSession.on("nova:error", (error: unknown) => {
+            broadcast("system:error", { agentId: task.assignee_id, agentName, taskId, error });
+          });
           try {
             await fixSession.send(fixPrompt);
           } finally {
@@ -446,8 +464,6 @@ Respond in this EXACT JSON format:
         const decomposed = JSON.parse(jsonMatch[1]);
         const tasks = decomposed.tasks ?? [];
 
-        // Safety: cap task count to prevent runaway decomposition
-        const MAX_TASKS_PER_GOAL = 10;
         const safeTasks = tasks.slice(0, MAX_TASKS_PER_GOAL);
 
         // Auto-assign agents by role — prefer CTO's children, fallback to all non-CTO
@@ -472,8 +488,6 @@ Respond in this EXACT JSON format:
             candidates[0] ?? projectAgents.find((a) => a.role !== "cto") ?? projectAgents[0] ?? null;
         };
 
-        const MAX_TITLE_LEN = 200;
-        const MAX_DESC_LEN = 2000;
         let created = 0;
 
         for (const t of safeTasks) {
@@ -582,10 +596,9 @@ Respond in this EXACT JSON format:
       for (const g of goals) {
         if (!g.description || typeof g.description !== "string") continue;
         const priority = VALID_PRIORITIES.includes(g.priority) ? g.priority : "medium";
-        const result = db.prepare(
-          "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, ?)",
-        ).run(projectId, g.description.slice(0, 500), priority);
-        const row = db.prepare("SELECT id FROM goals WHERE rowid = ?").get(result.lastInsertRowid) as { id: string };
+        const row = db.prepare(
+          "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, ?) RETURNING id",
+        ).get(projectId, g.description.slice(0, 500), priority) as { id: string };
         goalIds.push(row.id);
       }
 

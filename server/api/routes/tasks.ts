@@ -98,11 +98,20 @@ export function createTaskRoutes(ctx: AppContext): Router {
     }
 
     try {
+      // assignee_id needs special handling: explicit null means "unassign",
+      // undefined means "don't change". COALESCE(NULL, x) = x, so we can't use it.
+      const assigneeClause = assignee_id !== undefined
+        ? "assignee_id = ?,"
+        : "";
+      const assigneeParams = assignee_id !== undefined
+        ? [assignee_id]
+        : [];
+
       db.prepare(`
         UPDATE tasks SET
           title = COALESCE(?, title),
           description = COALESCE(?, description),
-          assignee_id = COALESCE(?, assignee_id),
+          ${assigneeClause}
           status = COALESCE(?, status),
           verification_id = COALESCE(?, verification_id),
           updated_at = datetime('now')
@@ -110,7 +119,7 @@ export function createTaskRoutes(ctx: AppContext): Router {
       `).run(
         title ?? null,
         description ?? null,
-        assignee_id !== undefined ? assignee_id : null,
+        ...assigneeParams,
         status ?? null,
         verification_id ?? null,
         req.params.id,

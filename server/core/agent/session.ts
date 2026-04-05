@@ -156,6 +156,9 @@ export function createSessionManager(db: Database): SessionManager {
     },
 
     pauseSession(agentId: string): void {
+      if (process.platform === "win32") {
+        throw new Error("SIGSTOP is not supported on Windows");
+      }
       const session = sessions.get(agentId);
       if (!session?.process?.pid) {
         throw new Error(`No active session for agent ${agentId}`);
@@ -166,6 +169,9 @@ export function createSessionManager(db: Database): SessionManager {
     },
 
     resumeSession(agentId: string): void {
+      if (process.platform === "win32") {
+        throw new Error("SIGCONT is not supported on Windows");
+      }
       const session = sessions.get(agentId);
       if (!session?.process?.pid) {
         throw new Error(`No active session for agent ${agentId}`);

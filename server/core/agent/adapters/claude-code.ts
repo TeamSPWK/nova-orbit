@@ -8,6 +8,7 @@ import { tmpdir, homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createLogger } from "../../../utils/logger.js";
+import { TASK_TIMEOUT_MS, RATE_LIMIT_WAIT_MS, SIGKILL_TIMEOUT_MS } from "../../../utils/constants.js";
 import {
   makeRateLimitError,
   makeSessionExpiredError,
@@ -95,7 +96,7 @@ export function createClaudeCodeAdapter() {
               resume: resumeId ?? "new",
             });
 
-            const TIMEOUT_MS = 5 * 60 * 1000; // 5 min timeout per task
+            const TIMEOUT_MS = TASK_TIMEOUT_MS;
 
             const ALLOWED_ENV_KEYS = [
               "PATH", "HOME", "SHELL", "USER", "LANG", "LC_ALL", "TERM",
@@ -119,19 +120,19 @@ export function createClaudeCodeAdapter() {
             session.process = proc;
 
             // Kill process after timeout — SIGTERM first, SIGKILL fallback
+            let sigkillTimer: ReturnType<typeof setTimeout> | null = null;
             const timeout = setTimeout(() => {
               if (session.process) {
                 log.warn(`Session ${session.id} timed out after ${TIMEOUT_MS / 1000}s, sending SIGTERM`);
                 session.process.kill("SIGTERM");
                 const novaError = makeTimeoutError(TIMEOUT_MS);
                 session.emit("nova:error", novaError.toJSON());
-                // SIGKILL fallback if process doesn't exit within 5s
-                setTimeout(() => {
+                sigkillTimer = setTimeout(() => {
                   if (session.process) {
                     log.warn(`Session ${session.id} did not exit after SIGTERM, sending SIGKILL`);
                     session.process.kill("SIGKILL");
                   }
-                }, 5000);
+                }, SIGKILL_TIMEOUT_MS);
               }
             }, TIMEOUT_MS);
             let stdout = "";
@@ -155,6 +156,7 @@ export function createClaudeCodeAdapter() {
 
             proc.on("close", (code: number | null) => {
               clearTimeout(timeout);
+              if (sigkillTimer) clearTimeout(sigkillTimer);
               session.process = null;
 
               // Try to extract sessionId from stream-json output
@@ -226,7 +228,7 @@ export function createClaudeCodeAdapter() {
 
         // Rate limit detection — wait and retry once
         if (result.exitCode !== 0 && isRateLimitError(result.stderr)) {
-          const waitMs = 60_000; // Wait 1 minute before retry
+          const waitMs = RATE_LIMIT_WAIT_MS;
           log.warn(`Rate limit hit, waiting ${waitMs / 1000}s before retry`);
           const novaError = makeRateLimitError(result.stderr.slice(0, 200));
           session.emit("rate-limit", { waitMs, stderr: result.stderr.slice(0, 200) });

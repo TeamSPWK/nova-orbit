@@ -1,8 +1,9 @@
 import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createDatabase, migrate } from "./db/schema.js";
 import { recoverOnStartup } from "./core/recovery.js";
 import { createProjectRoutes } from "./api/routes/projects.js";
@@ -117,7 +118,12 @@ export async function startServer(config: ServerConfig): Promise<void> {
 
   // Health check
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", version: "0.1.0" });
+    let version = "unknown";
+    try {
+      const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+      version = JSON.parse(readFileSync(pkgPath, "utf-8")).version;
+    } catch { /* fallback */ }
+    res.json({ status: "ok", version });
   });
 
   // Claude Code status — read from ~/.claude/tmux-status (written by statusline.sh)
