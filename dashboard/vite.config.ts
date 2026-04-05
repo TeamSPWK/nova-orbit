@@ -13,16 +13,8 @@ export default defineConfig({
           proxy.on("error", () => {}); // Suppress proxy errors (server restart)
         },
       },
-      "/ws": {
-        target: "ws://127.0.0.1:3000",
-        ws: true,
-        configure: (proxy) => {
-          proxy.on("error", () => {});
-          proxy.on("proxyReqWs", (_proxyReq: unknown, _req: unknown, socket: any) => {
-            socket.on("error", () => {}); // Suppress EPIPE/ECONNRESET on WS proxy socket
-          });
-        },
-      },
+      // /ws proxy 제거 — Vite proxy가 WS 탐침 연결을 시도해 EPIPE 유발
+      // dev 환경에서는 useWebSocket이 VITE_WS_URL로 직접 연결
     },
   },
 });

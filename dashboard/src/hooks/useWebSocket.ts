@@ -8,6 +8,10 @@ export function useWebSocket() {
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
+    // dev 환경에서는 Vite proxy를 우회해 백엔드에 직접 연결
+    // (Vite /ws proxy가 탐침 연결을 시도해 서버 측 EPIPE를 유발하므로 제거됨)
+    const wsHost = import.meta.env.VITE_WS_URL ?? `${protocol}//${window.location.host}`;
+
     let destroyed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -18,7 +22,7 @@ export function useWebSocket() {
         if (!destroyed) reconnectTimer = setTimeout(connect, 1000);
         return;
       }
-      const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
+      const wsUrl = `${wsHost}/ws?token=${token}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
