@@ -4,6 +4,7 @@ import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 import { NewProjectDialog } from "./NewProjectDialog";
 import { InputDialog } from "./InputDialog";
+import { DirectoryPicker } from "./DirectoryPicker";
 import { Toast } from "./Toast";
 
 export function Sidebar() {
@@ -113,9 +114,7 @@ export function Sidebar() {
         />
       )}
       {showDialog === "import" && (
-        <InputDialog
-          title={t("promptLocalPath")}
-          placeholder={t("promptLocalPathHint")}
+        <DirectoryPicker
           onSubmit={handleImportProject}
           onCancel={() => setShowDialog(null)}
         />

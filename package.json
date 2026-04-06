@@ -7,6 +7,7 @@
     "nova-orbit": "./dist/bin/nova-orbit.js"
   },
   "scripts": {
+    "postinstall": "cd dashboard && npm install",
     "predev": "bash scripts/predev.sh",
     "dev": "concurrently --kill-others \"npm run dev:server\" \"npm run dev:dashboard\"",
     "dev:server": "tsx watch server/index.ts",
