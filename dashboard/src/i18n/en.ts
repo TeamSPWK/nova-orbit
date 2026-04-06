@@ -400,6 +400,11 @@ const en = {
   queueRunning: "Queue Running",
   resumeNow: "Resume Now",
   retryIn: "Auto-retry pending",
+  rateLimitPausedTitle: "Rate Limit — Paused",
+  rateLimitPausedDesc: "API rate limit reached. Auto-retry {{retry}}/{{max}}",
+  rateLimitStoppedTitle: "Queue Stopped",
+  rateLimitStoppedDesc: "Consecutive retries failed. Please restart after a moment.",
+  restartQueue: "Restart Queue",
 
   // Autopilot
   autopilotDescManual: "Manual — run Decompose and Queue yourself",

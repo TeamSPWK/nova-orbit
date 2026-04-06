@@ -400,6 +400,11 @@ const ko = {
   queueRunning: "큐 실행 중",
   resumeNow: "지금 재개",
   retryIn: "자동 재시도 대기 중",
+  rateLimitPausedTitle: "API 한도 도달 — 일시 정지",
+  rateLimitPausedDesc: "사용량 한도에 도달하여 잠시 대기 중입니다. 자동 재시도 {{retry}}/{{max}}회",
+  rateLimitStoppedTitle: "큐가 정지되었습니다",
+  rateLimitStoppedDesc: "연속 재시도 실패로 작업이 중단되었습니다. 잠시 후 다시 시작해 주세요.",
+  restartQueue: "큐 재시작",
 
   // Autopilot
   autopilotDescManual: "수동 제어 — Decompose와 Queue를 직접 실행",

@@ -142,6 +142,7 @@ export function ProjectHome() {
     retryNumber: number;
     maxRetries: number;
   } | null>(null);
+  const [queueStoppedByRateLimit, setQueueStoppedByRateLimit] = useState(false);
 
   // Autopilot state
   const [autopilotMode, setAutopilotMode] = useState<"off" | "goal" | "full">("off");
@@ -257,10 +258,12 @@ export function ProjectHome() {
       setQueuePaused(false);
       setQueuePausedInfo(null);
     };
-    const onStopped = () => {
+    const onStopped = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
       setQueueRunning(false);
       setQueuePaused(false);
       setQueuePausedInfo(null);
+      setQueueStoppedByRateLimit(detail?.reason === "rate_limit_exceeded");
     };
     const onAutopilotChanged = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -604,6 +607,7 @@ export function ProjectHome() {
       } else {
         await api.orchestration.startQueue(currentProjectId);
         setQueueRunning(true);
+        setQueueStoppedByRateLimit(false);
       }
     } catch {
       // 409 = already running, just sync state
@@ -941,25 +945,7 @@ export function ProjectHome() {
                 </button>
               </section>
 
-              {/* Rate Limit Banner */}
-              {queuePaused && queuePausedInfo && (
-                <section className="mb-4">
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className="text-amber-500 text-sm">&#9208;</span>
-                      <span className="text-xs text-amber-700 dark:text-amber-300 font-medium">
-                        Rate limit — {t("retryIn")} ({queuePausedInfo.retryNumber}/{queuePausedInfo.maxRetries})
-                      </span>
-                    </div>
-                    <button
-                      onClick={handleResumeQueue}
-                      className="text-[11px] px-2.5 py-1 bg-amber-100 dark:bg-amber-800/40 text-amber-700 dark:text-amber-300 rounded hover:bg-amber-200 dark:hover:bg-amber-800/60 font-medium"
-                    >
-                      {t("resumeNow")}
-                    </button>
-                  </div>
-                </section>
-              )}
+              {/* Rate Limit Banner — removed, now shown as overlay on task area */}
 
               {/* Agents Section — compact summary */}
               <section className="mb-8">
@@ -1314,13 +1300,65 @@ export function ProjectHome() {
                     </button>
                   </div>
                 </div>
-                {queueRunning && (
+                {queueRunning && !queuePaused && (
                   <p className="text-[10px] text-blue-500 dark:text-blue-400 flex items-center gap-1 mb-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                     {t("queueRunning")}
                   </p>
                 )}
-                <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} />
+                <div className="relative">
+                  {/* Rate limit paused overlay */}
+                  {queuePaused && queuePausedInfo && (
+                    <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
+                      <div className="flex flex-col items-center gap-3 px-6 py-5 bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 rounded-xl shadow-lg max-w-xs text-center">
+                        <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/60 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="6" y="4" width="4" height="16" rx="1" />
+                            <rect x="14" y="4" width="4" height="16" rx="1" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">{t("rateLimitPausedTitle")}</p>
+                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                            {t("rateLimitPausedDesc", { retry: queuePausedInfo.retryNumber, max: queuePausedInfo.maxRetries })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleResumeQueue}
+                          className="text-xs px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
+                        >
+                          {t("resumeNow")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Queue stopped by rate limit overlay */}
+                  {queueStoppedByRateLimit && !queueRunning && (
+                    <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
+                      <div className="flex flex-col items-center gap-3 px-6 py-5 bg-red-50 dark:bg-red-950/80 border border-red-300 dark:border-red-700 rounded-xl shadow-lg max-w-xs text-center">
+                        <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/60 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="15" y1="9" x2="9" y2="15" />
+                            <line x1="9" y1="9" x2="15" y2="15" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-red-800 dark:text-red-200">{t("rateLimitStoppedTitle")}</p>
+                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{t("rateLimitStoppedDesc")}</p>
+                        </div>
+                        <button
+                          onClick={handleToggleQueue}
+                          disabled={queueToggling}
+                          className="text-xs px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                        >
+                          {t("restartQueue")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} />
+                </div>
               </section>
             </div>
 
