@@ -32,6 +32,7 @@ interface TaskItem {
   assignee_id: string | null;
   parent_task_id?: string | null;
   verification_id: string | null;
+  verification_verdict?: string | null;
 }
 
 interface TaskListProps {
