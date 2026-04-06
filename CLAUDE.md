@@ -95,6 +95,27 @@ refactor: refactoring  | chore: config/misc
   - 텍스트 입력: `InputDialog` (`dashboard/src/components/InputDialog.tsx`)
   - 알림: `Toast` (`dashboard/src/components/Toast.tsx`)
 
+## UX 원칙 — 비개발자 친화
+
+Nova Orbit은 **개발자 + 비개발자(PM, 파운더 등) 모두**를 위한 도구다. UI 문자열 작성 시 반드시 아래 규칙을 따른다:
+
+- **개발 전문 용어 직접 노출 금지** — 아래 매핑표의 대체 용어를 사용할 것
+  | 금지 용어 | EN 대체 | KO 대체 |
+  |-----------|---------|---------|
+  | Decompose | Split into Tasks | 작업 분할 |
+  | System Prompt | Role Instructions | 역할 지시사항 |
+  | Spec | Blueprint | 기획서 |
+  | Preset | Template | 템플릿 |
+  | Queue | Auto-run | 자동 실행 |
+  | Rate Limit | Usage Limit | 사용량 한도 |
+  | Working Directory | Project Folder | 프로젝트 폴더 |
+  | Kill Session | End Session | 에이전트 종료 |
+  | Worktree | Isolated workspace | 독립된 작업 공간 |
+  | Branch/Merge (사용자 노출) | Save/Apply | 저장/반영 |
+- **Session ID, UUID 등 내부 식별자**는 기본 숨김 또는 "Agent ID"로 표기
+- **Autopilot 모드명**: Manual→수동, Semi-Auto→반자동, Full Auto→완전 자동
+- 새 UI 문자열 추가 시 "비개발자가 이해할 수 있는가?" 자문할 것
+
 ## Credentials
 
 - **Never commit**: `.env`, `.nova-orbit/`, `*.db`

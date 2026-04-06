@@ -1,7 +1,7 @@
 # Nova State
 
 ## Current
-- **Goal**: Nova 규칙 통합 엔진 — 패턴 이식에서 진짜 하네스 엔지니어링으로
+- **Goal**: 비개발자 친화 UX 개선 — 용어 교체 Phase 1
 - **Phase**: done
 - **Blocker**: none
 
@@ -19,9 +19,9 @@
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
+| 기획서 생성 세션 충돌 수정 | 2026-04-06 | PASS | 4파일, ef21ddc |
+| 비개발자 친화 용어 교체 Phase 1 | 2026-04-06 | PASS | 3파일, 759395a |
 | Nova 규칙 통합 엔진 | 2026-04-06 | PASS | 12파일 +1036줄, a0329c6 |
-| Structured Spec 기능 | 2026-04-06 | PASS | 12파일 +1372줄, 0d8d4ea |
-| 워크트리 격리 + 포트 + UX | 2026-04-06 | PASS | 18파일 변경, c992a1d |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -30,23 +30,20 @@
 | Layer 3 실행 강제 | 프롬프트 지시만, 실제 실행 여부 검증 수단 없음 | Medium |
 | npm publish | npmjs.com 미배포 | Low |
 | 동시 verification 충돌 | 경고 로그만, 세션 격리 미구현 | Medium |
-| Spec → Decompose 자동 연계 | 스펙 생성 후 자동 분해 트리거 미구현 | Medium |
+| Spec → Decompose 자동 연계 | ~~미구현~~ → ef21ddc에서 구현 완료 | Done |
+| 비개발자 UX Phase 2 | UX 구조 개선 — Git 설정 단순화, 검증 시각화, 간소화 뷰 | Medium |
+| 비개발자 UX Phase 3 | 비개발자 전용 경험 — 터미널 숨김, 진행률 중심 뷰 | Low |
 
 ## Key Changes This Session
-- `server/core/nova-rules/index.ts` — Nova Rules Engine (빌드 타임 동기화 + 런타임 로드)
-- `server/core/nova-rules/*.md` — Nova 핵심 규칙 3종 (rules, evaluator, orchestrator)
-- `server/core/quality-gate/evaluator.ts` — verdict 보정 제거, Nova 3-Layer 프로토콜, CONDITIONAL, autoDetectScope()
-- `server/core/orchestration/engine.ts` — Architect Phase, detectComplexity(), 구현 프롬프트 강화
-- `server/index.ts` — /api/nova-rules/version + /api/nova-rules/sync 엔드포인트
-- `scripts/sync-nova-rules.sh` — Nova→Orbit 빌드 타임 동기화 스크립트
-- `scripts/predev.sh` — dev 시작 시 Nova 버전 자동 감지 + 동기화
-- `dashboard/src/components/StatusBar.tsx` — Nova 버전 표시 + outdated sync 버튼
-- `dashboard/index.html` — 화이트모드 기본값
+- `server/api/routes/goals.ts` — withSpec 플래그로 autopilot decompose 지연, spec 완료 후 자동 트리거
+- `server/api/routes/orchestration.ts` — CLI exit code 검증 + JSON 추출 fallback
+- `server/core/agent/adapters/stream-parser.ts` — result 이벤트 텍스트 덮어쓰기 방지
+- `dashboard/src/components/ProjectHome.tsx` — withSpec: true 전달
 
 ## Last Activity
-- Nova 규칙 통합 엔진 구현 + 적대적 갭 분석 6건 해결 | 2026-04-06
+- 기획서 생성 시 autopilot decompose 세션 충돌 해결 (ef21ddc) | 2026-04-06
 
 ## Refs
 - Plan: docs/plans/phase2-production-ready.md
 - Gap Analysis: 적대적 평가 12항목 (FAIL×6 → 전부 해결, Known Gaps 2건 이월)
-- Last Verification: tsc PASS + build PASS + 서버 기동 + API curl 3종 PASS
+- Last Verification: tsc PASS + build PASS (ef21ddc)
