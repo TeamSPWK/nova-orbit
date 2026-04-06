@@ -136,6 +136,18 @@ export function createClaudeCodeAdapter() {
 
             const HARD_TIMEOUT_MS = TIMEOUT_MS * 3; // 3x idle timeout as absolute max
 
+            /** Clear all pending timers to prevent leaks */
+            const clearAllTimers = () => {
+              if (idleTimer) { clearTimeout(idleTimer); idleTimer = null as any; }
+              if (sigkillTimer) { clearTimeout(sigkillTimer); sigkillTimer = null; }
+            };
+
+            /** Reset idle timer on activity (prevents stale timer from firing) */
+            const resetIdleTimer = () => {
+              if (idleTimer) clearTimeout(idleTimer);
+              idleTimer = setTimeout(checkTimeout, hasReceivedOutput ? TIMEOUT_MS : 30000);
+            };
+
             const checkTimeout = () => {
               if (!session.process) return;
 
@@ -145,6 +157,7 @@ export function createClaudeCodeAdapter() {
               if (!hasReceivedOutput) {
                 const totalElapsed = Date.now() - startTime;
                 if (totalElapsed >= HARD_TIMEOUT_MS) {
+                  clearAllTimers();
                   log.warn(`Session ${session.id} hard timeout: ${Math.round(totalElapsed / 1000)}s with no output at all, sending SIGTERM`);
                   session.process.kill("SIGTERM");
                   const novaError = makeTimeoutError(totalElapsed);
@@ -163,6 +176,7 @@ export function createClaudeCodeAdapter() {
 
               // After first output: enforce idle timeout
               if (elapsed >= TIMEOUT_MS) {
+                clearAllTimers();
                 log.warn(`Session ${session.id} idle for ${Math.round(elapsed / 1000)}s (no output after first response), sending SIGTERM`);
                 session.process.kill("SIGTERM");
                 const novaError = makeTimeoutError(elapsed);
@@ -178,7 +192,7 @@ export function createClaudeCodeAdapter() {
               }
             };
             const startTime = Date.now();
-            let idleTimer: ReturnType<typeof setTimeout> = setTimeout(checkTimeout, TIMEOUT_MS);
+            let idleTimer: ReturnType<typeof setTimeout> | null = setTimeout(checkTimeout, TIMEOUT_MS);
 
             let stdout = "";
             let stderr = "";
@@ -188,6 +202,7 @@ export function createClaudeCodeAdapter() {
               stdout += text;
               lastActivity = Date.now();
               hasReceivedOutput = true;
+              resetIdleTimer(); // Fix: reset timer on each output
               session.emit("output", text);
             });
 
@@ -196,6 +211,7 @@ export function createClaudeCodeAdapter() {
               stderr += text;
               lastActivity = Date.now();
               hasReceivedOutput = true;
+              resetIdleTimer(); // Fix: reset timer on each output
               session.emit("stderr", text);
             });
 
@@ -204,8 +220,7 @@ export function createClaudeCodeAdapter() {
             proc.stdin!.end();
 
             proc.on("close", (code: number | null) => {
-              clearTimeout(idleTimer);
-              if (sigkillTimer) clearTimeout(sigkillTimer);
+              clearAllTimers();
               session.process = null;
 
               // Try to extract sessionId from stream-json output
@@ -241,6 +256,7 @@ export function createClaudeCodeAdapter() {
             });
 
             proc.on("error", (err: Error) => {
+              clearAllTimers(); // Fix: prevent timer leaks on spawn failure
               session.process = null;
               session.status = "failed";
               session.emit("status", "failed");
