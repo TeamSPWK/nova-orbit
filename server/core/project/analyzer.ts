@@ -8,6 +8,8 @@ const log = createLogger("project-analyzer");
 interface AnalysisResult {
   techStack: TechStack;
   suggestedAgents: Array<{ name: string; role: AgentRole; reason: string }>;
+  mission: string;
+  projectDocs: string[]; // file paths relative to workdir
 }
 
 /**
@@ -122,8 +124,14 @@ export function analyzeProject(dirPath: string): AnalysisResult {
   // Suggest agents based on tech stack
   const suggestedAgents = suggestAgents(techStack, dirs);
 
-  log.info("Analysis complete", { techStack, agents: suggestedAgents.length });
-  return { techStack, suggestedAgents };
+  // Extract mission from CLAUDE.md or readme.md
+  const mission = extractMission(dirPath);
+
+  // Detect project docs
+  const projectDocs = detectProjectDocs(dirPath);
+
+  log.info("Analysis complete", { techStack, agents: suggestedAgents.length, mission: mission.slice(0, 50) });
+  return { techStack, suggestedAgents, mission, projectDocs };
 }
 
 function suggestAgents(
@@ -191,4 +199,51 @@ function readFileSafe(path: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Extract mission from CLAUDE.md or readme.md.
+ * Looks for description lines, "## What is", or first paragraph after title.
+ */
+function extractMission(dirPath: string): string {
+  // Try CLAUDE.md first — often has a one-liner at the top
+  for (const file of ["CLAUDE.md", "README.md", "readme.md"]) {
+    const content = readFileSafe(join(dirPath, file));
+    if (!content) continue;
+
+    const lines = content.split("\n").map((l) => l.trim()).filter(Boolean);
+
+    // Skip frontmatter and title, find first descriptive line
+    let foundTitle = false;
+    for (const line of lines) {
+      if (line.startsWith("# ")) { foundTitle = true; continue; }
+      if (!foundTitle) continue;
+      // Skip metadata lines
+      if (line.startsWith("##") || line.startsWith("```") || line.startsWith("|") || line.startsWith("-") || line.startsWith(">")) {
+        // Check if it's a quote with description
+        if (line.startsWith("> ") && line.length > 10) return line.slice(2).trim();
+        continue;
+      }
+      // First normal paragraph after title
+      if (line.length > 10) return line.slice(0, 200);
+    }
+  }
+  return "";
+}
+
+/** Detect docs in project (plans, references, etc.) */
+function detectProjectDocs(dirPath: string): string[] {
+  const docs: string[] = [];
+  const docDirs = ["docs/plans", "docs/references", "docs/reviews", "docs/designs", "docs"];
+  for (const dir of docDirs) {
+    const fullDir = join(dirPath, dir);
+    if (!existsSync(fullDir)) continue;
+    try {
+      const files = readdirSync(fullDir, { withFileTypes: true })
+        .filter((f) => f.isFile() && f.name.endsWith(".md"))
+        .map((f) => `${dir}/${f.name}`);
+      docs.push(...files);
+    } catch { /* skip */ }
+  }
+  return docs;
 }

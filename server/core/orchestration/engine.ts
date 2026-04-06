@@ -37,6 +37,7 @@ interface ProjectRow {
 interface GoalRow {
   id: string;
   project_id: string;
+  title: string;
   description: string;
 }
 interface AgentRow {
@@ -463,7 +464,7 @@ Fix ONLY these issues. Do not modify other code.
 
       const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as ProjectRow | undefined;
 
-      log.info(`Decomposing goal: "${goal.description}"`);
+      log.info(`Decomposing goal: "${goal.title || goal.description}"`);
 
       // Prefer CTO/lead agent for decomposition; fall back to any agent
       const agent = db.prepare(
@@ -530,7 +531,7 @@ ${tech.map((t: string) => `- ${t}`).join("\n")}
 # Goal Decomposition
 
 Break down this goal into concrete, actionable tasks:
-"${goal.description}"
+${goal.title ? `**${goal.title}**\n` : ""}"${goal.description}"
 ${specContext}
 Available team members: ${roleList || "coder"}
 
@@ -708,8 +709,8 @@ Respond in this EXACT JSON format:
         if (!g.description || typeof g.description !== "string") continue;
         const priority = VALID_PRIORITIES.includes(g.priority) ? g.priority : "medium";
         const row = db.prepare(
-          "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, ?) RETURNING id",
-        ).get(projectId, g.description.slice(0, 500), priority) as { id: string };
+          "INSERT INTO goals (project_id, title, description, priority) VALUES (?, ?, ?, ?) RETURNING id",
+        ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority) as { id: string };
         goalIds.push(row.id);
       }
 

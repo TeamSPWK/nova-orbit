@@ -90,7 +90,9 @@ export type TaskStatus =
 export interface Goal {
   id: string;
   projectId: string;
+  title: string;
   description: string;
+  references: string[]; // file paths or URLs
   priority: Priority;
   progress: number; // 0-100
   createdAt: string;

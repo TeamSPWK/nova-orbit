@@ -47,7 +47,9 @@ export function migrate(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS goals (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '',
       description TEXT NOT NULL,
+      'references' TEXT NOT NULL DEFAULT '[]',
       priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical', 'high', 'medium', 'low')),
       progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -317,6 +319,19 @@ export function migrate(db: Database.Database): void {
 
   // Composite index for session context chain queries (Sprint 6)
   db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_assignee_done ON tasks(assignee_id, status, updated_at DESC)");
+
+  // title column on goals (separate title from description)
+  const goalColumns = db.prepare("PRAGMA table_info(goals)").all() as { name: string }[];
+  if (!goalColumns.some((c) => c.name === "title")) {
+    db.exec("ALTER TABLE goals ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+    // Backfill: existing goals use first 100 chars of description as title
+    db.exec("UPDATE goals SET title = SUBSTR(description, 1, 100) WHERE title = ''");
+  }
+
+  // references column on goals (JSON array of file paths or URLs)
+  if (!goalColumns.some((c) => c.name === "references")) {
+    db.exec("ALTER TABLE goals ADD COLUMN 'references' TEXT NOT NULL DEFAULT '[]'");
+  }
 
   // Goal Specs table (Structured Planning — ManyFast-inspired)
   db.exec(`

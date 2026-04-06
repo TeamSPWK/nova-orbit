@@ -1,27 +1,26 @@
 # Nova State
 
 ## Current
-- **Goal**: 비개발자 친화 UX 개선 — 용어 교체 Phase 1
+- **Goal**: Orbit UX 개선 — 목표 편집 + 프로젝트 온보딩 + 문서 참조
 - **Phase**: done
 - **Blocker**: none
 
 ## Tasks
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
-| 적대적 갭 분석 (Nova vs Orbit) | done | FAIL×6 PASS×5 | 6개 핵심 문제 발견 |
-| Critical 버그 수정 (verdict 보정) | done | PASS | avg>=6 FAIL→PASS 오버라이드 제거 |
-| Nova Rules Engine 구축 | done | PASS | 빌드 타임 동기화, 런타임 로드 |
-| Evaluator Nova 프로토콜 주입 | done | PASS | 3-Layer, CONDITIONAL, scope별 분리 |
-| Architect Phase + 복잡도 라우팅 | done | PASS | moderate/complex → CPS 설계 |
-| 대시보드 Nova 버전 표시 + sync | done | PASS | API + StatusBar + predev 자동 감지 |
-| 화이트모드 기본값 | done | PASS | index.html |
+| Goal title/description 분리 | done | PASS | DB 마이그레이션 + UI 분리 |
+| Goal 편집 모달 | done | PASS | EditGoalDialog, 연필 아이콘 |
+| Goal 참고문서 멀티 선택 | done | PASS | API /projects/:id/docs + 체크박스 UI |
+| 프로젝트 온보딩 미션 자동 추출 | done | PASS | analyzer.ts, CLAUDE.md/readme에서 추출 |
+| 에이전트 docs/ 자동 주입 | done | PASS | session.ts, 최대 4KB |
+| 기획서 생성 시 docs 참조 | done | PASS | 선택 문서 우선 + 자동 발견, 16KB/3KB per file |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| 기획서 생성 세션 충돌 수정 | 2026-04-06 | PASS | 4파일, ef21ddc |
-| 비개발자 친화 용어 교체 Phase 1 | 2026-04-06 | PASS | 3파일, 759395a |
-| Nova 규칙 통합 엔진 | 2026-04-06 | PASS | 12파일 +1036줄, a0329c6 |
+| Orbit UX 6개 개선 | 2026-04-06 | PASS | 15파일, +450줄 |
+| Pulsar 프로젝트 방향 수립 | 2026-04-06 | PASS | Plan + 적대적 평가 + Orbit 미션 |
+| ZipPit 제품 컨텍스트 작성 | 2026-04-06 | PASS | product.yaml + zippit-product-context.md |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -29,21 +28,24 @@
 | Nova 런타임 연동 | MCP 직접 호출 미구현 (프롬프트 주입만) | Medium |
 | Layer 3 실행 강제 | 프롬프트 지시만, 실제 실행 여부 검증 수단 없음 | Medium |
 | npm publish | npmjs.com 미배포 | Low |
-| 동시 verification 충돌 | 경고 로그만, 세션 격리 미구현 | Medium |
-| Spec → Decompose 자동 연계 | ~~미구현~~ → ef21ddc에서 구현 완료 | Done |
-| 비개발자 UX Phase 2 | UX 구조 개선 — Git 설정 단순화, 검증 시각화, 간소화 뷰 | Medium |
-| 비개발자 UX Phase 3 | 비개발자 전용 경험 — 터미널 숨김, 진행률 중심 뷰 | Low |
+| 비개발자 UX Phase 2 | Git 설정 단순화, 검증 시각화, 간소화 뷰 | Medium |
+| 비개발자 UX Phase 3 | 터미널 숨김, 진행률 중심 뷰 | Low |
 
 ## Key Changes This Session
-- `server/api/routes/goals.ts` — withSpec 플래그로 autopilot decompose 지연, spec 완료 후 자동 트리거
-- `server/api/routes/orchestration.ts` — CLI exit code 검증 + JSON 추출 fallback
-- `server/core/agent/adapters/stream-parser.ts` — result 이벤트 텍스트 덮어쓰기 방지
-- `dashboard/src/components/ProjectHome.tsx` — withSpec: true 전달
+- `server/db/schema.ts` — goals에 title, references 컬럼 추가
+- `server/api/routes/goals.ts` — title, references CRUD
+- `server/api/routes/projects.ts` — GET /:id/docs (문서 목록 API), import 시 미션 자동 추출
+- `server/api/routes/orchestration.ts` — spec 생성 시 프로젝트 docs 16KB 주입, 파일당 3KB cap
+- `server/core/agent/session.ts` — 에이전트 스폰 시 docs/ 자동 주입 (4KB)
+- `server/core/project/analyzer.ts` — extractMission(), detectProjectDocs()
+- `dashboard/src/components/ProjectHome.tsx` — AddGoalDialog(title+desc), EditGoalDialog(편집+참고문서 체크박스), GoalCard(제목+접기/펼치기)
+- `dashboard/src/i18n/ko.ts`, `en.ts` — 15+ 번역 키 추가
 
 ## Last Activity
-- 기획서 생성 시 autopilot decompose 세션 충돌 해결 (ef21ddc) | 2026-04-06
+- Orbit UX 6개 개선 완료 (Goal 편집, 문서 참조, 온보딩) + Pulsar 방향 수립 | 2026-04-06
 
 ## Refs
 - Plan: docs/plans/phase2-production-ready.md
-- Gap Analysis: 적대적 평가 12항목 (FAIL×6 → 전부 해결, Known Gaps 2건 이월)
-- Last Verification: tsc PASS + build PASS (ef21ddc)
+- Pulsar Plan: /pulsar/docs/plans/plan-v1-mvp.md
+- Pulsar 적대적 평가: /pulsar/docs/reviews/adversarial-evaluation-v1.md
+- Last Verification: tsc PASS + build PASS (전체)

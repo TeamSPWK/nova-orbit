@@ -84,6 +84,8 @@ export const api = {
       ),
     deleteAllBranches: (id: string) =>
       request<{ deleted: string[] }>(`/projects/${id}/branches`, { method: "DELETE" }),
+    listDocs: (id: string) =>
+      request<Array<{ path: string; name: string; dir: string }>>(`/projects/${id}/docs`),
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),

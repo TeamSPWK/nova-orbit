@@ -21,9 +21,13 @@ export function createGoalRoutes(ctx: AppContext): Router {
 
   // Create goal — triggers autopilot if enabled
   router.post("/", (req, res) => {
-    const { project_id, description, priority = "medium" } = req.body;
-    if (!project_id || !description) {
-      return res.status(400).json({ error: "project_id and description are required" });
+    const { project_id, title, description, priority = "medium", references } = req.body;
+    // Support both: title+description (new) and description-only (legacy)
+    const goalTitle = title ?? "";
+    const goalDescription = description ?? "";
+    const goalRefs = Array.isArray(references) ? JSON.stringify(references) : "[]";
+    if (!project_id || (!goalTitle && !goalDescription)) {
+      return res.status(400).json({ error: "project_id and (title or description) are required" });
     }
 
     const VALID_PRIORITIES = ["critical", "high", "medium", "low"];
@@ -33,8 +37,8 @@ export function createGoalRoutes(ctx: AppContext): Router {
 
     try {
       const result = db.prepare(
-        "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, ?)",
-      ).run(project_id, description, priority);
+        "INSERT INTO goals (project_id, title, description, priority, \"references\") VALUES (?, ?, ?, ?, ?)",
+      ).run(project_id, goalTitle, goalDescription, priority, goalRefs);
 
       const goal = db.prepare("SELECT * FROM goals WHERE rowid = ?").get(result.lastInsertRowid) as any;
       broadcast("project:updated", { projectId: project_id });
@@ -57,18 +61,22 @@ export function createGoalRoutes(ctx: AppContext): Router {
 
   // Update goal progress
   router.patch("/:id", (req, res) => {
-    const { description, priority, progress } = req.body;
+    const { title, description, priority, progress, references } = req.body;
     const existing = db.prepare("SELECT * FROM goals WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Goal not found" });
+
+    const refsJson = Array.isArray(references) ? JSON.stringify(references) : null;
 
     try {
       db.prepare(`
         UPDATE goals SET
+          title = COALESCE(?, title),
           description = COALESCE(?, description),
           priority = COALESCE(?, priority),
-          progress = COALESCE(?, progress)
+          progress = COALESCE(?, progress),
+          "references" = COALESCE(?, "references")
         WHERE id = ?
-      `).run(description ?? null, priority ?? null, progress ?? null, req.params.id);
+      `).run(title ?? null, description ?? null, priority ?? null, progress ?? null, refsJson, req.params.id);
 
       const updated = db.prepare("SELECT * FROM goals WHERE id = ?").get(req.params.id);
       res.json(updated);

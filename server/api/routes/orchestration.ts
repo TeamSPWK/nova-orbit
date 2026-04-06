@@ -41,8 +41,8 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
     const goalDesc = data.goal ?? data.analysis ?? fallbackDesc.slice(0, 200);
     const goalRow = db.prepare(
-      "INSERT INTO goals (project_id, description, priority) VALUES (?, ?, 'high') RETURNING id",
-    ).get(projectId, goalDesc) as { id: string } | undefined;
+      "INSERT INTO goals (project_id, title, description, priority) VALUES (?, ?, ?, 'high') RETURNING id",
+    ).get(projectId, goalDesc.slice(0, 100), goalDesc) as { id: string } | undefined;
 
     if (!goalRow) return false;
 
@@ -698,13 +698,69 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       ? `\nTech Stack: ${techStack.languages?.join(", ")} / ${techStack.frameworks?.join(", ")}`
       : "";
 
+    // Load project docs for richer spec context
+    let projectDocsContext = "";
+    const loadedPaths = new Set<string>();
+
+    if (project?.workdir) {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const exists = fs.existsSync, readFile = fs.readFileSync, readdir = fs.readdirSync;
+      const pathJoin = path.join;
+      const docParts: string[] = [];
+      let docLen = 0;
+      const DOC_LIMIT = 16000;
+      const PER_FILE_LIMIT = 3000; // 한 파일이 전체를 독점하지 않도록
+
+      // 1) User-selected references first (highest priority)
+      if (goal.references) {
+        try {
+          const refs = JSON.parse(goal.references);
+          if (Array.isArray(refs)) {
+            for (const ref of refs) {
+              if (docLen >= DOC_LIMIT) break;
+              const fullPath = pathJoin(project.workdir, ref);
+              if (!exists(fullPath)) continue;
+              try {
+                const c = readFile(fullPath, "utf-8").slice(0, Math.min(PER_FILE_LIMIT, DOC_LIMIT - docLen));
+                docParts.push(`### ${ref}\n${c}`);
+                docLen += c.length;
+                loadedPaths.add(ref);
+              } catch { /* skip unreadable */ }
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+
+      // 2) Auto-discover remaining docs (skip already loaded)
+      const docDirs = ["docs/plans", "docs/references", "docs/reviews"];
+      for (const dir of docDirs) {
+        const full = pathJoin(project.workdir, dir);
+        if (!exists(full)) continue;
+        try {
+          for (const f of readdir(full).filter((f: string) => f.endsWith(".md")).slice(0, 3)) {
+            const relPath = `${dir}/${f}`;
+            if (loadedPaths.has(relPath) || docLen >= DOC_LIMIT) continue;
+            const c = readFile(pathJoin(full, f), "utf-8").slice(0, Math.min(PER_FILE_LIMIT, DOC_LIMIT - docLen));
+            docParts.push(`### ${relPath}\n${c}`);
+            docLen += c.length;
+            loadedPaths.add(relPath);
+          }
+        } catch { /* skip */ }
+      }
+
+      if (docParts.length > 0) {
+        projectDocsContext = `\n\n## Project Reference Documents (${docParts.length} files)\n${docParts.join("\n\n")}`;
+      }
+    }
+
     const specPrompt = `
 # Structured Spec Generation
 
 You are a senior product manager. Generate a structured specification for this goal.
 
 **Project**: ${project?.name || "Unknown"}${techInfo}
-**Goal**: "${goal.description}"
+**Goal**: ${goal.title ? `"${goal.title}"` : `"${goal.description}"`}${goal.title && goal.description ? `\n**Details**: ${goal.description}` : ""}${projectDocsContext}
 
 Generate a comprehensive spec in this EXACT JSON format:
 \`\`\`json
@@ -818,7 +874,7 @@ Rules:
 
       db.prepare(
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'spec_generated', ?)",
-      ).run(goal.project_id, `Structured spec generated for goal: "${goal.description.slice(0, 80)}"`);
+      ).run(goal.project_id, `Structured spec generated for goal: "${(goal.title || goal.description).slice(0, 80)}"`);
 
       return {
         ...saved,
@@ -865,7 +921,7 @@ Rules:
 
 You are refining an existing structured spec based on the user's request.
 
-**Goal**: "${goal.description}"
+**Goal**: ${goal.title ? `"${goal.title}"` : `"${goal.description}"`}${goal.title && goal.description ? `\n**Details**: ${goal.description}` : ""}
 
 **Current Spec**:
 \`\`\`json

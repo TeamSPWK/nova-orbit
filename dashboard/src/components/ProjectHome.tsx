@@ -28,24 +28,25 @@ function AddGoalDialog({
   onCreateWithSpec,
   onCancel,
 }: {
-  onCreateDirect: (description: string) => void;
-  onCreateWithSpec: (description: string) => void;
+  onCreateDirect: (title: string, description: string) => void;
+  onCreateWithSpec: (title: string, description: string) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  const [value, setValue] = useState("");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   const handleSubmit = (mode: "direct" | "spec") => {
-    if (!value.trim() || submitting) return;
+    if (!title.trim() || submitting) return;
     setSubmitting(true);
     if (mode === "spec") {
-      onCreateWithSpec(value.trim());
+      onCreateWithSpec(title.trim(), description.trim());
     } else {
-      onCreateDirect(value.trim());
+      onCreateDirect(title.trim(), description.trim());
     }
   };
 
@@ -55,32 +56,44 @@ function AddGoalDialog({
       onClick={onCancel}
     >
       <div
-        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[480px] overflow-hidden"
+        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[520px] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
+        <div className="px-5 py-4 space-y-3">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
             {t("addGoalTitle")}
           </h3>
           <input
             ref={inputRef}
             type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && value.trim()) handleSubmit("direct");
+              if (e.key === "Enter" && title.trim() && !description) handleSubmit("direct");
+              if (e.key === "Escape") onCancel();
+            }}
+            placeholder={t("promptGoalTitleHint")}
+            disabled={submitting}
+            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+          />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onKeyDown={(e) => {
               if (e.key === "Escape") onCancel();
             }}
             placeholder={t("promptGoalDescHint")}
             disabled={submitting}
-            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+            rows={3}
+            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50 resize-none"
           />
+          <p className="text-[11px] text-gray-400 dark:text-gray-500">{t("goalDescHelp")}</p>
         </div>
         <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-2">
           <div className="flex gap-2">
             <button
               onClick={() => handleSubmit("direct")}
-              disabled={!value.trim() || submitting}
+              disabled={!title.trim() || submitting}
               className="flex-1 text-xs px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors text-left"
             >
               <div className="font-semibold">{t("addGoalCreateDirect")}</div>
@@ -88,7 +101,7 @@ function AddGoalDialog({
             </button>
             <button
               onClick={() => handleSubmit("spec")}
-              disabled={!value.trim() || submitting}
+              disabled={!title.trim() || submitting}
               className="flex-1 text-xs px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors text-left"
             >
               {submitting ? (
@@ -113,6 +126,163 @@ function AddGoalDialog({
             className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
           >
             {t("cancel")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── EditGoalDialog ──────────────────────────────────
+function EditGoalDialog({
+  goal,
+  projectId,
+  onSave,
+  onCancel,
+}: {
+  goal: { id: string; title: string; description: string; references: string };
+  projectId: string;
+  onSave: (id: string, title: string, description: string, references: string[]) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [title, setTitle] = useState(goal.title || "");
+  const [description, setDescription] = useState(
+    goal.title && goal.description !== goal.title ? goal.description : ""
+  );
+  const parsedRefs = (() => { try { const r = JSON.parse(goal.references || "[]"); return Array.isArray(r) ? r : []; } catch { return []; } })();
+  const [selectedRefs, setSelectedRefs] = useState<string[]>(parsedRefs);
+  const [availableDocs, setAvailableDocs] = useState<Array<{ path: string; name: string; dir: string }>>([]);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Load available docs from project
+  useEffect(() => {
+    api.projects.listDocs(projectId)
+      .then((docs) => setAvailableDocs(docs))
+      .catch(() => {})
+      .finally(() => setDocsLoading(false));
+  }, [projectId]);
+
+  const toggleRef = (path: string) => {
+    setSelectedRefs((prev) =>
+      prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]
+    );
+  };
+
+  const handleSave = () => {
+    if (!title.trim()) return;
+    onSave(goal.id, title.trim(), description.trim(), selectedRefs);
+  };
+
+  // Group docs by directory
+  const groupedDocs = useMemo(() => {
+    const groups: Record<string, typeof availableDocs> = {};
+    for (const doc of availableDocs) {
+      const key = doc.dir || "/";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(doc);
+    }
+    // Root first, then alphabetical
+    const sorted: [string, typeof availableDocs][] = [];
+    if (groups["/"]) { sorted.push(["/", groups["/"]]); delete groups["/"]; }
+    sorted.push(...Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)));
+    return sorted;
+  }, [availableDocs]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/20 dark:bg-black/50 flex items-center justify-center z-50"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[560px] max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+            {t("editGoal")}
+          </h3>
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1 block">{t("goalTitleLabel")}</label>
+            <input
+              ref={inputRef}
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && title.trim()) handleSave();
+                if (e.key === "Escape") onCancel();
+              }}
+              placeholder={t("promptGoalTitleHint")}
+              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1 block">{t("goalDescLabel")}</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+              placeholder={t("promptGoalDescHint")}
+              rows={5}
+              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 resize-none"
+            />
+            <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">{t("goalDescHelp")}</p>
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1 block">
+              {t("goalRefsLabel")} {selectedRefs.length > 0 && <span className="text-blue-500">({selectedRefs.length})</span>}
+            </label>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500 mb-1.5">{t("goalRefsHelp")}</p>
+            {docsLoading ? (
+              <div className="text-xs text-gray-400 py-2">{t("loading")}</div>
+            ) : availableDocs.length === 0 ? (
+              <div className="text-xs text-gray-400 py-2 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
+                {t("noDocsFound")}
+              </div>
+            ) : (
+              <div className="border border-gray-200 dark:border-gray-600 rounded-lg max-h-[180px] overflow-y-auto">
+                {groupedDocs.map(([dir, docs]) => (
+                  <div key={dir}>
+                    <div className="px-3 py-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/50 sticky top-0">
+                      {dir === "/" ? t("goalRefsRoot") : `${dir}/`}
+                    </div>
+                    {docs.map((doc) => (
+                      <label
+                        key={doc.path}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedRefs.includes(doc.path)}
+                          onChange={() => toggleRef(doc.path)}
+                          className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400 focus:ring-1"
+                        />
+                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate">{doc.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-2 shrink-0">
+          <button
+            onClick={onCancel}
+            className="text-xs px-4 py-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          >
+            {t("cancel")}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!title.trim()}
+            className="text-xs px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors"
+          >
+            {t("save")}
           </button>
         </div>
       </div>
@@ -172,6 +342,10 @@ export function ProjectHome() {
   // Goals 접기 상태
   const [showCompletedGoals, setShowCompletedGoals] = useState(false);
   const COMPLETED_GOALS_THRESHOLD = 3;
+
+  // Goal edit state
+  const [editGoalId, setEditGoalId] = useState<string | null>(null);
+  const [expandedGoalDescs, setExpandedGoalDescs] = useState<Set<string>>(new Set());
 
   // Goal Spec state
   const [specGoalId, setSpecGoalId] = useState<string | null>(null);
@@ -457,11 +631,11 @@ export function ProjectHome() {
     specPollRefs.current.set(goalId, timer);
   };
 
-  const handleAddGoalDirect = async (description: string) => {
+  const handleAddGoalDirect = async (title: string, description: string) => {
     setShowDialog(null);
     if (!currentProjectId) return;
     try {
-      const goal = await api.goals.create({ project_id: currentProjectId, description });
+      const goal = await api.goals.create({ project_id: currentProjectId, title, description });
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
     } catch (err: any) {
@@ -469,11 +643,11 @@ export function ProjectHome() {
     }
   };
 
-  const handleAddGoalWithSpec = async (description: string) => {
+  const handleAddGoalWithSpec = async (title: string, description: string) => {
     setShowDialog(null);
     if (!currentProjectId) return;
     try {
-      const goal = await api.goals.create({ project_id: currentProjectId, description, withSpec: true });
+      const goal = await api.goals.create({ project_id: currentProjectId, title, description, withSpec: true });
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
       // Start spec generation (autopilot decompose is suppressed via withSpec flag)
@@ -481,6 +655,17 @@ export function ProjectHome() {
       startSpecPolling(goal.id);
     } catch (err: any) {
       showToast(err.message ?? t("specGenerateFailed"), "error");
+    }
+  };
+
+  const handleUpdateGoal = async (goalId: string, title: string, description: string, references?: string[]) => {
+    setEditGoalId(null);
+    try {
+      const updated = await api.goals.update(goalId, { title, description, ...(references ? { references } : {}) });
+      setGoals(goals.map((g) => g.id === goalId ? { ...g, ...updated } : g));
+      showToast(t("goalUpdated"), "success");
+    } catch (err: any) {
+      showToast(err.message ?? "Failed to update goal", "error");
     }
   };
 
@@ -689,6 +874,18 @@ export function ProjectHome() {
           onCancel={() => setShowDialog(null)}
         />
       )}
+      {editGoalId && currentProjectId && (() => {
+        const goal = goals.find((g) => g.id === editGoalId);
+        if (!goal) return null;
+        return (
+          <EditGoalDialog
+            goal={goal}
+            projectId={currentProjectId}
+            onSave={handleUpdateGoal}
+            onCancel={() => setEditGoalId(null)}
+          />
+        );
+      })()}
       {showDialog === "addTask" && (
         <InputDialog
           title={t("promptTaskTitle")}
@@ -1038,6 +1235,9 @@ export function ProjectHome() {
                     const hiddenTaskCount = activeTasks.length - visibleActiveTasks.length;
                     const isDecomposing = decomposingGoalId === goal.id;
                     const isGeneratingSpec = generatingSpecGoalIds.has(goal.id);
+                    const displayTitle = goal.title || goal.description;
+                    const hasDescription = goal.description && goal.title && goal.description !== goal.title;
+                    const goalRefs = (() => { try { const r = JSON.parse(goal.references || "[]"); return Array.isArray(r) ? r : []; } catch { return []; } })();
                     return (
                       <div
                         key={goal.id}
@@ -1050,13 +1250,26 @@ export function ProjectHome() {
                         }`}
                       >
                         <div className="flex items-center justify-between gap-3 px-3 py-2">
-                          <span className={`text-sm font-medium min-w-0 ${isComplete ? "text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-100"}`}>
-                            {goal.description}
-                          </span>
+                          <button
+                            onClick={() => setEditGoalId(goal.id)}
+                            className={`text-sm font-medium min-w-0 truncate text-left hover:underline decoration-gray-300 dark:decoration-gray-600 underline-offset-2 ${isComplete ? "text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-100"}`}
+                            title={t("editGoal")}
+                          >
+                            {displayTitle}
+                          </button>
                           <div className="flex items-center gap-2 shrink-0">
                             <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
                               {doneTasks.length}/{goalTasks.length} ({pct}%)
                             </span>
+                            <button
+                              onClick={() => setEditGoalId(goal.id)}
+                              title={t("editGoal")}
+                              className="text-gray-300 dark:text-gray-600 hover:text-blue-400 dark:hover:text-blue-400 transition-colors p-0.5"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                              </svg>
+                            </button>
                             <button
                               onClick={() => handleDeleteGoal(goal.id)}
                               title={t("deleteGoal")}
@@ -1165,6 +1378,33 @@ export function ProjectHome() {
                             <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
                           )}
                         </div>
+                        {hasDescription && (
+                          <div
+                            className="px-3 pt-1.5 pb-1 cursor-pointer group/desc"
+                            onClick={() => setExpandedGoalDescs((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(goal.id)) next.delete(goal.id);
+                              else next.add(goal.id);
+                              return next;
+                            })}
+                          >
+                            <p className={`text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap ${expandedGoalDescs.has(goal.id) ? "" : "line-clamp-2"}`}>
+                              {goal.description}
+                            </p>
+                            {!expandedGoalDescs.has(goal.id) && goal.description.length > 120 && (
+                              <span className="text-[10px] text-blue-400 dark:text-blue-500 group-hover/desc:underline">{t("showMore")}</span>
+                            )}
+                          </div>
+                        )}
+                        {goalRefs.length > 0 && (
+                          <div className="px-3 pb-1 flex flex-wrap gap-1">
+                            {goalRefs.map((ref: string, i: number) => (
+                              <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded font-mono truncate max-w-[200px]" title={ref}>
+                                {ref.split("/").pop()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {/* Inline tasks for this goal — 최대 3개 */}
                         {visibleActiveTasks.length > 0 && (
                           <div className="px-3 pb-2 space-y-1">

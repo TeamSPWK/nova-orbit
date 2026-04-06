@@ -1,10 +1,35 @@
 import type { Database } from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createClaudeCodeAdapter, type ClaudeCodeSession } from "./adapters/claude-code.js";
 import { createLogger } from "../../utils/logger.js";
 import { resolvePrompt } from "./prompt-resolver.js";
 import { loadMemory } from "./memory.js";
+
+/** Read key project docs (plans, references, reviews) for agent context injection */
+function loadProjectDocs(workdir: string, maxChars = 4000): string {
+  const docDirs = ["docs/plans", "docs/references", "docs/reviews", "docs/designs"];
+  const parts: string[] = [];
+  let totalLen = 0;
+
+  for (const dir of docDirs) {
+    const fullDir = join(workdir, dir);
+    if (!existsSync(fullDir)) continue;
+    try {
+      const files = readdirSync(fullDir).filter((f) => f.endsWith(".md")).slice(0, 3);
+      for (const file of files) {
+        if (totalLen >= maxChars) break;
+        const content = readFileSync(join(fullDir, file), "utf-8");
+        const trimmed = content.slice(0, maxChars - totalLen);
+        parts.push(`### ${dir}/${file}\n${trimmed}`);
+        totalLen += trimmed.length;
+      }
+    } catch { /* skip unreadable dirs */ }
+  }
+
+  return parts.length > 0 ? `\n\n## Project Documents\n${parts.join("\n\n")}` : "";
+}
 
 const log = createLogger("session-manager");
 
@@ -81,6 +106,10 @@ export function createSessionManager(db: Database): SessionManager {
           projectContext += `\n\n## Recent Git History\n\`\`\`\n${gitResult.stdout.trim()}\n\`\`\``;
         }
       } catch { /* git 없는 프로젝트 */ }
+
+      // Project docs (plans, references, reviews) — 에이전트가 프로젝트 맥락을 이해하도록
+      const workdir = project?.workdir || projectWorkdir;
+      projectContext += loadProjectDocs(workdir);
 
       // Sprint 6: 에이전트 메모리 로드
       const dataDir = process.env.NOVA_ORBIT_DATA_DIR || join(process.cwd(), ".nova-orbit");

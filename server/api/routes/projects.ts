@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { AppContext } from "../../index.js";
 import { validateWorkdir } from "../../utils/validate-path.js";
@@ -347,11 +348,11 @@ ${branchList}
       const analysis = analyzeProject(resolvedImport);
       const projectName = name || resolvedImport.split("/").pop() || "Imported Project";
 
-      // Create project
+      // Create project — auto-fill mission from CLAUDE.md/readme if available
       const result = db.prepare(`
-        INSERT INTO projects (name, source, workdir, tech_stack)
-        VALUES (?, 'local_import', ?, ?)
-      `).run(projectName, resolvedImport, JSON.stringify(analysis.techStack));
+        INSERT INTO projects (name, mission, source, workdir, tech_stack)
+        VALUES (?, ?, 'local_import', ?, ?)
+      `).run(projectName, analysis.mission || "", resolvedImport, JSON.stringify(analysis.techStack));
 
       const project = db.prepare("SELECT * FROM projects WHERE rowid = ?").get(result.lastInsertRowid) as any;
 
@@ -376,6 +377,46 @@ ${branchList}
     }
   });
 
+  // List project docs (.md files in docs/, plans, references, etc.)
+  router.get("/:id/docs", (req, res) => {
+    const project = db.prepare("SELECT workdir FROM projects WHERE id = ?").get(req.params.id) as { workdir: string } | undefined;
+    if (!project || !project.workdir) return res.status(404).json({ error: "Project not found or no workdir" });
+
+    const docs: Array<{ path: string; name: string; dir: string }> = [];
+    const scanDirs = ["docs", "docs/plans", "docs/references", "docs/reviews", "docs/designs"];
+
+    for (const dir of scanDirs) {
+      const fullDir = join(project.workdir, dir);
+      try {
+        const stat = statSync(fullDir);
+        if (!stat.isDirectory()) continue;
+        const files = readdirSync(fullDir, { withFileTypes: true });
+        for (const f of files) {
+          if (!f.isFile()) continue;
+          if (!f.name.endsWith(".md") && !f.name.endsWith(".yaml") && !f.name.endsWith(".yml")) continue;
+          const relPath = `${dir}/${f.name}`;
+          // Avoid duplicates (docs/plans/x.md seen from both "docs" and "docs/plans")
+          if (!docs.some((d) => d.path === relPath)) {
+            docs.push({ path: relPath, name: f.name, dir });
+          }
+        }
+      } catch { /* skip non-existent dirs */ }
+    }
+
+    // Also scan root-level important files (dedup by lowercase)
+    const seenRoot = new Set<string>();
+    for (const rootFile of ["CLAUDE.md", "README.md", "readme.md"]) {
+      if (seenRoot.has(rootFile.toLowerCase())) continue;
+      try {
+        statSync(join(project.workdir, rootFile));
+        docs.push({ path: rootFile, name: rootFile, dir: "" });
+        seenRoot.add(rootFile.toLowerCase());
+      } catch { /* skip */ }
+    }
+
+    res.json(docs);
+  });
+
   // Connect GitHub repo (clone + analyze + create project + agents)
   router.post("/github", (req, res) => {
     const { url, name } = req.body;
@@ -395,12 +436,13 @@ ${branchList}
       // Validate localPath is within allowed directories
       const validatedPath = validateWorkdir(result.localPath);
 
-      // Create project
+      // Create project — auto-fill mission from CLAUDE.md/readme if available
       const dbResult = db.prepare(`
-        INSERT INTO projects (name, source, workdir, github_config, tech_stack)
-        VALUES (?, 'github', ?, ?, ?)
+        INSERT INTO projects (name, mission, source, workdir, github_config, tech_stack)
+        VALUES (?, ?, 'github', ?, ?, ?)
       `).run(
         projectName,
+        result.analysis.mission || "",
         validatedPath,
         JSON.stringify({ repoUrl: result.repoUrl, branch: result.branch, autoPush: false, prMode: true }),
         JSON.stringify(result.analysis.techStack),

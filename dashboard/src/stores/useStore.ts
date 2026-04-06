@@ -43,7 +43,9 @@ interface Task {
 interface Goal {
   id: string;
   project_id: string;
+  title: string;
   description: string;
+  references: string; // JSON array string
   priority: string;
   progress: number;
 }
