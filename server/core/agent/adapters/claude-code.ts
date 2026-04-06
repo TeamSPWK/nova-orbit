@@ -94,6 +94,7 @@ export function createClaudeCodeAdapter() {
             log.info("Spawning Claude Code CLI", {
               workdir: config.workdir,
               resume: resumeId ?? "new",
+              args: args.join(" "),
             });
 
             const TIMEOUT_MS = TASK_TIMEOUT_MS;
@@ -236,13 +237,16 @@ export function createClaudeCodeAdapter() {
                   stdoutLen: stdout.length,
                   stderrLen: stderr.length,
                   sessionId: session.lastSessionId,
+                  hasReceivedOutput,
                 });
               } else {
                 session.status = "failed";
                 session.emit("status", "failed");
                 log.error(`Claude Code exited with code ${code}`, {
                   stdoutLen: stdout.length,
-                  stderr: stderr.slice(0, 500),
+                  stderrLen: stderr.length,
+                  stderr: stderr.slice(0, 1000),
+                  hasReceivedOutput,
                 });
               }
 

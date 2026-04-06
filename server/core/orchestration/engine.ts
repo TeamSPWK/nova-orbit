@@ -502,16 +502,15 @@ Fix ONLY these issues. Do not modify other code.
           const criteria = JSON.parse(goalSpec.acceptance_criteria || "[]");
           const tech = JSON.parse(goalSpec.tech_considerations || "[]");
 
-          // Compact spec: keep features + criteria, skip verbose details to avoid token overflow
-          const featureList = features.slice(0, 8).map((f: any) => `- [${f.priority}] ${f.name}: ${(f.description || "").slice(0, 80)}`).join("\n");
-          const criteriaList = criteria.slice(0, 8).map((c: string) => `- ${c}`).join("\n");
+          // Compact spec: name+priority only (no description), max 5 criteria to minimize token usage
+          const featureList = features.slice(0, 8).map((f: any) => `- [${f.priority}] ${f.name}`).join("\n");
+          const criteriaList = criteria.slice(0, 5).map((c: string) => `- ${c}`).join("\n");
 
           specContext = `
 
 ## Spec Summary
-**Objective**: ${(prd.objective || "N/A").slice(0, 200)}
-**Scope**: ${(prd.scope || "N/A").slice(0, 200)}
-**Metrics**: ${(prd.success_metrics || prd.successMetrics || []).slice(0, 4).join("; ")}
+**Objective**: ${(prd.objective || "N/A").slice(0, 120)}
+**Scope**: ${(prd.scope || "N/A").slice(0, 120)}
 
 ### Features (${features.length})
 ${featureList}
@@ -570,7 +569,7 @@ Respond in this EXACT JSON format:
           // Fallback: try to find raw JSON object with "tasks" array
           jsonMatch = parsed.text.match(/(\{[\s\S]*"tasks"\s*:\s*\[[\s\S]*\][\s\S]*\})/);
         }
-        if (!jsonMatch) throw new Error(`No JSON found in decomposition response (textLen=${parsed.text.length}, exitCode=${runResult.exitCode}, first300=${parsed.text.slice(0, 300)})`);
+        if (!jsonMatch) throw new Error(`No JSON found in decomposition response (textLen=${parsed.text.length}, exitCode=${runResult.exitCode}, stderr=${runResult.stderr.slice(0, 200)}, first300=${parsed.text.slice(0, 300)})`);
 
         let decomposed: any;
         try {

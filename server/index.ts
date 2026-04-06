@@ -93,6 +93,9 @@ export async function startServer(config: ServerConfig): Promise<void> {
 
   // HTTP + WebSocket server
   const server = createServer(app);
+  // Agent execution can take 10+ minutes — prevent Node.js default 2-min socket timeout
+  server.timeout = 0; // Disable HTTP timeout (Claude CLI handles its own timeouts)
+  server.keepAliveTimeout = 0;
   // 연결을 항상 수락하되, 인증 여부를 태깅 — proxy EPIPE 방지
   const wss = new WebSocketServer({ server, path: "/ws" });
 
