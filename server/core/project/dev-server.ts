@@ -1,4 +1,6 @@
 import { spawn, execSync, type ChildProcess } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:net";
 import { createLogger } from "../../utils/logger.js";
 
@@ -13,6 +15,81 @@ interface DevServerEntry {
   process: ChildProcess;
   port: number;
   pid: number;
+  basePath: string;
+}
+
+/**
+ * 프로젝트 workdir에서 프레임워크별 basePath를 자동 감지한다.
+ * Next.js, Vite, Vue CLI, CRA(package.json homepage) 지원.
+ */
+function detectBasePath(workdir: string): string {
+  // Next.js: next.config.{ts,js,mjs}
+  for (const name of ["next.config.ts", "next.config.js", "next.config.mjs"]) {
+    const fp = join(workdir, name);
+    if (!existsSync(fp)) continue;
+    try {
+      const src = readFileSync(fp, "utf-8");
+      const m = src.match(/basePath\s*:\s*["'`]([^"'`]+)["'`]/);
+      if (m) return m[1];
+    } catch { /* ignore */ }
+  }
+
+  // Vite: vite.config.{ts,js,mjs}
+  for (const name of ["vite.config.ts", "vite.config.js", "vite.config.mjs"]) {
+    const fp = join(workdir, name);
+    if (!existsSync(fp)) continue;
+    try {
+      const src = readFileSync(fp, "utf-8");
+      const m = src.match(/\bbase\s*:\s*["'`]([^"'`]+)["'`]/);
+      if (m && m[1] !== "/" && m[1] !== "./") return m[1].replace(/\/$/, "");
+    } catch { /* ignore */ }
+  }
+
+  // Vue CLI: vue.config.{js,ts}
+  for (const name of ["vue.config.js", "vue.config.ts"]) {
+    const fp = join(workdir, name);
+    if (!existsSync(fp)) continue;
+    try {
+      const src = readFileSync(fp, "utf-8");
+      const m = src.match(/publicPath\s*:\s*["'`]([^"'`]+)["'`]/);
+      if (m && m[1] !== "/" && m[1] !== "./") return m[1].replace(/\/$/, "");
+    } catch { /* ignore */ }
+  }
+
+  // Angular: angular.json → baseHref
+  const angularJson = join(workdir, "angular.json");
+  if (existsSync(angularJson)) {
+    try {
+      const cfg = JSON.parse(readFileSync(angularJson, "utf-8"));
+      const projects = cfg.projects ?? {};
+      for (const proj of Object.values(projects) as any[]) {
+        const baseHref = proj?.architect?.build?.options?.baseHref
+          ?? proj?.architect?.serve?.options?.baseHref;
+        if (baseHref && baseHref !== "/") return baseHref.replace(/\/$/, "");
+      }
+    } catch { /* ignore */ }
+  }
+
+  // CRA / generic: package.json homepage
+  const pkgJson = join(workdir, "package.json");
+  if (existsSync(pkgJson)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgJson, "utf-8"));
+      if (pkg.homepage && pkg.homepage !== "/" && pkg.homepage !== ".") {
+        // homepage가 full URL이면 pathname만 추출
+        try {
+          const u = new URL(pkg.homepage);
+          if (u.pathname && u.pathname !== "/") return u.pathname.replace(/\/$/, "");
+        } catch {
+          // relative path
+          const hp = pkg.homepage.replace(/\/$/, "");
+          if (hp && hp !== "." && hp !== "./") return hp.startsWith("/") ? hp : `/${hp}`;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  return "";
 }
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -171,9 +248,13 @@ export function createDevServerManager(serverPort?: number): DevServerManager {
 
       const proc = spawn("npm", ["run", "dev", "--", "--port", String(port)], {
         cwd: workdir,
-        stdio: "pipe",
+        stdio: ["ignore", "pipe", "pipe"],
         detached: false,
       });
+
+      // stdout/stderr를 drain — 읽지 않으면 OS 파이프 버퍼가 가득 차서 프로세스 블로킹
+      proc.stdout?.resume();
+      proc.stderr?.resume();
 
       proc.on("error", (err) => {
         log.warn(`Dev server for project ${projectId} error: ${err.message}`);
@@ -189,10 +270,11 @@ export function createDevServerManager(serverPort?: number): DevServerManager {
         throw new Error("Failed to spawn dev server process");
       }
 
-      servers.set(projectId, { process: proc, port, pid: proc.pid });
-      log.info(`Started dev server for project ${projectId} on port ${port} (pid ${proc.pid})`);
+      const basePath = detectBasePath(workdir);
+      servers.set(projectId, { process: proc, port, pid: proc.pid, basePath });
+      log.info(`Started dev server for project ${projectId} on port ${port} (pid ${proc.pid})${basePath ? ` basePath=${basePath}` : ""}`);
 
-      const url = `http://localhost:${port}`;
+      const url = `http://localhost:${port}${basePath}`;
       return { port, url };
     },
 
@@ -214,7 +296,7 @@ export function createDevServerManager(serverPort?: number): DevServerManager {
         running: true,
         port: entry.port,
         pid: entry.pid,
-        url: `http://localhost:${entry.port}`,
+        url: `http://localhost:${entry.port}${entry.basePath}`,
       };
     },
 
