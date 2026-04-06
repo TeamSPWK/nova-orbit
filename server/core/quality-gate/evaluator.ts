@@ -2,6 +2,7 @@ import type { Database } from "better-sqlite3";
 import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createLogger } from "../../utils/logger.js";
+import { createNovaRulesEngine } from "../nova-rules/index.js";
 import type { VerificationResult, VerificationScope, Verdict, Severity, Score, VerificationIssue } from "../../../shared/types.js";
 
 const log = createLogger("quality-gate");
@@ -161,36 +162,68 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
   };
 }
 
-function buildEvaluationPrompt(task: any, project: any, scope: VerificationScope): string {
-  const scopeInstructions: Record<VerificationScope, string> = {
-    lite: `Layer 1 only: Static analysis — lint/type-check, unused imports, security patterns.`,
-    standard: `Layer 1 + 2: Static analysis AND semantic analysis — design-implementation consistency, business logic correctness.`,
-    full: `Layer 1 + 2 + 3: Static + semantic + execution-based validation — run tests, verify API endpoints, check edge cases.`,
-  };
+/**
+ * Auto-detect verification scope based on task characteristics.
+ * Aligns with Nova §1: high-risk areas auto-escalate one level.
+ */
+export function autoDetectScope(
+  task: { title: string; description: string },
+  changedFileCount?: number,
+): VerificationScope {
+  const text = `${task.title} ${task.description}`.toLowerCase();
 
-  return `# Code Review — Quality Verification
+  // High-risk patterns always escalate (Nova §1: auth/DB/payment → one level up)
+  const highRisk = [
+    "auth", "login", "password", "token", "payment", "billing",
+    "database", "migration", "schema", "security", "permission", "rbac",
+    "encrypt", "decrypt", "secret", "credential",
+  ];
+  const isHighRisk = highRisk.some((p) => text.includes(p));
+
+  const files = changedFileCount ?? 0;
+
+  if (isHighRisk || files >= 8) return "full";
+  if (files >= 3) return "standard";
+  return "lite";
+}
+
+function buildEvaluationPrompt(task: any, project: any, scope: VerificationScope): string {
+  const novaRules = createNovaRulesEngine();
+  const verificationProtocol = novaRules.getVerificationProtocol(scope);
+
+  return `# Code Review — Quality Verification (Nova Protocol)
 
 Review the code changes for task: "${task.title}"
 ${task.description ? `\nTask description: ${task.description}` : ""}
 
-## Scope: ${scope.toUpperCase()}
-${scopeInstructions[scope]}
+## Verification Scope: ${scope.toUpperCase()}
+
+${verificationProtocol || `Scope: ${scope} — Evaluate code quality, correctness, and safety.`}
+
+## Evaluator Stance
+"통과시키지 마라. 문제를 찾아라." — Do not rubber-stamp. Find problems.
+Code existing is not the same as code working.
 
 ## Score each dimension 0-10:
 
 1. **Functionality** — Does it do what the task asked for?
-2. **Data Flow** — Is the data pipeline reasonable for this task?
+2. **Data Flow** — Input → Save → Load → Display complete?
 3. **Design Alignment** — Does it follow existing codebase patterns?
-4. **Craft** — Code clarity, type safety, reasonable error handling?
-5. **Edge Cases** — Are obvious boundary cases considered?
+4. **Craft** — Error handling, type safety, edge cases?
+5. **Edge Cases** — Boundary values (0, negative, empty, max) safe?
 
-## Verdict Rules (based on average score):
-- Average >= 6 → "pass"
-- Average >= 4 and < 6 → "conditional"
-- Average < 4, OR security/data-loss issue found → "fail"
+## Verdict Rules:
+- **PASS**: All layers for this scope completed, no critical/high issues
+- **CONDITIONAL**: Code looks correct but Layer 3 (execution) could not be verified → MUST list Known Gaps
+- **FAIL**: Critical or high severity issue found, OR functionality broken, OR security/data-loss risk
 
-Not every task needs perfect scores. A simple UI change scoring 7 across the board is a clear PASS.
-Only fail if there are genuine bugs, broken functionality, or security issues.
+${scope === "full" ? `
+## CRITICAL: Layer 3 Execution Rule
+If you CANNOT execute Layer 3 (no DB, no runtime, no test runner):
+- Do NOT return "pass"
+- Return "conditional" with Known Gaps listing what needs manual verification
+- Example issue: "Layer 3 미수행 — API 서버 기동 후 curl 테스트 필요"
+` : ""}
 
 ## Output — respond ONLY with this JSON block:
 
@@ -205,12 +238,14 @@ Only fail if there are genuine bugs, broken functionality, or security issues.
     "craft": { "value": 7, "notes": "..." },
     "edgeCases": { "value": 6, "notes": "..." }
   },
-  "issues": []
+  "issues": [],
+  "knownGaps": []
 }
 \`\`\`
 
 - severity: "auto-resolve" (minor), "soft-block" (runtime risk), "hard-block" (security/data loss)
 - issues: only list actual problems found, empty array if none
+- knownGaps: areas that could not be verified (Layer 3 not executed, etc.)
 `;
 }
 
@@ -266,17 +301,11 @@ function parseVerificationResult(
       edgeCases: parsed.dimensions?.edgeCases ?? defaultScore,
     };
 
-    // Score-based verdict correction — prevent high scores + fail verdict mismatch
-    const scores = Object.values(dimensions).map((d: any) => d.value ?? 0);
-    const avg = scores.reduce((a: number, b: number) => a + b, 0) / scores.length;
+    // Trust the evaluator agent's verdict — do NOT override based on score averages.
+    // The evaluator may FAIL a task with high dimension scores if it found a critical
+    // issue (e.g., security vulnerability) that doesn't map neatly to any dimension.
+    // Overriding FAIL→PASS based on avg score was a Critical bug (Nova gap analysis).
     let verdict: Verdict = parsed.verdict ?? "fail";
-    if (avg >= 6 && verdict === "fail") {
-      log.info(`Verdict corrected: fail → pass (avg score ${avg.toFixed(1)} >= 6)`);
-      verdict = "pass";
-    } else if (avg >= 4 && verdict === "fail") {
-      log.info(`Verdict corrected: fail → conditional (avg score ${avg.toFixed(1)} >= 4)`);
-      verdict = "conditional";
-    }
 
     const issues = (parsed.issues ?? []).map((issue: any, i: number) => ({
       id: `issue-${i}`,

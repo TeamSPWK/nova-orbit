@@ -10,6 +10,8 @@ import { createLogger } from "../../utils/logger.js";
 import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL } from "../../utils/constants.js";
 import type { VerificationScope } from "../../../shared/types.js";
 import { appendMemory } from "../agent/memory.js";
+import { createNovaRulesEngine } from "../nova-rules/index.js";
+import { autoDetectScope } from "../quality-gate/evaluator.js";
 
 const log = createLogger("orchestration");
 
@@ -123,6 +125,38 @@ export function createOrchestrationEngine(
         }
       }
 
+      // Phase 0.5: Complexity detection + Architect phase (Nova Orchestrator alignment)
+      const complexity = detectComplexity(task);
+      let architectContext = "";
+
+      if (complexity !== "simple" && !task.parent_task_id) {
+        const ctoAgent = db.prepare(
+          "SELECT * FROM agents WHERE project_id = ? AND role = 'cto' AND id != ? LIMIT 1",
+        ).get(task.project_id, task.assignee_id) as AgentRow | undefined;
+
+        if (ctoAgent) {
+          log.info(`Architect phase for "${task.title}" (complexity: ${complexity})`);
+          const novaRules = createNovaRulesEngine();
+          const architectPrompt = buildArchitectPrompt(task, novaRules);
+          try {
+            const archSession = sessionManager.spawnAgent(ctoAgent.id, workdir);
+            const archResult = await archSession.send(architectPrompt);
+            const archParsed = parseStreamJson(archResult.stdout);
+            architectContext = archParsed.text ?? "";
+            log.info(`Architect design complete for "${task.title}" (${architectContext.length} chars)`);
+          } catch (archErr: any) {
+            log.warn(`Architect phase failed, proceeding without design: ${archErr.message}`);
+          } finally {
+            sessionManager.killSession(ctoAgent.id);
+          }
+        }
+      }
+
+      // Auto-detect verification scope if not explicitly set (Nova §1 alignment)
+      const effectiveVerificationScope = opts.verificationScope !== "standard"
+        ? opts.verificationScope
+        : autoDetectScope(task, undefined);
+
       // Phase 1: Set task to in_progress
       transitionTask(db, broadcast, task, "in_progress");
 
@@ -185,16 +219,23 @@ export function createOrchestrationEngine(
       broadcast("task:started", { taskId, agentId: task.assignee_id, startedAt: new Date().toISOString() });
 
       try {
+        const novaRules = createNovaRulesEngine();
+        const autoApplyRules = novaRules.getAutoApplyRules();
+
         const implementationPrompt = `
 # Task: ${task.title}
 
 ${task.description}
+${architectContext ? `\n## Architecture Design\n${architectContext}\n` : ""}
+## Nova Auto-Apply Rules
+${autoApplyRules || "Follow clean code conventions and existing patterns."}
 
-Implement this task. Focus on:
+## Constraints
 - Clean, production-ready code
 - Follow existing codebase conventions
 - Run lint/type-check before finishing
-- DO NOT verify your own work — verification is handled separately
+- DO NOT verify your own work — verification is handled by independent Evaluator
+- Fix ONLY what the task requires — do not refactor unrelated code
 
 When complete, provide a summary of changes made.
 `;
@@ -268,7 +309,7 @@ When complete, provide a summary of changes made.
 
         // Phase 4: Quality Gate verification (worktree 경로 전달)
         const verification = await qualityGate.verify(taskId, {
-          scope: opts.verificationScope,
+          scope: effectiveVerificationScope,
           workdir: effectiveWorkdir,
         });
 
@@ -326,7 +367,7 @@ Fix ONLY these issues. Do not modify other code.
 
           // Re-verify (worktree 경로 전달)
           const reVerification = await qualityGate.verify(taskId, {
-            scope: opts.verificationScope,
+            scope: effectiveVerificationScope,
             workdir: effectiveWorkdir,
           });
           broadcast("verification:result", reVerification);
@@ -800,4 +841,68 @@ function updateGoalProgress(db: Database, goalId: string): void {
   `).get(goalId) as { total: number; done: number };
   const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalId);
+}
+
+/**
+ * Detect task complexity aligned with Nova §1.
+ * - simple: 1-2 files, single module
+ * - moderate: 3-7 files, new feature
+ * - complex: 8+ files, multi-module, or high-risk domain
+ */
+type Complexity = "simple" | "moderate" | "complex";
+
+function detectComplexity(task: TaskRow): Complexity {
+  const text = `${task.title} ${task.description}`.toLowerCase();
+
+  // High-risk keywords force escalation (Nova §1: auth/DB/payment → one level up)
+  const highRisk = [
+    "auth", "payment", "migration", "security", "schema", "deploy",
+    "database", "credential", "permission", "billing", "encrypt",
+  ];
+  if (highRisk.some((k) => text.includes(k))) return "complex";
+
+  // Estimate from description patterns
+  const filePatterns = text.match(/\.(ts|js|tsx|jsx|py|go|rs|css|html|vue|svelte)\b/g);
+  const estimatedFiles = filePatterns?.length ?? 0;
+
+  if (estimatedFiles >= 8) return "complex";
+  if (estimatedFiles >= 3) return "moderate";
+
+  // Check for multi-module indicators
+  const multiModule = ["multiple files", "여러 파일", "across modules", "다중 모듈", "refactor"];
+  if (multiModule.some((k) => text.includes(k))) return "moderate";
+
+  return "simple";
+}
+
+/**
+ * Build architect prompt for CPS design phase.
+ * Used for moderate/complex tasks before implementation (Nova Orchestrator Phase 2).
+ */
+function buildArchitectPrompt(task: TaskRow, novaRules: ReturnType<typeof createNovaRulesEngine>): string {
+  const orchestratorProtocol = novaRules.getOrchestratorProtocol();
+
+  // Extract Phase 2 (Design) section from orchestrator protocol
+  const phase2Match = orchestratorProtocol.match(/### Phase 2:[\s\S]*?(?=### Phase 3:|### --design-only)/);
+  const designGuidance = phase2Match ? phase2Match[0].trim() : "";
+
+  return `# Architecture Design — CPS Pattern
+
+You are the Architect. Design ONLY, do NOT implement.
+
+## Task
+"${task.title}"
+${task.description}
+
+## Design Guidance (from Nova Orchestrator)
+${designGuidance || "Write a CPS design: Context → Problem → Solution"}
+
+## Output
+Produce a CPS design document with:
+1. **Context**: Current project state, relevant files, tech stack
+2. **Problem**: What exactly needs to change and why (MECE decomposition)
+3. **Solution**: File structure, data flow, API boundaries, implementation order, build/verify commands
+
+Keep the design concise (under 100 lines). Focus on what the implementer needs.
+`;
 }
