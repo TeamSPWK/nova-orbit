@@ -34,7 +34,7 @@ export function migrate(db: Database.Database): void {
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
+      role TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
       system_prompt TEXT NOT NULL DEFAULT '',
       skills_dir TEXT,
@@ -153,7 +153,7 @@ export function migrate(db: Database.Database): void {
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
+        role TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
         system_prompt TEXT NOT NULL DEFAULT '',
         prompt_source TEXT NOT NULL DEFAULT 'auto',
@@ -170,11 +170,11 @@ export function migrate(db: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
     `);
   } else {
-    // parent_id exists but CHECK might still be old — test by inserting a dummy
+    // role CHECK constraint removed — test with arbitrary role to detect legacy constraint
     let needsAgentsRecreate = false;
     try {
       db.pragma("foreign_keys = OFF");
-      db.exec("INSERT INTO agents (project_id, name, role) VALUES ('__check__', '__check__', 'cto')");
+      db.exec("INSERT INTO agents (project_id, name, role) VALUES ('__check__', '__check__', '__any_role__')");
       db.exec("DELETE FROM agents WHERE project_id = '__check__'");
     } catch {
       needsAgentsRecreate = true;
@@ -189,7 +189,7 @@ export function migrate(db: Database.Database): void {
           id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('coder', 'reviewer', 'marketer', 'designer', 'qa', 'custom', 'cto', 'backend', 'frontend', 'ux', 'devops')),
+          role TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'working', 'waiting_approval', 'paused', 'terminated')),
           system_prompt TEXT NOT NULL DEFAULT '',
           prompt_source TEXT NOT NULL DEFAULT 'auto',

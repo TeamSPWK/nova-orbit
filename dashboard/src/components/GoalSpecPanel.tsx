@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface GoalSpecPanelProps {
   goalId: string;
@@ -280,8 +281,13 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
   const [showRefine, setShowRefine] = useState(false);
   const [refinePrompt, setRefinePrompt] = useState("");
   const [refining, setRefining] = useState(false);
+  const [refineElapsed, setRefineElapsed] = useState(0);
+  const [confirmClose, setConfirmClose] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refineTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const refineInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const busy = refining || generating;
 
   const isGeneratingStatus = (s: SpecData | null) =>
     s?.prd_summary && (s.prd_summary as any)._status === "generating";
@@ -291,8 +297,29 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
 
   useEffect(() => {
     loadSpec();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (refineTimerRef.current) clearInterval(refineTimerRef.current);
+    };
   }, [goalId]);
+
+  // Prevent browser refresh/close while busy
+  useEffect(() => {
+    if (!busy) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [busy]);
+
+  const handleClose = useCallback(() => {
+    if (busy) {
+      setConfirmClose(true);
+    } else {
+      onClose();
+    }
+  }, [busy, onClose]);
 
   async function loadSpec() {
     setLoading(true);
@@ -391,7 +418,12 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
   async function handleRefine() {
     if (!refinePrompt.trim()) return;
     setRefining(true);
+    setRefineElapsed(0);
     setError(null);
+    // Start elapsed timer
+    refineTimerRef.current = setInterval(() => {
+      setRefineElapsed((prev) => prev + 1);
+    }, 1000);
     try {
       const data = await api.goals.refineSpec(goalId, refinePrompt.trim());
       setSpec(data);
@@ -402,6 +434,8 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
       setError(err.message || "Refine failed");
     } finally {
       setRefining(false);
+      setRefineElapsed(0);
+      if (refineTimerRef.current) { clearInterval(refineTimerRef.current); refineTimerRef.current = null; }
     }
   }
 
@@ -418,7 +452,7 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
   const hasSpec = spec && !isGeneratingStatus(spec) && !isFailedStatus(spec);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
       <div
         className="bg-white dark:bg-[#1a1a2e] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
         style={{ width: "min(1100px, 92vw)", height: "min(760px, 88vh)" }}
@@ -445,6 +479,15 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 {t("specGenerating")}
+              </span>
+            )}
+            {refining && (
+              <span className="text-[10px] px-2.5 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 animate-pulse">
+                <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                {t("specAiRefining")} {refineElapsed > 0 && `${refineElapsed}s`}
               </span>
             )}
           </div>
@@ -478,7 +521,7 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
                 </button>
               </>
             )}
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            <button onClick={handleClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
               <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
@@ -509,7 +552,7 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
                   disabled={refining || !refinePrompt.trim()}
                   className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 font-medium"
                 >
-                  {refining ? t("specAiRefining") : "Send"}
+                  {refining ? `${t("specAiRefining")} ${refineElapsed > 0 ? `${refineElapsed}s` : ""}` : "Send"}
                 </button>
                 <button
                   onClick={() => { setShowRefine(false); setRefinePrompt(""); }}
@@ -524,7 +567,7 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
         )}
 
         {/* ─── Body ─── */}
-        <div className="flex-1 overflow-hidden flex">
+        <div className="flex-1 overflow-hidden flex relative">
           {loading ? (
             <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
               <svg className="animate-spin w-5 h-5 mr-2" viewBox="0 0 24 24" fill="none">
@@ -769,6 +812,32 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
               </div>
             </>
           )}
+
+          {/* ─── Refining Overlay ─── */}
+          {refining && (
+            <div className="absolute inset-0 bg-white/60 dark:bg-[#1a1a2e]/70 backdrop-blur-[2px] flex items-center justify-center z-10">
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+                    <span className="text-xl">✨</span>
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center">
+                    <svg className="animate-spin w-3 h-3 text-white" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("specAiRefining")}</p>
+                  <p className="text-xs text-gray-400 mt-1">{t("specAiRefiningDesc")}</p>
+                </div>
+                {refineElapsed > 0 && (
+                  <span className="text-[10px] text-gray-400 tabular-nums">{refineElapsed}s</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ─── Footer (when dirty) ─── */}
@@ -793,6 +862,15 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
           </div>
         )}
       </div>
+
+      {/* ─── Confirm close while busy ─── */}
+      {confirmClose && (
+        <ConfirmDialog
+          message={t("specCloseWhileBusy")}
+          onConfirm={onClose}
+          onCancel={() => setConfirmClose(false)}
+        />
+      )}
     </div>
   );
 }

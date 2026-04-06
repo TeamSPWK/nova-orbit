@@ -625,6 +625,8 @@ const ko = {
   specAiRefine: "AI 보완",
   specAiRefinePlaceholder: "예: \"에러 처리 플로우 추가\" 또는 \"수락 기준을 더 구체적으로\"",
   specAiRefining: "AI로 보완 중...",
+  specAiRefiningDesc: "AI가 요청사항을 반영하여 기획서를 수정하고 있습니다",
+  specCloseWhileBusy: "AI가 기획서를 처리하고 있습니다. 닫으면 진행 중인 작업이 중단될 수 있습니다. 정말 닫으시겠습니까?",
   specPriorityMust: "필수",
   specPriorityShould: "권장",
   specPriorityCould: "선택",

@@ -624,6 +624,8 @@ const en = {
   specAiRefine: "AI Refine",
   specAiRefinePlaceholder: "E.g. \"Add error handling flows\" or \"Make acceptance criteria more specific\"",
   specAiRefining: "Refining with AI...",
+  specAiRefiningDesc: "AI is updating the spec based on your request",
+  specCloseWhileBusy: "AI is still processing the spec. Closing may interrupt the operation. Are you sure?",
   specPriorityMust: "Must",
   specPriorityShould: "Should",
   specPriorityCould: "Could",
