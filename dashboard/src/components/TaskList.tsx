@@ -235,11 +235,21 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
               <span className="text-gray-300 dark:text-gray-600 text-xs shrink-0">└</span>
             )}
             <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{task.title}</span>
-          {task.verification_id && (
-            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 rounded shrink-0">
+          {task.verification_verdict ? (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
+              task.verification_verdict === "pass"
+                ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                : task.verification_verdict === "fail"
+                ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
+                : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400"
+            }`}>
+              {task.verification_verdict.toUpperCase()}
+            </span>
+          ) : task.verification_id ? (
+            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400 rounded shrink-0">
               {t("verified")}
             </span>
-          )}
+          ) : null}
           {task.status === "todo" && task.description?.includes("--- Rejection Feedback ---") && (
             <span className="text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded shrink-0">
               {t("rejected")}
