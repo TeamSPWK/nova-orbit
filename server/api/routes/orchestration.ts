@@ -876,6 +876,24 @@ Rules:
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'spec_generated', ?)",
       ).run(goal.project_id, `Structured spec generated for goal: "${(goal.title || goal.description).slice(0, 80)}"`);
 
+      // Autopilot: spec 완료 후 decompose 재트리거 (spec generating 중 스킵된 경우)
+      const proj = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(goal.project_id) as { autopilot: string } | undefined;
+      if (proj && (proj.autopilot === "goal" || proj.autopilot === "full")) {
+        const existingTasks = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?").get(goalId) as { count: number };
+        if (existingTasks.count === 0) {
+          console.log(`[orchestration] Spec completed — triggering autopilot decompose for goal ${goalId}`);
+          engine.decomposeGoal(goalId).then((result) => {
+            if (result.taskCount > 0) {
+              db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(goalId);
+              ensureQueueRunning(goal.project_id);
+              broadcast("project:updated", { projectId: goal.project_id });
+            }
+          }).catch((err) => {
+            console.error(`[orchestration] Autopilot decompose after spec failed for goal ${goalId}`, err);
+          });
+        }
+      }
+
       return {
         ...saved,
         prd_summary: JSON.parse(saved.prd_summary),
