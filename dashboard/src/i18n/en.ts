@@ -224,6 +224,7 @@ const en = {
   promptLocalPathHint: "e.g., ~/projects/my-app",
   selectDirectory: "Select Project Directory",
   selectThisFolder: "Select This Folder",
+  browse: "Browse",
   noSubdirectories: "No subdirectories",
   promptGitHubUrl: "GitHub URL",
   promptGitHubUrlHint: "e.g., user/my-app or full URL",

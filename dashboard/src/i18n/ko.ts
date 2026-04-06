@@ -224,6 +224,7 @@ const ko = {
   promptLocalPathHint: "예: ~/projects/my-app",
   selectDirectory: "프로젝트 디렉토리 선택",
   selectThisFolder: "이 폴더 선택",
+  browse: "찾아보기",
   noSubdirectories: "하위 디렉토리 없음",
   promptGitHubUrl: "GitHub URL",
   promptGitHubUrlHint: "예: user/my-app 또는 전체 URL",

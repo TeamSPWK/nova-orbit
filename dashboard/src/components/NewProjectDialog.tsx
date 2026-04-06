@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DirectoryPicker } from "./DirectoryPicker";
 
 interface NewProjectDialogProps {
   onSubmit: (name: string, mission: string, workdir: string, autoAgents: boolean) => void;
@@ -12,6 +13,7 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
   const [mission, setMission] = useState("");
   const [workdir, setWorkdir] = useState("");
   const [autoAgents, setAutoAgents] = useState(true);
+  const [showBrowser, setShowBrowser] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -21,6 +23,18 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
   const handleSubmit = () => {
     if (name.trim() && workdir.trim()) onSubmit(name.trim(), mission.trim(), workdir.trim(), autoAgents);
   };
+
+  if (showBrowser) {
+    return (
+      <DirectoryPicker
+        onSubmit={(path) => {
+          setWorkdir(path);
+          setShowBrowser(false);
+        }}
+        onCancel={() => setShowBrowser(false)}
+      />
+    );
+  }
 
   return (
     <div
@@ -53,14 +67,25 @@ export function NewProjectDialog({ onSubmit, onCancel }: NewProjectDialogProps) 
             <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
               {t("promptWorkdir")} *
             </label>
-            <input
-              type="text"
-              value={workdir}
-              onChange={(e) => setWorkdir(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
-              placeholder={t("promptWorkdirHint")}
-              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
-            />
+            <div className="flex gap-2">
+              <div
+                onClick={() => setShowBrowser(true)}
+                className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 font-mono cursor-pointer hover:border-blue-400 transition-colors truncate"
+              >
+                {workdir || (
+                  <span className="text-gray-400 dark:text-gray-500">
+                    {t("promptWorkdirHint")}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBrowser(true)}
+                className="px-3 py-2 text-xs font-medium border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors shrink-0"
+              >
+                {t("browse")}
+              </button>
+            </div>
             <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
               {t("promptWorkdirDesc")}
             </p>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getApiKey } from "../lib/api";
 
 interface DirectoryPickerProps {
   onSubmit: (path: string) => void;
@@ -23,7 +24,10 @@ export function DirectoryPicker({ onSubmit, onCancel }: DirectoryPickerProps) {
     setError(null);
     try {
       const params = path ? `?path=${encodeURIComponent(path)}` : "";
-      const res = await fetch(`/api/fs/browse${params}`);
+      const key = getApiKey();
+      const res = await fetch(`/api/fs/browse${params}`, {
+        headers: key ? { Authorization: `Bearer ${key}` } : {},
+      });
       if (!res.ok) {
         const err = await res.json();
         setError(err.error);

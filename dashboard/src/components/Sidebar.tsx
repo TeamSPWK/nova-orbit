@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
-import { api } from "../lib/api";
+import { api, getApiKey } from "../lib/api";
 import { NewProjectDialog } from "./NewProjectDialog";
 import { InputDialog } from "./InputDialog";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -50,9 +50,13 @@ export function Sidebar() {
   const handleImportProject = async (path: string) => {
     setShowDialog(null);
     try {
+      const key = getApiKey();
       const res = await fetch("/api/projects/import", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { Authorization: `Bearer ${key}` } : {}),
+        },
         body: JSON.stringify({ path, name: path.split("/").pop() }),
       });
 
@@ -79,9 +83,13 @@ export function Sidebar() {
   const handleConnectGitHub = async (url: string) => {
     setShowDialog(null);
     try {
+      const key = getApiKey();
       const res = await fetch("/api/projects/github", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { Authorization: `Bearer ${key}` } : {}),
+        },
         body: JSON.stringify({ url }),
       });
 
