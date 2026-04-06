@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
+import type { NotificationType } from "../stores/useNotifications";
 import { TaskTimeline } from "./TaskTimeline";
 import { OrgChart } from "./OrgChart";
 import { AgentDetail } from "./AgentDetail";
@@ -20,6 +21,104 @@ import GoalSpecPanel from "./GoalSpecPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
+
+// ─── AddGoalDialog ───────────────────────────────────
+function AddGoalDialog({
+  onCreateDirect,
+  onCreateWithSpec,
+  onCancel,
+}: {
+  onCreateDirect: (description: string) => void;
+  onCreateWithSpec: (description: string) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSubmit = (mode: "direct" | "spec") => {
+    if (!value.trim() || submitting) return;
+    setSubmitting(true);
+    if (mode === "spec") {
+      onCreateWithSpec(value.trim());
+    } else {
+      onCreateDirect(value.trim());
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/20 dark:bg-black/50 flex items-center justify-center z-50"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[480px] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
+            {t("addGoalTitle")}
+          </h3>
+          <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && value.trim()) handleSubmit("direct");
+              if (e.key === "Escape") onCancel();
+            }}
+            placeholder={t("promptGoalDescHint")}
+            disabled={submitting}
+            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+          />
+        </div>
+        <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-2">
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleSubmit("direct")}
+              disabled={!value.trim() || submitting}
+              className="flex-1 text-xs px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors text-left"
+            >
+              <div className="font-semibold">{t("addGoalCreateDirect")}</div>
+              <div className="mt-0.5 opacity-60">{t("addGoalCreateDirectDesc")}</div>
+            </button>
+            <button
+              onClick={() => handleSubmit("spec")}
+              disabled={!value.trim() || submitting}
+              className="flex-1 text-xs px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors text-left"
+            >
+              {submitting ? (
+                <div className="flex items-center gap-2">
+                  <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span>{t("loading")}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="font-semibold">{t("addGoalWithSpec")}</div>
+                  <div className="mt-0.5 opacity-60">{t("addGoalWithSpecDesc")}</div>
+                </>
+              )}
+            </button>
+          </div>
+          <button
+            onClick={onCancel}
+            disabled={submitting}
+            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
+          >
+            {t("cancel")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function ProjectHome() {
   const { t } = useTranslation();
@@ -60,11 +159,14 @@ export function ProjectHome() {
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: NotificationType } | null>(null);
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
   const [reDecomposeGoalId, setReDecomposeGoalId] = useState<string | null>(null);
   const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
   const [queueToggling, setQueueToggling] = useState(false);
+
+  // Spec generation tracking (goal IDs currently generating)
+  const [generatingSpecGoalIds, setGeneratingSpecGoalIds] = useState<Set<string>>(new Set());
 
   // Goals 접기 상태
   const [showCompletedGoals, setShowCompletedGoals] = useState(false);
@@ -86,6 +188,12 @@ export function ProjectHome() {
   const [multiPromptResults, setMultiPromptResults] = useState<{ agentId: string; agentName: string; result: string }[]>([]);
 
   const project = projects.find((p) => p.id === currentProjectId);
+
+  const specPollRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+  const showToast = useCallback((message: string, type: NotificationType = "info") => {
+    setToast({ message, type });
+  }, []);
 
   const loadData = useCallback(() => {
     if (!currentProjectId) return;
@@ -176,7 +284,7 @@ export function ProjectHome() {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ message?: string }>).detail;
-      setToast(detail?.message ?? t("systemErrorGeneric"));
+      showToast(detail?.message ?? t("systemErrorGeneric"), "error");
     };
     window.addEventListener("nova:system-error", handler);
     return () => window.removeEventListener("nova:system-error", handler);
@@ -247,6 +355,14 @@ export function ProjectHome() {
     };
   }, [multiAgentMode]);
 
+  // Spec polling — cleanup on unmount
+  useEffect(() => {
+    return () => {
+      specPollRefs.current.forEach((timer) => clearInterval(timer));
+      specPollRefs.current.clear();
+    };
+  }, []);
+
   // useMemo MUST be called before any early returns (Rules of Hooks)
   const agentMap = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
   const activeTasks = useMemo(() => tasks.filter((t) => t.status === "in_progress" || t.status === "in_review"), [tasks]);
@@ -302,11 +418,67 @@ export function ProjectHome() {
 
   const handleAddGoal = () => setShowDialog("addGoal");
 
-  const handleAddGoalSubmit = async (description: string) => {
+  const startSpecPolling = (goalId: string) => {
+    // Prevent duplicate polling
+    if (specPollRefs.current.has(goalId)) return;
+    setGeneratingSpecGoalIds((prev) => new Set(prev).add(goalId));
+    const timer = setInterval(async () => {
+      try {
+        const data = await api.goals.getSpec(goalId);
+        const status = data?.prd_summary?._status;
+        if (status !== "generating") {
+          clearInterval(timer);
+          specPollRefs.current.delete(goalId);
+          setGeneratingSpecGoalIds((prev) => {
+            const next = new Set(prev);
+            next.delete(goalId);
+            return next;
+          });
+          if (status === "failed") {
+            showToast(t("specGenerateFailed"), "error");
+          } else {
+            showToast(t("specGenerateComplete"), "success");
+          }
+        }
+      } catch {
+        clearInterval(timer);
+        specPollRefs.current.delete(goalId);
+        setGeneratingSpecGoalIds((prev) => {
+          const next = new Set(prev);
+          next.delete(goalId);
+          return next;
+        });
+        showToast(t("specGenerateFailed"), "error");
+      }
+    }, 3000);
+    specPollRefs.current.set(goalId, timer);
+  };
+
+  const handleAddGoalDirect = async (description: string) => {
     setShowDialog(null);
     if (!currentProjectId) return;
-    const goal = await api.goals.create({ project_id: currentProjectId, description });
-    setGoals([...goals, goal]);
+    try {
+      const goal = await api.goals.create({ project_id: currentProjectId, description });
+      setGoals([...goals, goal]);
+      showToast(t("addGoalSuccess"), "success");
+    } catch (err: any) {
+      showToast(err.message ?? t("decomposeFailed"), "error");
+    }
+  };
+
+  const handleAddGoalWithSpec = async (description: string) => {
+    setShowDialog(null);
+    if (!currentProjectId) return;
+    try {
+      const goal = await api.goals.create({ project_id: currentProjectId, description });
+      setGoals([...goals, goal]);
+      showToast(t("addGoalSuccess"), "success");
+      // Start spec generation
+      await api.goals.generateSpec(goal.id);
+      startSpecPolling(goal.id);
+    } catch (err: any) {
+      showToast(err.message ?? t("specGenerateFailed"), "error");
+    }
   };
 
   const handleDecomposeGoal = async (goalId: string) => {
@@ -324,9 +496,9 @@ export function ProjectHome() {
     try {
       await api.orchestration.decomposeGoal(goalId);
       loadData();
-      setToast(isReDecompose ? t("reDecomposeSuccess") : t("decomposeSuccess"));
+      showToast(isReDecompose ? t("reDecomposeSuccess") : t("decomposeSuccess"), "success");
     } catch {
-      setToast(t("decomposeFailed"));
+      showToast(t("decomposeFailed"), "error");
     } finally {
       setDecomposingGoalId(null);
     }
@@ -380,7 +552,7 @@ export function ProjectHome() {
       updateProject(updated);
       setEditingHeaderMission(false);
     } catch {
-      setToast(t("errorSaveMissionFailed"));
+      showToast(t("errorSaveMissionFailed"), "error");
     } finally {
       setSavingMission(false);
     }
@@ -405,7 +577,7 @@ export function ProjectHome() {
       updateProject(updated);
       setAutopilotMode(mode);
     } catch (err: any) {
-      setToast(err.message ?? "Failed to change autopilot mode");
+      showToast(err.message ?? "Failed to change autopilot mode", "error");
     } finally {
       setAutopilotChanging(false);
     }
@@ -418,7 +590,7 @@ export function ProjectHome() {
       setQueuePaused(false);
       setQueuePausedInfo(null);
     } catch (err: any) {
-      setToast(err.message ?? "Failed to resume queue");
+      showToast(err.message ?? "Failed to resume queue", "error");
     }
   };
 
@@ -449,7 +621,7 @@ export function ProjectHome() {
       const result = await api.projects.startDevServer(currentProjectId);
       setDevServerStatus({ running: true, port: result.port, url: result.url });
     } catch (err: any) {
-      setToast(err.message ?? "Failed to start dev server");
+      showToast(err.message ?? "Failed to start dev server", "error");
     } finally {
       setDevServerStarting(false);
     }
@@ -461,7 +633,7 @@ export function ProjectHome() {
       await api.projects.stopDevServer(currentProjectId);
       setDevServerStatus({ running: false, port: null, url: null });
     } catch (err: any) {
-      setToast(err.message ?? "Failed to stop dev server");
+      showToast(err.message ?? "Failed to stop dev server", "error");
     }
   };
 
@@ -507,10 +679,9 @@ export function ProjectHome() {
   return (
     <div className="flex-1 overflow-y-auto">
       {showDialog === "addGoal" && (
-        <InputDialog
-          title={t("promptGoalDesc")}
-          placeholder={t("promptGoalDescHint")}
-          onSubmit={handleAddGoalSubmit}
+        <AddGoalDialog
+          onCreateDirect={handleAddGoalDirect}
+          onCreateWithSpec={handleAddGoalWithSpec}
           onCancel={() => setShowDialog(null)}
         />
       )}
@@ -551,7 +722,7 @@ export function ProjectHome() {
           />
         );
       })()}
-      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
       {specGoalId && (
         <GoalSpecPanel goalId={specGoalId} onClose={() => setSpecGoalId(null)} />
       )}
@@ -879,10 +1050,18 @@ export function ProjectHome() {
                     const TASK_PREVIEW = 3;
                     const visibleActiveTasks = activeTasks.slice(0, TASK_PREVIEW);
                     const hiddenTaskCount = activeTasks.length - visibleActiveTasks.length;
+                    const isDecomposing = decomposingGoalId === goal.id;
+                    const isGeneratingSpec = generatingSpecGoalIds.has(goal.id);
                     return (
                       <div
                         key={goal.id}
-                        className="mb-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] overflow-hidden"
+                        className={`mb-3 border rounded-lg overflow-hidden transition-all ${
+                          isDecomposing
+                            ? "border-purple-300 dark:border-purple-600 bg-purple-50/50 dark:bg-purple-900/10 ring-1 ring-purple-200 dark:ring-purple-800 animate-pulse"
+                            : isGeneratingSpec
+                              ? "border-indigo-300 dark:border-indigo-600 bg-indigo-50/30 dark:bg-indigo-900/10 ring-1 ring-indigo-200 dark:ring-indigo-800"
+                              : "border-gray-200 dark:border-gray-700 bg-white dark:bg-[#25253d]"
+                        }`}
                       >
                         <div className="flex items-center justify-between gap-3 px-3 py-2">
                           <span className={`text-sm font-medium min-w-0 ${isComplete ? "text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-100"}`}>
@@ -901,12 +1080,22 @@ export function ProjectHome() {
                                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                               </svg>
                             </button>
-                            <button
-                              onClick={() => setSpecGoalId(goal.id)}
-                              className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors whitespace-nowrap"
-                            >
-                              {t("specView")}
-                            </button>
+                            {isGeneratingSpec ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-500 dark:text-indigo-400 whitespace-nowrap flex items-center gap-1">
+                                <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                </svg>
+                                {t("specGeneratingInCard")}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setSpecGoalId(goal.id)}
+                                className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors whitespace-nowrap"
+                              >
+                                {t("specView")}
+                              </button>
+                            )}
                             {(() => {
                               const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
                               const hasRunning = goalTasks.some((tk) => tk.status === "in_progress" || tk.status === "in_review");
@@ -983,8 +1172,12 @@ export function ProjectHome() {
                             </button>
                           </div>
                         </div>
-                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3">
-                          <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3 overflow-hidden">
+                          {isDecomposing ? (
+                            <div className="h-1 rounded-full bg-gradient-to-r from-purple-400 via-purple-300 to-purple-400 animate-shimmer" style={{ width: "100%", backgroundSize: "200% 100%" }} />
+                          ) : (
+                            <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                          )}
                         </div>
                         {/* Inline tasks for this goal — 최대 3개 */}
                         {visibleActiveTasks.length > 0 && (
