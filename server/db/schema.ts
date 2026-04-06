@@ -63,6 +63,8 @@ export function migrate(db: Database.Database): void {
       assignee_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
       parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
       status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'pending_approval', 'in_progress', 'in_review', 'done', 'blocked')),
+      priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical', 'high', 'medium', 'low')),
+      sort_order INTEGER NOT NULL DEFAULT 0,
       verification_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -229,6 +231,14 @@ export function migrate(db: Database.Database): void {
   // result_summary on tasks (Sprint 6: context chain, added here early)
   if (!taskColumns.some((c) => c.name === "result_summary")) {
     db.exec("ALTER TABLE tasks ADD COLUMN result_summary TEXT");
+  }
+
+  // priority + sort_order on tasks (task execution ordering)
+  if (!taskColumns.some((c) => c.name === "priority")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'");
+  }
+  if (!taskColumns.some((c) => c.name === "sort_order")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
   }
 
   // retry_count + reassign_count on tasks (auto-retry blocked tasks)

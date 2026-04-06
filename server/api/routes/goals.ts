@@ -265,6 +265,19 @@ export function createGoalRoutes(ctx: AppContext): Router {
       db.prepare(
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)",
       ).run(projectId, `Autopilot failed: ${err.message?.slice(0, 200)}`);
+
+      // Fallback: if tasks were partially created before the error, auto-approve them
+      const pending = db.prepare(
+        "UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'"
+      ).run(goalId);
+      if (pending.changes > 0) {
+        log.info(`Autopilot fallback: auto-approved ${pending.changes} partially created tasks for goal ${goalId}`);
+        broadcast("project:updated", { projectId });
+
+        if (ctx.scheduler && !ctx.scheduler.isRunning(projectId)) {
+          ctx.scheduler.startQueue(projectId);
+        }
+      }
     }
   }
 

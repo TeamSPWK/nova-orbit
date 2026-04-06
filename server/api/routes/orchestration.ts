@@ -112,15 +112,45 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
     if (!goal) return res.status(404).json({ error: "Goal not found" });
 
-    // Prevent duplicate decomposition
+    // Allow re-decompose unless tasks are actively running (in_progress / in_review)
     const existingTasks = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?").get(goalId) as any;
     if (existingTasks.count > 0) {
-      return res.status(409).json({ error: "Goal already has tasks. Delete existing tasks first to re-decompose." });
+      const runningTasks = db.prepare(
+        "SELECT COUNT(*) as count FROM tasks WHERE goal_id = ? AND status IN ('in_progress', 'in_review')"
+      ).get(goalId) as any;
+      if (runningTasks.count > 0) {
+        return res.status(409).json({ error: "Goal has tasks currently running. Stop them first to re-decompose." });
+      }
+      // Kill sessions for assigned agents before deleting
+      const assigned = db.prepare(
+        "SELECT assignee_id FROM tasks WHERE goal_id = ? AND assignee_id IS NOT NULL"
+      ).all(goalId) as { assignee_id: string }[];
+      for (const t of assigned) {
+        ctx.sessionManager?.killSession(t.assignee_id);
+      }
+      db.prepare("DELETE FROM tasks WHERE goal_id = ?").run(goalId);
+      broadcast("project:updated", { projectId: goal.project_id });
     }
 
     try {
       await engine.decomposeGoal(goalId);
       broadcast("project:updated", { projectId: goal.project_id });
+
+      // Auto-approve tasks if project is in autopilot mode
+      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(goal.project_id) as { autopilot: string } | undefined;
+      if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+        const approved = db.prepare(
+          "UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'"
+        ).run(goalId);
+        if (approved.changes > 0) {
+          broadcast("project:updated", { projectId: goal.project_id });
+
+          // Auto-start queue if not already running
+          if (ctx.scheduler && !ctx.scheduler.isRunning(goal.project_id)) {
+            ctx.scheduler.startQueue(goal.project_id);
+          }
+        }
+      }
 
       const tasks = db.prepare("SELECT * FROM tasks WHERE goal_id = ?").all(goalId);
       res.json({ status: "completed", goalId, taskCount: tasks.length });

@@ -17,6 +17,7 @@ import { WelcomeGuide } from "./WelcomeGuide";
 import { ProjectStats } from "./ProjectStats";
 import { AutopilotModal } from "./AutopilotModal";
 import GoalSpecPanel from "./GoalSpecPanel";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
 
@@ -61,6 +62,8 @@ export function ProjectHome() {
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
+  const [reDecomposeGoalId, setReDecomposeGoalId] = useState<string | null>(null);
+  const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
   const [queueToggling, setQueueToggling] = useState(false);
 
   // Goals 접기 상태
@@ -250,16 +253,44 @@ export function ProjectHome() {
   const hasActiveTasks = activeTasks.length > 0;
   const pendingApprovalCount = useMemo(() => tasks.filter((t) => t.status === "pending_approval").length, [tasks]);
 
-  if (!project) {
-    return <WelcomeGuide />;
-  }
-
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-400">
-        {t("loading")}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-6xl mx-auto py-8 px-6 animate-pulse">
+          {/* Header skeleton */}
+          <div className="mb-6">
+            <div className="h-7 w-48 bg-gray-200 dark:bg-gray-700 rounded mb-2" />
+            <div className="h-4 w-80 bg-gray-100 dark:bg-gray-800 rounded mb-3" />
+            <div className="flex gap-2">
+              <div className="h-5 w-16 bg-gray-100 dark:bg-gray-800 rounded" />
+              <div className="h-5 w-20 bg-gray-100 dark:bg-gray-800 rounded" />
+            </div>
+          </div>
+          {/* Tabs skeleton */}
+          <div className="flex gap-4 mb-6 border-b border-gray-100 dark:border-gray-800 pb-2">
+            {[56, 64, 48, 72, 48].map((w, i) => (
+              <div key={i} className="h-4 rounded bg-gray-100 dark:bg-gray-800" style={{ width: w }} />
+            ))}
+          </div>
+          {/* Content skeleton */}
+          <div className="grid grid-cols-3 gap-6">
+            <div className="col-span-2 space-y-4">
+              <div className="h-24 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+              <div className="h-32 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+              <div className="h-20 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+            </div>
+            <div className="space-y-4">
+              <div className="h-28 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+              <div className="h-36 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+            </div>
+          </div>
+        </div>
       </div>
     );
+  }
+
+  if (!project) {
+    return <WelcomeGuide />;
   }
 
   const handleAddAgent = () => setShowAddAgent(true);
@@ -279,11 +310,21 @@ export function ProjectHome() {
   };
 
   const handleDecomposeGoal = async (goalId: string) => {
+    // If tasks already exist (re-decompose), show confirm modal
+    const existingTasks = tasks.filter((tk) => tk.goal_id === goalId);
+    if (existingTasks.length > 0) {
+      setReDecomposeGoalId(goalId);
+      return;
+    }
+    await executeDecompose(goalId, false);
+  };
+
+  const executeDecompose = async (goalId: string, isReDecompose: boolean) => {
     setDecomposingGoalId(goalId);
     try {
       await api.orchestration.decomposeGoal(goalId);
       loadData();
-      setToast(t("decomposeSuccess"));
+      setToast(isReDecompose ? t("reDecomposeSuccess") : t("decomposeSuccess"));
     } catch {
       setToast(t("decomposeFailed"));
     } finally {
@@ -296,8 +337,11 @@ export function ProjectHome() {
     setShowDialog("addTask");
   };
 
-  const handleDeleteGoal = async (goalId: string) => {
-    if (!window.confirm(t("deleteGoalConfirm"))) return;
+  const handleDeleteGoal = (goalId: string) => {
+    setDeleteGoalId(goalId);
+  };
+
+  const executeDeleteGoal = async (goalId: string) => {
     await api.goals.delete(goalId);
     loadData();
   };
@@ -478,6 +522,35 @@ export function ProjectHome() {
           onCancel={() => { setShowDialog(null); setAddTaskGoalId(null); }}
         />
       )}
+      {deleteGoalId && (
+        <ConfirmDialog
+          message={t("deleteGoalConfirm")}
+          onConfirm={() => {
+            const goalId = deleteGoalId;
+            setDeleteGoalId(null);
+            executeDeleteGoal(goalId);
+          }}
+          onCancel={() => setDeleteGoalId(null)}
+        />
+      )}
+      {reDecomposeGoalId && (() => {
+        const goalTasks = tasks.filter((tk) => tk.goal_id === reDecomposeGoalId);
+        const doneCount = goalTasks.filter((tk) => tk.status === "done").length;
+        const msg = doneCount > 0
+          ? t("reDecomposeConfirmWithDone").replace("{count}", String(goalTasks.length)).replace("{done}", String(doneCount))
+          : t("reDecomposeConfirm").replace("{count}", String(goalTasks.length));
+        return (
+          <ConfirmDialog
+            message={msg}
+            onConfirm={() => {
+              const goalId = reDecomposeGoalId;
+              setReDecomposeGoalId(null);
+              executeDecompose(goalId, true);
+            }}
+            onCancel={() => setReDecomposeGoalId(null)}
+          />
+        );
+      })()}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
       {specGoalId && (
         <GoalSpecPanel goalId={specGoalId} onClose={() => setSpecGoalId(null)} />
@@ -834,42 +907,73 @@ export function ProjectHome() {
                             >
                               {t("specView")}
                             </button>
-                            {tasks.some((tk) => tk.goal_id === goal.id) ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                                {t("decomposed")}
-                              </span>
-                            ) : autopilotMode !== "off" ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-400 dark:text-blue-500 whitespace-nowrap flex items-center gap-1">
-                                <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                                </svg>
-                                {t("autoDecompose")}
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleDecomposeGoal(goal.id)}
-                                disabled={decomposingGoalId !== null}
-                                className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
-                                  decomposingGoalId === goal.id
-                                    ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
-                                    : decomposingGoalId !== null
-                                      ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
-                                      : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
-                                }`}
-                              >
-                                {decomposingGoalId === goal.id ? (
-                                  <>
-                                    <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
-                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                                    </svg>
-                                    {t("decomposing")}
-                                  </>
-                                ) : (
-                                  t("decompose")
-                                )}
-                              </button>
+                            {(() => {
+                              const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                              const hasRunning = goalTasks.some((tk) => tk.status === "in_progress" || tk.status === "in_review");
+                              if (goalTasks.length > 0 && !hasRunning) return (
+                                <button
+                                  onClick={() => handleDecomposeGoal(goal.id)}
+                                  disabled={decomposingGoalId !== null}
+                                  className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                                    decomposingGoalId === goal.id
+                                      ? "bg-orange-200 dark:bg-orange-800/60 text-orange-500 dark:text-orange-300 cursor-wait"
+                                      : "bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
+                                  }`}
+                                >
+                                  {decomposingGoalId === goal.id ? (
+                                    <>
+                                      <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                      </svg>
+                                      {t("decomposing")}
+                                    </>
+                                  ) : (
+                                    t("reDecompose")
+                                  )}
+                                </button>
+                              );
+                              if (goalTasks.length > 0 && hasRunning) return (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                                  {t("decomposed")}
+                                </span>
+                              );
+                              return null;
+                            })()}
+                            {!tasks.some((tk) => tk.goal_id === goal.id) && (
+                              autopilotMode !== "off" ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-400 dark:text-blue-500 whitespace-nowrap flex items-center gap-1">
+                                  <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                  </svg>
+                                  {t("autoDecompose")}
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleDecomposeGoal(goal.id)}
+                                  disabled={decomposingGoalId !== null}
+                                  className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                                    decomposingGoalId === goal.id
+                                      ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
+                                      : decomposingGoalId !== null
+                                        ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed"
+                                        : "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50"
+                                  }`}
+                                >
+                                  {decomposingGoalId === goal.id ? (
+                                    <>
+                                      <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                      </svg>
+                                      {t("decomposing")}
+                                    </>
+                                  ) : (
+                                    t("decompose")
+                                  )}
+                                </button>
+                              )
                             )}
                             <button
                               onClick={() => handleAddTask(goal.id)}

@@ -536,10 +536,12 @@ Available team members: ${roleList || "coder"}
 
 Rules:
 - Each task should be completable by a single agent
-- Tasks should be ordered by dependency
 - Include clear acceptance criteria in each task description
 - Keep tasks small and focused (1-4 hours each)
-- Use the "role" field to assign tasks to available team members${goalSpec ? "\n- Reference the structured spec above to ensure complete coverage of all features and acceptance criteria" : ""}
+- Use the "role" field to assign tasks to available team members
+- Set "priority": "critical" | "high" | "medium" | "low" based on importance and dependency
+- Set "order": sequential number (1, 2, 3...) reflecting execution order — tasks with dependencies on others must have a higher number
+- Verification/review/QA tasks should always have the highest order number (run last)${goalSpec ? "\n- Reference the structured spec above to ensure complete coverage of all features and acceptance criteria" : ""}
 
 Respond in this EXACT JSON format:
 \`\`\`json
@@ -548,7 +550,9 @@ Respond in this EXACT JSON format:
     {
       "title": "Task title",
       "description": "Detailed description with acceptance criteria",
-      "role": "${availableAgents[0]?.role ?? "coder"}"
+      "role": "${availableAgents[0]?.role ?? "coder"}",
+      "priority": "high",
+      "order": 1
     }
   ]
 }
@@ -592,17 +596,22 @@ Respond in this EXACT JSON format:
 
         let created = 0;
 
-        for (const t of safeTasks) {
+        const VALID_PRIORITIES = new Set(["critical", "high", "medium", "low"]);
+
+        for (let i = 0; i < safeTasks.length; i++) {
+          const t = safeTasks[i];
           if (!t.title || typeof t.title !== "string") continue;
           const title = t.title.slice(0, MAX_TITLE_LEN);
           const description = typeof t.description === "string" ? t.description.slice(0, MAX_DESC_LEN) : "";
           const agent = findAgent(t.role ?? "coder");
+          const priority = VALID_PRIORITIES.has(t.priority) ? t.priority : "medium";
+          const sortOrder = typeof t.order === "number" ? t.order : i + 1;
           // Sprint 5: tasks created from decomposition start as pending_approval
           // so the user can review the plan before execution begins
           db.prepare(`
-            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status)
-            VALUES (?, ?, ?, ?, ?, 'pending_approval')
-          `).run(goal.id, goal.project_id, title, description, agent?.id ?? null);
+            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status, priority, sort_order)
+            VALUES (?, ?, ?, ?, ?, 'pending_approval', ?, ?)
+          `).run(goal.id, goal.project_id, title, description, agent?.id ?? null, priority, sortOrder);
           created++;
         }
 

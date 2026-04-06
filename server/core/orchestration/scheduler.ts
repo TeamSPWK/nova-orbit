@@ -278,10 +278,20 @@ export function createScheduler(
         AND t.assignee_id IS NOT NULL
       ORDER BY
         CASE WHEN t.parent_task_id IS NOT NULL THEN 0 ELSE 1 END,
+        t.sort_order ASC,
+        CASE t.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
         CASE g.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
         t.created_at ASC
       LIMIT 20
     `).all(projectId) as any[];
+
+    // Reviewer/QA tasks should wait until all other tasks in the same goal are done
+    const reviewerRoles = new Set(["qa-reviewer", "reviewer", "qa"]);
+    const reviewerAgentIds = new Set(
+      (db.prepare(
+        "SELECT id FROM agents WHERE project_id = ? AND role IN ('qa-reviewer', 'reviewer', 'qa')"
+      ).all(projectId) as { id: string }[]).map((a) => a.id)
+    );
 
     // Filter out tasks whose agent is already busy, pick up to maxSlots
     const picked: any[] = [];
@@ -289,6 +299,21 @@ export function createScheduler(
     for (const task of candidates) {
       if (picked.length >= maxSlots) break;
       if (usedAgents.has(task.assignee_id)) continue; // agent already occupied
+
+      // Gate: reviewer tasks wait until all sibling tasks in the same goal are done
+      if (task.goal_id && reviewerAgentIds.has(task.assignee_id)) {
+        const siblings = db.prepare(`
+          SELECT COUNT(*) as remaining FROM tasks
+          WHERE goal_id = ? AND id != ? AND status NOT IN ('done', 'verified')
+            AND assignee_id NOT IN (SELECT id FROM agents WHERE project_id = ? AND role IN ('qa-reviewer', 'reviewer', 'qa'))
+        `).get(task.goal_id, task.id, projectId) as { remaining: number };
+
+        if (siblings.remaining > 0) {
+          log.info(`Deferring reviewer task "${task.title}" — ${siblings.remaining} sibling tasks still incomplete`);
+          continue;
+        }
+      }
+
       picked.push(task);
       usedAgents.add(task.assignee_id);
     }

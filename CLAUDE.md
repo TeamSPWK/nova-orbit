@@ -88,6 +88,13 @@ update: enhancement    | docs: documentation
 refactor: refactoring  | chore: config/misc
 ```
 
+## Dashboard UI Rules
+
+- **`window.confirm` / `window.alert` / `window.prompt` 사용 금지** — 항상 프로젝트 내 컴포넌트 사용
+  - 확인 다이얼로그: `ConfirmDialog` (`dashboard/src/components/ConfirmDialog.tsx`)
+  - 텍스트 입력: `InputDialog` (`dashboard/src/components/InputDialog.tsx`)
+  - 알림: `Toast` (`dashboard/src/components/Toast.tsx`)
+
 ## Credentials
 
 - **Never commit**: `.env`, `.nova-orbit/`, `*.db`
