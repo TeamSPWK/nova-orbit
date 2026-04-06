@@ -540,6 +540,31 @@ ${branchList}
   });
 
   // --- Full autopilot: generate goals from mission, decompose, run queue ---
+  /** Wait for all tasks in a goal to settle (done or permanently blocked) */
+  function waitForGoalCompletion(goalId: string, projectId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const check = () => {
+        // User may have switched mode — bail out
+        const current = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as any;
+        if (current?.autopilot !== "full") { resolve(); return; }
+
+        const goal = db.prepare("SELECT progress FROM goals WHERE id = ?").get(goalId) as any;
+        if (!goal || goal.progress >= 100) { resolve(); return; }
+
+        // All tasks done or permanently blocked → goal is settled
+        const stats = db.prepare(`
+          SELECT COUNT(*) as total,
+                 SUM(CASE WHEN status IN ('done', 'blocked') THEN 1 ELSE 0 END) as settled
+          FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+        `).get(goalId) as { total: number; settled: number };
+        if (stats.total > 0 && stats.settled >= stats.total) { resolve(); return; }
+
+        setTimeout(check, 5000);
+      };
+      check();
+    });
+  }
+
   async function triggerFullAutopilot(projectId: string) {
     if (!ctx.orchestrationEngine || !ctx.scheduler) {
       log.warn("Full autopilot trigger skipped: orchestration not initialized");
@@ -548,59 +573,92 @@ ${branchList}
 
     try {
       log.info(`Full autopilot started for project ${projectId}`);
+      broadcast("autopilot:full-status", {
+        projectId, phase: "generating_goals", currentGoalIndex: 0, totalGoals: 0,
+        message: "CTO가 미션을 분석하고 목표를 생성합니다...",
+      });
 
-      // Step 1: CTO generates goals from mission
+      // Step 1: CTO generates goals from mission (all at once for roadmap context)
       const { goalIds } = await ctx.orchestrationEngine.generateGoalsFromMission(projectId);
 
       if (goalIds.length === 0) {
         log.warn("Full autopilot: no goals generated, downgrading to goal mode");
         db.prepare("UPDATE projects SET autopilot = 'goal', updated_at = datetime('now') WHERE id = ?").run(projectId);
+        broadcast("autopilot:full-status", { projectId, phase: "completed", message: "생성할 목표가 없습니다" });
         broadcast("autopilot:full-completed", { projectId, reason: "no_goals" });
         broadcast("autopilot:mode-changed", { projectId, mode: "goal" });
         return;
       }
 
-      // Step 2: Decompose each goal
-      for (const goalId of goalIds) {
+      // Step 2: Sequential pipeline — decompose → execute → wait → next goal
+      for (let i = 0; i < goalIds.length; i++) {
+        const goalId = goalIds[i];
+
+        // Guard: re-check autopilot mode (user may have switched mid-run)
+        const current = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as any;
+        if (current?.autopilot !== "full") {
+          log.info("Full autopilot: mode changed during execution, stopping");
+          broadcast("autopilot:full-status", { projectId, phase: "completed", message: "사용자가 모드를 변경했습니다" });
+          return;
+        }
+
+        const goal = db.prepare("SELECT title, description FROM goals WHERE id = ?").get(goalId) as any;
+        const goalTitle = (goal?.title || goal?.description || "").slice(0, 50);
+
         try {
-          // Guard: re-check autopilot mode (user may have switched mid-run)
-          const current = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as any;
-          if (current?.autopilot !== "full") {
-            log.info("Full autopilot: mode changed during execution, stopping");
-            return;
+          // 2a: Decompose this goal
+          broadcast("autopilot:full-status", {
+            projectId, phase: "decomposing", currentGoalIndex: i + 1, totalGoals: goalIds.length,
+            goalId, message: `Goal ${i + 1}/${goalIds.length} 분해 중: "${goalTitle}"`,
+          });
+          await ctx.orchestrationEngine.decomposeGoal(goalId);
+
+          // 2b: Auto-approve tasks for this goal
+          const approved = db.prepare(
+            "UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'"
+          ).run(goalId);
+          log.info(`Full autopilot: auto-approved ${approved.changes} tasks for goal ${i + 1}/${goalIds.length}`);
+
+          // 2c: Start queue (if not running)
+          if (ctx.scheduler && !ctx.scheduler.isRunning(projectId)) {
+            ctx.scheduler.startQueue(projectId);
           }
 
-          await ctx.orchestrationEngine.decomposeGoal(goalId);
+          // 2d: Wait for this goal to complete before moving to next
+          broadcast("autopilot:full-status", {
+            projectId, phase: "executing", currentGoalIndex: i + 1, totalGoals: goalIds.length,
+            goalId, message: `Goal ${i + 1}/${goalIds.length} 실행 중: "${goalTitle}"`,
+          });
+          await waitForGoalCompletion(goalId, projectId);
+
+          log.info(`Full autopilot: goal ${i + 1}/${goalIds.length} completed`);
         } catch (err: any) {
-          log.error(`Full autopilot: failed to decompose goal ${goalId}`, err);
-          // Continue with other goals — don't let one failure block all
+          log.error(`Full autopilot: failed on goal ${i + 1}/${goalIds.length}`, err);
+          broadcast("autopilot:full-status", {
+            projectId, phase: "error", currentGoalIndex: i + 1, totalGoals: goalIds.length,
+            goalId, message: `Goal ${i + 1} 실패: ${err.message?.slice(0, 100)}`,
+          });
+          // Continue with next goal — don't let one failure block all
         }
       }
 
-      // Step 2.5: Auto-approve all pending tasks for execution
-      const approved = db.prepare(
-        "UPDATE tasks SET status = 'todo' WHERE project_id = ? AND status = 'pending_approval'"
-      ).run(projectId);
-      log.info(`Full autopilot: auto-approved ${approved.changes} tasks`);
-
-      // Step 3: Start queue
-      if (!ctx.scheduler.isRunning(projectId)) {
-        ctx.scheduler.startQueue(projectId);
-      }
-
-      // Step 4: Downgrade to 'goal' mode after generation complete
-      // (Tasks will continue executing, but no new goals will be auto-generated)
+      // Step 3: Downgrade to 'goal' mode after all goals processed
       db.prepare("UPDATE projects SET autopilot = 'goal', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      broadcast("autopilot:full-status", {
+        projectId, phase: "completed", currentGoalIndex: goalIds.length, totalGoals: goalIds.length,
+        message: `${goalIds.length}개 목표 처리 완료`,
+      });
       broadcast("autopilot:full-completed", { projectId, reason: "goals_generated", goalCount: goalIds.length });
       broadcast("autopilot:mode-changed", { projectId, mode: "goal" });
       broadcast("project:updated", { projectId });
 
-      log.info(`Full autopilot completed: ${goalIds.length} goals generated, downgraded to goal mode`);
+      log.info(`Full autopilot completed: ${goalIds.length} goals processed sequentially, downgraded to goal mode`);
     } catch (err: any) {
       log.error(`Full autopilot failed for project ${projectId}`, err);
 
       // Safety: downgrade to goal mode on failure
       db.prepare("UPDATE projects SET autopilot = 'goal', updated_at = datetime('now') WHERE id = ?").run(projectId);
+      broadcast("autopilot:full-status", { projectId, phase: "error", message: `실패: ${err.message?.slice(0, 100)}` });
       broadcast("autopilot:full-completed", { projectId, reason: "error", error: err.message });
       broadcast("autopilot:mode-changed", { projectId, mode: "goal" });
 

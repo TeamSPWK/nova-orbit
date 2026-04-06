@@ -52,6 +52,7 @@ export function migrate(db: Database.Database): void {
       'references' TEXT NOT NULL DEFAULT '[]',
       priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical', 'high', 'medium', 'low')),
       progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+      sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -331,6 +332,11 @@ export function migrate(db: Database.Database): void {
   // references column on goals (JSON array of file paths or URLs)
   if (!goalColumns.some((c) => c.name === "references")) {
     db.exec("ALTER TABLE goals ADD COLUMN 'references' TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  // sort_order on goals (manual reordering)
+  if (!goalColumns.some((c) => c.name === "sort_order")) {
+    db.exec("ALTER TABLE goals ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
   }
 
   // Goal Specs table (Structured Planning — ManyFast-inspired)

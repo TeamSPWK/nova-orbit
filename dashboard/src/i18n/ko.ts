@@ -413,6 +413,7 @@ const ko = {
   autopilotDescGoal: "목표 추가 시 자동 분할·할당·실행",
   autopilotDescFull: "CTO가 미션 기반으로 목표까지 자동 생성",
   autoDecompose: "태스크 자동 분할 중",
+  autoDecomposeWaiting: "분할 대기",
   autopilotModalTitle: "자동화 설정",
   autopilotModalDesc: "자동화 수준을 선택하세요. 언제든지 변경할 수 있습니다.",
   autopilotMode_off: "수동",

@@ -116,6 +116,9 @@ export function useWebSocket() {
               window.dispatchEvent(new CustomEvent("nova:autopilot-full-completed", { detail: msg.payload }));
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
+            case "autopilot:full-status":
+              window.dispatchEvent(new CustomEvent("nova:autopilot-full-status", { detail: msg.payload }));
+              break;
             case "agent:status":
             case "project:updated":
               // Trigger a refetch — handled by components

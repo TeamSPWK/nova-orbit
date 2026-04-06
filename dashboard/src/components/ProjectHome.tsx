@@ -356,6 +356,11 @@ export function ProjectHome() {
   const [panelPromptSending, setPanelPromptSending] = useState(false);
   const [panelPromptToast, setPanelPromptToast] = useState<string | null>(null);
 
+  // Full autopilot status (from WebSocket)
+  const [fullAutopilotStatus, setFullAutopilotStatus] = useState<{
+    phase: string; currentGoalIndex: number; totalGoals: number; message: string; goalId?: string;
+  } | null>(null);
+
   // Multi-agent prompt state
   const [multiAgentMode, setMultiAgentMode] = useState(false);
   const [multiAgentIds, setMultiAgentIds] = useState<string[]>([]);
@@ -445,15 +450,29 @@ export function ProjectHome() {
         setAutopilotMode(detail.mode);
       }
     };
+    const onFullStatus = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.projectId === currentProjectId) {
+        if (detail.phase === "completed" || detail.phase === "error") {
+          // Clear after short delay so user sees final message
+          setFullAutopilotStatus(detail);
+          setTimeout(() => setFullAutopilotStatus(null), 5000);
+        } else {
+          setFullAutopilotStatus(detail);
+        }
+      }
+    };
     window.addEventListener("nova:queue-paused", onPaused);
     window.addEventListener("nova:queue-resumed", onResumed);
     window.addEventListener("nova:queue-stopped", onStopped);
     window.addEventListener("nova:autopilot-changed", onAutopilotChanged);
+    window.addEventListener("nova:autopilot-full-status", onFullStatus);
     return () => {
       window.removeEventListener("nova:queue-paused", onPaused);
       window.removeEventListener("nova:queue-resumed", onResumed);
       window.removeEventListener("nova:queue-stopped", onStopped);
       window.removeEventListener("nova:autopilot-changed", onAutopilotChanged);
+      window.removeEventListener("nova:autopilot-full-status", onFullStatus);
     };
   }, [currentProjectId]);
 
@@ -1330,13 +1349,34 @@ export function ProjectHome() {
                             })()}
                             {!tasks.some((tk) => tk.goal_id === goal.id) && (
                               autopilotMode !== "off" ? (
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-400 dark:text-blue-500 whitespace-nowrap flex items-center gap-1">
-                                  <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                                  </svg>
-                                  {t("autoDecompose")}
-                                </span>
+                                (() => {
+                                  const isThisGoalActive = fullAutopilotStatus?.goalId === goal.id && !["completed", "error"].includes(fullAutopilotStatus.phase);
+                                  const isAnyActive = fullAutopilotStatus && !["completed", "error"].includes(fullAutopilotStatus.phase);
+                                  if (isThisGoalActive) return (
+                                    <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-500 dark:text-blue-400 whitespace-nowrap flex items-center gap-1">
+                                      <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                      </svg>
+                                      {fullAutopilotStatus?.message?.slice(0, 30) || t("autoDecompose")}
+                                    </span>
+                                  );
+                                  if (isAnyActive) return (
+                                    <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                                      {t("autoDecomposeWaiting")}
+                                    </span>
+                                  );
+                                  // Autopilot on but no active status — show manual trigger
+                                  return (
+                                    <button
+                                      onClick={() => handleDecomposeGoal(goal.id)}
+                                      disabled={decomposingGoalId !== null}
+                                      className="text-[10px] px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50 whitespace-nowrap"
+                                    >
+                                      {t("decompose")}
+                                    </button>
+                                  );
+                                })()
                               ) : (
                                 <button
                                   onClick={() => handleDecomposeGoal(goal.id)}

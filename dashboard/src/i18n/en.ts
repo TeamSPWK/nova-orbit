@@ -413,6 +413,7 @@ const en = {
   autopilotDescGoal: "Auto-split, assign & run when a goal is added",
   autopilotDescFull: "CTO auto-creates goals from your mission",
   autoDecompose: "Auto-splitting tasks",
+  autoDecomposeWaiting: "Waiting",
   autopilotModalTitle: "Automation Settings",
   autopilotModalDesc: "Choose the automation level. You can change this anytime.",
   autopilotMode_off: "Manual",

@@ -654,6 +654,10 @@ Respond in this EXACT JSON format:
 
       const remainingSlots = MAX_AUTO_GOALS - activeGoals.count;
 
+      const existingGoals = db.prepare(
+        "SELECT title, description, priority, progress FROM goals WHERE project_id = ? ORDER BY created_at",
+      ).all(projectId) as { title: string; description: string; priority: string; progress: number }[];
+
       const ctoAgent = db.prepare(
         "SELECT * FROM agents WHERE project_id = ? AND role = 'cto' LIMIT 1",
       ).get(projectId) as AgentRow | undefined;
@@ -668,18 +672,22 @@ Respond in this EXACT JSON format:
       const session = sessionManager.spawnAgent(ctoAgent.id, ctoWorkdir);
 
       try {
+      const existingGoalsSection = existingGoals.length > 0
+        ? `\n**Existing Goals (DO NOT duplicate):**\n${existingGoals.map((g, i) => `${i + 1}. [${g.priority}] ${g.title} — ${g.description.slice(0, 80)}`).join("\n")}\n`
+        : "";
+
       const prompt = `
 # Mission Analysis — Goal Generation
 
 You are the CTO. Analyze this project's mission and create actionable goals.
 
 **Mission:** "${project.mission}"
-
+${existingGoalsSection}
 Rules:
 - Create at most ${remainingSlots} goals
 - Each goal should be a clear milestone toward the mission
 - Order goals by priority/dependency
-- Keep goals achievable (not too broad, not too narrow)
+- Keep goals achievable (not too broad, not too narrow)${existingGoals.length > 0 ? "\n- DO NOT create goals that overlap or duplicate any existing goal listed above" : ""}
 
 Respond in this EXACT JSON format:
 \`\`\`json
@@ -705,12 +713,12 @@ Respond in this EXACT JSON format:
       const VALID_PRIORITIES = ["critical", "high", "medium", "low"];
       const goalIds: string[] = [];
 
-      for (const g of goals) {
+      for (const [index, g] of goals.entries()) {
         if (!g.description || typeof g.description !== "string") continue;
         const priority = VALID_PRIORITIES.includes(g.priority) ? g.priority : "medium";
         const row = db.prepare(
-          "INSERT INTO goals (project_id, title, description, priority) VALUES (?, ?, ?, ?) RETURNING id",
-        ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority) as { id: string };
+          "INSERT INTO goals (project_id, title, description, priority, sort_order) VALUES (?, ?, ?, ?, ?) RETURNING id",
+        ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority, index) as { id: string };
         goalIds.push(row.id);
       }
 
@@ -827,6 +835,7 @@ async function runGitWorkflow(
           }
         } else {
           log.warn(`Merge failed — worktree branch ${worktreeBranch} preserved for manual merge`);
+          result.error = `Auto-merge failed: ${worktreeBranch} → ${targetBranch}. Manual resolution may be needed.`;
           // 머지 실패를 activity log에 기록하여 대시보드에서 확인 가능
           db.prepare(`
             INSERT INTO activities (project_id, agent_id, type, message)
