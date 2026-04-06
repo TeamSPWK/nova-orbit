@@ -21,7 +21,7 @@ export const MAX_CONSECUTIVE_RATE_LIMITS = parseInt(process.env.NOVA_MAX_RATE_LI
 export const DEFAULT_MAX_CONCURRENCY = parseInt(process.env.NOVA_MAX_CONCURRENCY ?? "3", 10);
 
 // --- Agent execution ---
-export const TASK_TIMEOUT_MS = parseInt(process.env.NOVA_TASK_TIMEOUT_MS ?? "300000", 10); // 5 min default
+export const TASK_TIMEOUT_MS = parseInt(process.env.NOVA_TASK_TIMEOUT_MS ?? "600000", 10); // 10 min default
 export const RATE_LIMIT_WAIT_MS = parseInt(process.env.NOVA_RATE_LIMIT_WAIT_MS ?? "60000", 10);
 export const SIGKILL_TIMEOUT_MS = 5000;
 

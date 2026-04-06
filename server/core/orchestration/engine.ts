@@ -563,10 +563,19 @@ Respond in this EXACT JSON format:
       const runResult = await session.send(decomposePrompt);
       const parsed = parseStreamJson(runResult.stdout);
 
-      // Parse tasks from AI response
+      log.info(`Decompose response: exitCode=${runResult.exitCode}, textLen=${parsed.text.length}, first200=${parsed.text.slice(0, 200)}`);
+      if (runResult.exitCode !== 0) {
+        log.error(`Decompose CLI error: stderr=${runResult.stderr.slice(0, 300)}`);
+      }
+
+      // Parse tasks from AI response — try ```json first, then raw JSON
       try {
-        const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
-        if (!jsonMatch) throw new Error("No JSON found in decomposition response");
+        let jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
+        if (!jsonMatch) {
+          // Fallback: try to find raw JSON object with "tasks" array
+          jsonMatch = parsed.text.match(/(\{[\s\S]*"tasks"\s*:\s*\[[\s\S]*\][\s\S]*\})/);
+        }
+        if (!jsonMatch) throw new Error(`No JSON found in decomposition response (textLen=${parsed.text.length}, exitCode=${runResult.exitCode}, first300=${parsed.text.slice(0, 300)})`);
 
         const decomposed = JSON.parse(jsonMatch[1]);
         const tasks = decomposed.tasks ?? [];
