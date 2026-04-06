@@ -502,27 +502,22 @@ Fix ONLY these issues. Do not modify other code.
           const criteria = JSON.parse(goalSpec.acceptance_criteria || "[]");
           const tech = JSON.parse(goalSpec.tech_considerations || "[]");
 
+          // Compact spec: keep features + criteria, skip verbose details to avoid token overflow
+          const featureList = features.slice(0, 8).map((f: any) => `- [${f.priority}] ${f.name}: ${(f.description || "").slice(0, 80)}`).join("\n");
+          const criteriaList = criteria.slice(0, 8).map((c: string) => `- ${c}`).join("\n");
+
           specContext = `
 
-## Structured Spec (use this to create better tasks)
-
-### PRD Summary
-- **Background**: ${prd.background || "N/A"}
-- **Objective**: ${prd.objective || "N/A"}
-- **Scope**: ${prd.scope || "N/A"}
-- **Success Metrics**: ${(prd.success_metrics || prd.successMetrics || []).join("; ")}
+## Spec Summary
+**Objective**: ${(prd.objective || "N/A").slice(0, 200)}
+**Scope**: ${(prd.scope || "N/A").slice(0, 200)}
+**Metrics**: ${(prd.success_metrics || prd.successMetrics || []).slice(0, 4).join("; ")}
 
 ### Features (${features.length})
-${features.map((f: any) => `- [${f.priority}] **${f.name}**: ${f.description}\n  Requirements: ${(f.requirements || []).join("; ")}`).join("\n")}
-
-### User Flow
-${flow.map((s: any) => `${s.step}. ${s.action} → ${s.expected}`).join("\n")}
+${featureList}
 
 ### Acceptance Criteria
-${criteria.map((c: string) => `- ${c}`).join("\n")}
-
-### Tech Considerations
-${tech.map((t: string) => `- ${t}`).join("\n")}
+${criteriaList}
 `;
         } catch { /* ignore parse errors, use basic prompt */ }
       }
@@ -577,7 +572,22 @@ Respond in this EXACT JSON format:
         }
         if (!jsonMatch) throw new Error(`No JSON found in decomposition response (textLen=${parsed.text.length}, exitCode=${runResult.exitCode}, first300=${parsed.text.slice(0, 300)})`);
 
-        const decomposed = JSON.parse(jsonMatch[1]);
+        let decomposed: any;
+        try {
+          decomposed = JSON.parse(jsonMatch[1]);
+        } catch (parseErr: any) {
+          // Truncated JSON recovery: extract complete task objects from partial JSON
+          log.warn(`JSON parse failed (${parseErr.message}), attempting truncated recovery`);
+          const partialTasks: any[] = [];
+          const taskPattern = /\{\s*"title"\s*:\s*"[^"]+"\s*,\s*"description"\s*:\s*"[^"]*"\s*,\s*"role"\s*:\s*"[^"]*"\s*,\s*"priority"\s*:\s*"[^"]*"\s*,\s*"order"\s*:\s*\d+\s*\}/g;
+          let match;
+          while ((match = taskPattern.exec(jsonMatch[1])) !== null) {
+            try { partialTasks.push(JSON.parse(match[0])); } catch { /* skip malformed */ }
+          }
+          if (partialTasks.length === 0) throw parseErr;
+          log.info(`Recovered ${partialTasks.length} tasks from truncated JSON`);
+          decomposed = { tasks: partialTasks };
+        }
         const tasks = decomposed.tasks ?? [];
 
         const safeTasks = tasks.slice(0, MAX_TASKS_PER_GOAL);
