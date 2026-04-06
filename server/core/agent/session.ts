@@ -1,35 +1,9 @@
 import type { Database } from "better-sqlite3";
-import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createClaudeCodeAdapter, type ClaudeCodeSession } from "./adapters/claude-code.js";
 import { createLogger } from "../../utils/logger.js";
 import { resolvePrompt } from "./prompt-resolver.js";
 import { loadMemory } from "./memory.js";
-
-/** Read key project docs (plans, references, reviews) for agent context injection */
-function loadProjectDocs(workdir: string, maxChars = 4000): string {
-  const docDirs = ["docs/plans", "docs/references", "docs/reviews", "docs/designs"];
-  const parts: string[] = [];
-  let totalLen = 0;
-
-  for (const dir of docDirs) {
-    const fullDir = join(workdir, dir);
-    if (!existsSync(fullDir)) continue;
-    try {
-      const files = readdirSync(fullDir).filter((f) => f.endsWith(".md")).slice(0, 3);
-      for (const file of files) {
-        if (totalLen >= maxChars) break;
-        const content = readFileSync(join(fullDir, file), "utf-8");
-        const trimmed = content.slice(0, maxChars - totalLen);
-        parts.push(`### ${dir}/${file}\n${trimmed}`);
-        totalLen += trimmed.length;
-      }
-    } catch { /* skip unreadable dirs */ }
-  }
-
-  return parts.length > 0 ? `\n\n## Project Documents\n${parts.join("\n\n")}` : "";
-}
 
 const log = createLogger("session-manager");
 
@@ -69,20 +43,20 @@ export function createSessionManager(db: Database): SessionManager {
       const resolution = resolvePrompt(agent, projectWorkdir);
       log.info(`Spawned agent ${agent.role} (source: ${resolution.source}${resolution.filePath ? `, file: ${resolution.filePath}` : ""})`);
 
-      // Sprint 6: Session Context Chain — 최근 3개 완료 태스크 결과를 system prompt에 주입
+      // Session Context Chain — 최근 3개 완료 태스크의 제목만 (요약은 --add-dir로 접근 가능)
       const recentTasks = db.prepare(`
-        SELECT title, result_summary FROM tasks
-        WHERE assignee_id = ? AND status = 'done' AND result_summary IS NOT NULL
+        SELECT title FROM tasks
+        WHERE assignee_id = ? AND status = 'done'
         ORDER BY updated_at DESC LIMIT 3
-      `).all(agentId) as { title: string; result_summary: string }[];
+      `).all(agentId) as { title: string }[];
 
       let contextChain = "";
       if (recentTasks.length > 0) {
-        contextChain = "\n\n## Recent Task Context\n" +
-          recentTasks.map((t) => `### ${t.title}\n${t.result_summary}`).join("\n\n");
+        contextChain = "\n\n## Recently Completed Tasks\n" +
+          recentTasks.map((t) => `- ${t.title}`).join("\n");
       }
 
-      // Sprint 6: 프로젝트 컨텍스트 자동 주입 (tech stack + git log)
+      // 프로젝트 컨텍스트: tech stack만 (git log, project docs는 --add-dir로 접근 가능)
       const project = db.prepare("SELECT tech_stack, workdir FROM projects WHERE id = ?")
         .get(agent.project_id) as { tech_stack: string | null; workdir: string } | undefined;
 
@@ -90,28 +64,14 @@ export function createSessionManager(db: Database): SessionManager {
       if (project?.tech_stack) {
         try {
           const stack = JSON.parse(project.tech_stack);
-          projectContext += `\n\n## Project Tech Stack\n- Languages: ${stack.languages?.join(", ") || "unknown"}\n- Frameworks: ${stack.frameworks?.join(", ") || "none"}`;
-          if (stack.buildTool) projectContext += `\n- Build: ${stack.buildTool}`;
-          if (stack.testFramework) projectContext += `\n- Test: ${stack.testFramework}`;
+          projectContext += `\n\n## Tech Stack\n${stack.languages?.join(", ") || "unknown"} / ${stack.frameworks?.join(", ") || "none"}`;
         } catch { /* invalid JSON */ }
       }
 
-      try {
-        const gitResult = spawnSync("git", ["log", "--oneline", "-5"], {
-          cwd: project?.workdir || projectWorkdir,
-          encoding: "utf-8",
-          timeout: 5000,
-        });
-        if (gitResult.status === 0 && gitResult.stdout) {
-          projectContext += `\n\n## Recent Git History\n\`\`\`\n${gitResult.stdout.trim()}\n\`\`\``;
-        }
-      } catch { /* git 없는 프로젝트 */ }
+      // NOTE: Project docs (plans, references) are NOT inlined — accessible via --add-dir
+      // NOTE: Git log is NOT inlined — agent can run git commands if needed
 
-      // Project docs (plans, references, reviews) — 에이전트가 프로젝트 맥락을 이해하도록
-      const workdir = project?.workdir || projectWorkdir;
-      projectContext += loadProjectDocs(workdir);
-
-      // Sprint 6: 에이전트 메모리 로드
+      // 에이전트 메모리 로드 (3KB 제한 — 시스템 프롬프트 비대화 방지)
       const dataDir = process.env.NOVA_ORBIT_DATA_DIR || join(process.cwd(), ".nova-orbit");
       const memory = loadMemory(dataDir, agentId);
 

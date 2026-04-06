@@ -709,8 +709,8 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       const pathJoin = path.join;
       const docParts: string[] = [];
       let docLen = 0;
-      const DOC_LIMIT = 16000;
-      const PER_FILE_LIMIT = 3000; // 한 파일이 전체를 독점하지 않도록
+      const DOC_LIMIT = 6000; // Keep total docs under ~1500 tokens
+      const PER_FILE_LIMIT = 2000; // 한 파일이 전체를 독점하지 않도록
 
       // 1) User-selected references first (highest priority)
       if (goal.references) {

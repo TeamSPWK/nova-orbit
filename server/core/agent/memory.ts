@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const MAX_MEMORY_SIZE = 50 * 1024; // 50KB
+const MAX_MEMORY_SIZE = 3 * 1024; // 3KB — keeps system prompt lean
 
 function sanitizeAgentId(agentId: string): string {
   return agentId.replace(/[^a-zA-Z0-9_-]/g, "");
