@@ -305,7 +305,9 @@ function parseVerificationResult(
     // The evaluator may FAIL a task with high dimension scores if it found a critical
     // issue (e.g., security vulnerability) that doesn't map neatly to any dimension.
     // Overriding FAIL→PASS based on avg score was a Critical bug (Nova gap analysis).
-    let verdict: Verdict = parsed.verdict ?? "fail";
+    const VALID_VERDICTS = new Set(["pass", "conditional", "fail"]);
+    const rawVerdict = String(parsed.verdict ?? "fail").toLowerCase().trim();
+    let verdict: Verdict = VALID_VERDICTS.has(rawVerdict) ? (rawVerdict as Verdict) : "fail";
 
     const issues = (parsed.issues ?? []).map((issue: any, i: number) => ({
       id: `issue-${i}`,
