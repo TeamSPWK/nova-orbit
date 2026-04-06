@@ -39,6 +39,39 @@ function gitExec(cwd: string, args: string[]): { stdout: string; stderr: string 
   return { stdout, stderr };
 }
 
+// ─── Branch detection ──────────────────────────────────
+
+/**
+ * Detect the default branch of a git repository.
+ * Checks remote HEAD first, then falls back to checking local branches.
+ * Returns "main" if detection fails.
+ */
+export function getDefaultBranch(workdir: string): string {
+  // 1. Try remote HEAD (most reliable)
+  try {
+    const { stdout } = gitExec(workdir, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
+    const match = stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
+    if (match) return match[1];
+  } catch { /* no remote or no HEAD */ }
+
+  // 2. Check if "main" or "master" exists locally
+  try {
+    const { stdout } = gitExec(workdir, ["branch", "--list", "main", "master"]);
+    const branches = stdout.split("\n").map(b => b.replace(/^\*?\s*/, "").trim()).filter(Boolean);
+    if (branches.includes("main")) return "main";
+    if (branches.includes("master")) return "master";
+  } catch { /* no branches */ }
+
+  // 3. Fallback — check current branch (for repos where HEAD is on a non-standard default)
+  try {
+    const { stdout } = gitExec(workdir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const branch = stdout.trim();
+    if (branch && !branch.startsWith("agent/")) return branch;
+  } catch { /* empty repo */ }
+
+  return "main";
+}
+
 // ─── Public API ────────────────────────────────────────
 
 /**

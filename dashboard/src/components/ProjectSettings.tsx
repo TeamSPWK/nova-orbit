@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
@@ -25,6 +25,59 @@ export function ProjectSettings({ projectId }: Props) {
   const [gitMode, setGitMode] = useState<string>(project?.github?.gitMode ?? "local_only");
   const [devPort, setDevPort] = useState<string>(project?.dev_port?.toString() ?? "");
   const [devPortSaving, setDevPortSaving] = useState(false);
+
+  // Branch management
+  const [branches, setBranches] = useState<string[]>([]);
+  const [merging, setMerging] = useState(false);
+  const [mergeAgent, setMergeAgent] = useState<string | null>(null);
+  const [deletingBranches, setDeletingBranches] = useState(false);
+  const [confirmDeleteBranches, setConfirmDeleteBranches] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadBranches = useCallback(async () => {
+    try {
+      const data = await api.projects.listBranches(projectId);
+      setBranches(data.branches);
+      // Stop polling when no branches remain
+      if (data.branches.length === 0 && pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+        if (merging) {
+          setMerging(false);
+          setMergeAgent(null);
+          setToast(t("branchMergeAgentDone"));
+        }
+      }
+    } catch { /* ignore */ }
+  }, [projectId, merging, t]);
+
+  useEffect(() => { loadBranches(); }, [loadBranches]);
+
+  // Listen for merge completion via WebSocket custom event
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.type === "project:branch-merge-complete" && detail?.data?.projectId === projectId) {
+        setMerging(false);
+        setMergeAgent(null);
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        loadBranches();
+        const d = detail.data;
+        if (d.error) {
+          setToast(t("branchMergeError"));
+        } else if (d.remaining?.length > 0) {
+          setToast(t("branchMergePartial", { merged: d.merged, remaining: d.remaining.length }));
+        } else {
+          setToast(t("branchMergeAgentDone"));
+        }
+      }
+    };
+    window.addEventListener("nova:refresh", handler);
+    return () => {
+      window.removeEventListener("nova:refresh", handler);
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [projectId, loadBranches, t]);
 
   if (!project) return null;
 
@@ -151,34 +204,145 @@ export function ProjectSettings({ projectId }: Props) {
       {/* Git Workflow Mode — 모든 프로젝트 공통 */}
       <section>
         <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-          Git Workflow
+          {t("settingsGitWorkflow")}
         </h2>
         <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d] space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500 dark:text-gray-400">모드</span>
-            <select
-              value={gitMode}
-              onChange={async (e) => {
-                const mode = e.target.value;
-                setGitMode(mode);
-                await saveGithubField({ gitMode: mode as any });
-              }}
-              className="text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-[#1a1a2e] text-gray-700 dark:text-gray-300"
-            >
-              <option value="local_only">로컬 커밋만 (push 안함)</option>
-              <option value="branch_only">에이전트 브랜치에 커밋</option>
-              <option value="pr">PR 생성 (브랜치 → push → PR)</option>
-              <option value="main_direct">메인에 직접 반영 (commit → push)</option>
-            </select>
+          <div className="grid gap-2">
+            {([
+              { value: "local_only", icon: "💻", label: t("gitModeLocalOnly"), desc: t("gitModeLocalOnlyDesc") },
+              { value: "branch_only", icon: "🔀", label: t("gitModeBranchOnly"), desc: t("gitModeBranchOnlyDesc") },
+              { value: "pr", icon: "📋", label: t("gitModePR"), desc: t("gitModePRDesc") },
+              { value: "main_direct", icon: "🚀", label: t("gitModeMainDirect"), desc: t("gitModeMainDirectDesc") },
+            ] as const).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={async () => {
+                  setGitMode(opt.value);
+                  await saveGithubField({ gitMode: opt.value as any });
+                }}
+                className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
+                  gitMode === opt.value
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                    : "border-gray-100 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-500"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-base">{opt.icon}</span>
+                  <span className={`text-sm font-medium ${
+                    gitMode === opt.value
+                      ? "text-blue-700 dark:text-blue-300"
+                      : "text-gray-700 dark:text-gray-300"
+                  }`}>
+                    {opt.label}
+                  </span>
+                  {opt.value === "local_only" && (
+                    <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full font-medium">
+                      {t("gitModeRecommended")}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 ml-6">
+                  {opt.desc}
+                </p>
+              </button>
+            ))}
           </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500">
-            {gitMode === "local_only" && "에이전트가 작성한 코드를 로컬 브랜치에만 커밋합니다. push하지 않습니다."}
-            {gitMode === "branch_only" && "에이전트별 브랜치(agent/...)에 커밋합니다. 나중에 수동으로 머지하세요."}
-            {gitMode === "pr" && "에이전트 브랜치를 push하고 PR을 자동 생성합니다. GitHub 연결이 필요합니다."}
-            {gitMode === "main_direct" && "메인 브랜치에 직접 커밋하고 push합니다. Solo 개발자에게 적합합니다."}
-          </p>
+          <div className="flex items-start gap-2 p-2 bg-gray-50 dark:bg-[#1a1a2e] rounded-lg">
+            <span className="text-xs text-gray-400">ℹ️</span>
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              {t("gitModeAutoMergeNote")}
+            </p>
+          </div>
         </div>
       </section>
+
+      {/* Unmerged agent branches */}
+      {branches.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-amber-500 dark:text-amber-400 uppercase tracking-wider mb-3">
+            {t("branchSectionTitle", { count: branches.length })}
+          </h2>
+          <div className="p-4 border border-amber-200 dark:border-amber-800/50 rounded-lg bg-white dark:bg-[#25253d] space-y-3">
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {branches.map((b) => (
+                <div key={b} className="flex items-center gap-2 px-2 py-1.5 bg-gray-50 dark:bg-[#1a1a2e] rounded text-xs font-mono text-gray-600 dark:text-gray-400">
+                  <span className="text-amber-500">⎇</span>
+                  <span className="flex-1 truncate">{b}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              {t("branchDesc")}
+            </p>
+            {merging && mergeAgent && (
+              <div className="flex items-center gap-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  {t("branchMergeAgentWorking", { agent: mergeAgent })}
+                </p>
+              </div>
+            )}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  setMerging(true);
+                  try {
+                    const result = await api.projects.mergeAllBranches(projectId);
+                    if (result.status === "started") {
+                      setMergeAgent(result.agentName ?? null);
+                      // Poll branches until agent finishes
+                      pollRef.current = setInterval(() => loadBranches(), 5000);
+                    } else {
+                      setMerging(false);
+                    }
+                  } catch {
+                    setToast(t("branchMergeError"));
+                    setMerging(false);
+                  }
+                }}
+                disabled={merging || deletingBranches}
+                className="text-xs px-3 py-1.5 bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50 transition-colors"
+              >
+                {merging ? t("branchMerging") : t("branchMergeAll")}
+              </button>
+              {confirmDeleteBranches ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setDeletingBranches(true);
+                      try {
+                        const result = await api.projects.deleteAllBranches(projectId);
+                        setToast(t("branchDeleteSuccess", { count: result.deleted.length }));
+                        await loadBranches();
+                      } catch { setToast(t("branchDeleteError")); }
+                      finally { setDeletingBranches(false); setConfirmDeleteBranches(false); }
+                    }}
+                    disabled={deletingBranches}
+                    className="text-xs px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deletingBranches ? t("branchDeleting") : t("branchConfirmDelete")}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteBranches(false)}
+                    disabled={deletingBranches}
+                    className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
+                  >
+                    {t("settingsCancel")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDeleteBranches(true)}
+                  disabled={merging}
+                  className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+                >
+                  {t("branchDeleteAll")}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Dev Server Port */}
       <section>

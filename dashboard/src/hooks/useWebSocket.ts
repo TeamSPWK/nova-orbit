@@ -128,6 +128,9 @@ export function useWebSocket() {
               window.dispatchEvent(new CustomEvent("nova:task-git", { detail: msg.payload }));
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
+            case "project:branch-merge-complete":
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: { type: msg.type, data: msg.payload } }));
+              break;
           }
         } catch {
           // Ignore

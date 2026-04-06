@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import type { AppContext } from "../../index.js";
 import { validateWorkdir } from "../../utils/validate-path.js";
 import { analyzeProject } from "../../core/project/analyzer.js";
@@ -143,6 +144,168 @@ export function createProjectRoutes(ctx: AppContext): Router {
     if (autopilot === "full" && existing.autopilot !== "full") {
       triggerFullAutopilot(req.params.id);
     }
+  });
+
+  // ─── Agent branch management ───────────────────────────
+
+  /** List unmerged agent/* branches for a project */
+  router.get("/:id/branches", (req, res) => {
+    const project = db.prepare("SELECT workdir FROM projects WHERE id = ?").get(req.params.id) as { workdir: string } | undefined;
+    if (!project?.workdir) return res.status(404).json({ error: "Project not found or no workdir" });
+
+    // spawnSync imported at top level
+    const result = spawnSync("git", ["branch", "--list", "agent/*"], {
+      cwd: project.workdir, stdio: "pipe", timeout: 10_000, encoding: "utf-8",
+    });
+    if (result.status !== 0) return res.json({ branches: [] });
+
+    const branches = result.stdout.split("\n")
+      .map((b: string) => b.replace(/^\*?\s*/, "").trim())
+      .filter((b: string) => b && b.startsWith("agent/"));
+
+    res.json({ branches });
+  });
+
+  /**
+   * Merge all agent branches via AI agent.
+   * Agent resolves conflicts intelligently instead of failing on git merge.
+   * Flow: find suitable agent → send merge prompt → agent resolves & commits.
+   */
+  router.post("/:id/branches/merge-all", async (req, res) => {
+    const projectId = req.params.id;
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project?.workdir) return res.status(404).json({ error: "Project not found or no workdir" });
+
+    const { getDefaultBranch } = await import("../../core/project/git-workflow.js");
+    const targetBranch = getDefaultBranch(project.workdir);
+
+    // List agent branches
+    const listResult = spawnSync("git", ["branch", "--list", "agent/*"], {
+      cwd: project.workdir, stdio: "pipe", timeout: 10_000, encoding: "utf-8",
+    });
+    if (listResult.status !== 0) return res.json({ status: "error", error: "Failed to list branches" });
+
+    const branches = listResult.stdout.split("\n")
+      .map((b: string) => b.replace(/^\*?\s*/, "").trim())
+      .filter((b: string) => b && b.startsWith("agent/"));
+
+    if (branches.length === 0) return res.json({ status: "no_branches" });
+
+    // Find best agent: CTO > any idle coder/backend/frontend > first idle agent
+    const agents = db.prepare(
+      "SELECT id, name, role, status FROM agents WHERE project_id = ? ORDER BY CASE role WHEN 'cto' THEN 0 WHEN 'backend' THEN 1 WHEN 'frontend' THEN 2 WHEN 'coder' THEN 3 ELSE 9 END"
+    ).all(projectId) as any[];
+
+    const agent = agents.find((a: any) => a.status === "idle")
+      ?? agents.find((a: any) => a.status !== "working");
+    if (!agent) return res.status(409).json({ error: "No available agent — all agents are busy" });
+
+    // Build merge prompt
+    const branchList = branches.map(b => `  - ${b}`).join("\n");
+    const mergePrompt = `# Branch Merge Task
+
+다음 에이전트 브랜치들을 \`${targetBranch}\` 브랜치에 합쳐주세요.
+
+## 브랜치 목록
+${branchList}
+
+## 작업 순서
+1. 현재 \`${targetBranch}\` 브랜치로 checkout
+2. 각 브랜치를 하나씩 merge (--no-ff):
+   - 충돌이 없으면 그대로 진행
+   - **충돌이 발생하면**: 양쪽 코드를 읽고 의미를 이해한 뒤 올바르게 해결. 두 변경사항을 모두 살리는 방향으로 합치되, 중복이나 문법 오류가 없도록 주의
+3. 각 merge 완료 후 해당 브랜치 삭제 (\`git branch -d <branch>\`)
+4. 모든 merge 완료 후 최종 상태 확인 (\`git log --oneline -10\`)
+
+## 주의사항
+- 절대 코드를 임의로 삭제하지 마세요. 두 브랜치의 변경사항을 모두 보존하세요.
+- merge commit 메시지는 \`chore: merge agent branches into ${targetBranch}\` 형식으로.
+- push하지 마세요 (로컬 merge만).
+- 작업 완료 후 남은 agent/* 브랜치가 없는지 확인하세요.`;
+
+    // Return immediately — run asynchronously via agent
+    res.json({ status: "started", agentId: agent.id, agentName: agent.name, branches });
+
+    // Async: spawn agent and execute merge
+    const sm = ctx.sessionManager;
+    if (!sm) {
+      log.error("sessionManager not initialized — cannot merge branches");
+      return;
+    }
+    (async () => {
+      db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agent.id);
+      broadcast("agent:status", { id: agent.id, name: agent.name, status: "working" });
+      broadcast("project:branch-merge-started", { projectId, agentId: agent.id, agentName: agent.name, branches });
+
+      let session;
+      try {
+        session = sm.spawnAgent(agent.id, project.workdir);
+        session.on("output", (text: string) => {
+          broadcast("agent:output", { agentId: agent.id, output: text });
+        });
+
+        const result = await session.send(mergePrompt);
+        const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");
+        const parsed = parseStreamJson(result.stdout);
+
+        // Check remaining branches after merge
+        const afterResult = spawnSync("git", ["branch", "--list", "agent/*"], {
+          cwd: project.workdir, stdio: "pipe", timeout: 10_000, encoding: "utf-8",
+        });
+        const remaining = (afterResult.stdout?.toString() ?? "").split("\n")
+          .map((b: string) => b.replace(/^\*?\s*/, "").trim())
+          .filter((b: string) => b && b.startsWith("agent/"));
+
+        const mergedCount = branches.length - remaining.length;
+
+        broadcast("project:branch-merge-complete", {
+          projectId,
+          agentId: agent.id,
+          merged: mergedCount,
+          remaining,
+          summary: parsed.text?.slice(0, 500) || "",
+        });
+
+        db.prepare(
+          "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'branch_merge', ?)",
+        ).run(projectId, agent.id,
+          `Merged ${mergedCount}/${branches.length} agent branches into ${targetBranch}${remaining.length > 0 ? ` (${remaining.length} remaining)` : ""}`);
+
+      } catch (err: any) {
+        broadcast("project:branch-merge-complete", {
+          projectId, agentId: agent.id, error: err.message, merged: 0, remaining: branches,
+        });
+      } finally {
+        sm.killSession(agent.id);
+        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?").run(agent.id);
+        broadcast("agent:status", { id: agent.id, name: agent.name, status: "idle" });
+      }
+    })();
+  });
+
+  /** Delete all agent branches (force) */
+  router.delete("/:id/branches", (req, res) => {
+    const project = db.prepare("SELECT workdir FROM projects WHERE id = ?").get(req.params.id) as { workdir: string } | undefined;
+    if (!project?.workdir) return res.status(404).json({ error: "Project not found or no workdir" });
+
+    // spawnSync imported at top level
+    const listResult = spawnSync("git", ["branch", "--list", "agent/*"], {
+      cwd: project.workdir, stdio: "pipe", timeout: 10_000, encoding: "utf-8",
+    });
+    if (listResult.status !== 0) return res.json({ deleted: [] });
+
+    const branches = listResult.stdout.split("\n")
+      .map((b: string) => b.replace(/^\*?\s*/, "").trim())
+      .filter((b: string) => b && b.startsWith("agent/"));
+
+    const deleted: string[] = [];
+    for (const branch of branches) {
+      const r = spawnSync("git", ["branch", "-D", branch], { cwd: project.workdir, stdio: "pipe", timeout: 5_000 });
+      if (r.status === 0) deleted.push(branch);
+    }
+
+    broadcast("project:branches-deleted", { projectId: req.params.id, deleted });
+    res.json({ deleted });
   });
 
   // Analyze a local directory (for project import)

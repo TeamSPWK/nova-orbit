@@ -4,7 +4,7 @@ import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createDelegationEngine } from "./delegation.js";
-import { executeGitWorkflow, type GitHubConfig } from "../project/git-workflow.js";
+import { executeGitWorkflow, getDefaultBranch, type GitHubConfig } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
 import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL } from "../../utils/constants.js";
@@ -766,9 +766,12 @@ async function runGitWorkflow(
   const githubConfig = getGitHubConfig(db, task.project_id);
 
   // github_config 없어도 로컬 commit은 수행 (worktree 정리 전 코드 보존)
+  // branch는 반드시 프로젝트 기본 브랜치 — worktree 브랜치를 넣으면 자기 자신에게 머지 시도
+  const projectRoot = _project.workdir;
+  const defaultBranch = projectRoot ? getDefaultBranch(projectRoot) : "main";
   const effectiveConfig: GitHubConfig = githubConfig ?? {
     repoUrl: "",
-    branch: worktreeBranch ?? "main",
+    branch: defaultBranch,
     autoPush: false,
     prMode: false,
     gitMode: "local_only",

@@ -76,6 +76,14 @@ export const api = {
       request<{ running: boolean; port: number | null; pid: number | null; url: string | null }>(
         `/projects/${id}/dev-server/status`,
       ),
+    listBranches: (id: string) =>
+      request<{ branches: string[] }>(`/projects/${id}/branches`),
+    mergeAllBranches: (id: string) =>
+      request<{ status: string; agentId?: string; agentName?: string; branches?: string[]; error?: string }>(
+        `/projects/${id}/branches/merge-all`, { method: "POST" },
+      ),
+    deleteAllBranches: (id: string) =>
+      request<{ deleted: string[] }>(`/projects/${id}/branches`, { method: "DELETE" }),
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
