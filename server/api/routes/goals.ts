@@ -41,9 +41,14 @@ export function createGoalRoutes(ctx: AppContext): Router {
       res.status(201).json(goal);
 
       // --- Autopilot trigger (async, after response) ---
-      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(project_id) as { autopilot: string } | undefined;
-      if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
-        triggerAutopilotDecompose(goal.id, project_id);
+      // When client will generate a spec first (withSpec=true), skip auto-decompose
+      // to avoid session conflict — decompose runs after spec generation completes instead.
+      const withSpec = req.body.withSpec === true;
+      if (!withSpec) {
+        const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(project_id) as { autopilot: string } | undefined;
+        if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+          triggerAutopilotDecompose(goal.id, project_id);
+        }
       }
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -182,11 +187,19 @@ export function createGoalRoutes(ctx: AppContext): Router {
     ctx.generateGoalSpec(goalId).then(() => {
       log.info(`Spec generated for goal ${goalId}`);
       broadcast("project:updated", { projectId: goal.project_id });
+
+      // Spec complete → trigger autopilot decompose if enabled
+      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(goal.project_id) as { autopilot: string } | undefined;
+      if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+        triggerAutopilotDecompose(goalId, goal.project_id);
+      }
     }).catch((err: any) => {
       log.error(`Failed to generate spec for goal ${goalId}`, err);
-      // Clean up the placeholder on failure
-      db.prepare("UPDATE goal_specs SET prd_summary = '{\"_status\":\"failed\",\"_error\":\"' || ? || '\"}', updated_at = datetime('now') WHERE goal_id = ?")
-        .run((err.message || "Unknown error").slice(0, 200), goalId);
+      // Store failure status as proper JSON (avoid SQL string concat which breaks on quotes)
+      const errorMsg = (err.message || "Unknown error").slice(0, 200).replace(/"/g, "'");
+      const failedJson = JSON.stringify({ _status: "failed", _error: errorMsg });
+      db.prepare("UPDATE goal_specs SET prd_summary = ?, updated_at = datetime('now') WHERE goal_id = ?")
+        .run(failedJson, goalId);
       broadcast("project:updated", { projectId: goal.project_id });
     });
   });
@@ -239,6 +252,18 @@ export function createGoalRoutes(ctx: AppContext): Router {
       if (existing.count > 0) {
         log.warn(`Autopilot: goal ${goalId} already has tasks, skipping decompose`);
         return;
+      }
+
+      // Skip if spec is currently being generated — decompose should wait for spec
+      const spec = db.prepare("SELECT prd_summary FROM goal_specs WHERE goal_id = ?").get(goalId) as { prd_summary: string } | undefined;
+      if (spec) {
+        try {
+          const prd = JSON.parse(spec.prd_summary);
+          if (prd._status === "generating") {
+            log.info(`Autopilot: goal ${goalId} has spec in progress, skipping decompose (will be triggered after spec completes)`);
+            return;
+          }
+        } catch { /* not JSON, proceed */ }
       }
 
       const result = await ctx.orchestrationEngine.decomposeGoal(goalId);

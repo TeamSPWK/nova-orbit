@@ -76,7 +76,11 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
       // Extract final result + usage data
       if (parsed.type === "result") {
         if (parsed.result) {
-          result.text = parsed.result;
+          // Use result text only if it's longer (more complete) than accumulated assistant text,
+          // otherwise keep assistant text which may contain structured output (e.g. JSON blocks)
+          if (parsed.result.length > result.text.length) {
+            result.text = parsed.result;
+          }
         }
 
         // Extract usage from result event

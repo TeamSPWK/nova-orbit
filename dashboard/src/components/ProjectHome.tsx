@@ -473,10 +473,10 @@ export function ProjectHome() {
     setShowDialog(null);
     if (!currentProjectId) return;
     try {
-      const goal = await api.goals.create({ project_id: currentProjectId, description });
+      const goal = await api.goals.create({ project_id: currentProjectId, description, withSpec: true });
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
-      // Start spec generation
+      // Start spec generation (autopilot decompose is suppressed via withSpec flag)
       await api.goals.generateSpec(goal.id);
       startSpecPolling(goal.id);
     } catch (err: any) {

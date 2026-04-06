@@ -752,12 +752,33 @@ Rules:
     try {
       session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd());
       const result = await session.send(specPrompt);
+
+      // Check CLI exit code
+      if (result.exitCode !== 0 && result.stdout.trim() === "") {
+        const hint = result.stderr.slice(0, 300);
+        throw new Error(`Claude Code CLI failed (exit ${result.exitCode}): ${hint}`);
+      }
+
       const parsed = parseStreamJson(result.stdout);
 
-      const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
-      if (!jsonMatch) throw new Error("No JSON found in spec generation response");
+      if (!parsed.text || parsed.text.trim() === "") {
+        throw new Error(`Spec generation produced no text output. Errors: ${parsed.errors.join("; ") || "none"}`);
+      }
 
-      const specData = JSON.parse(jsonMatch[1]);
+      // Try multiple JSON extraction strategies
+      let specData: any;
+      const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        specData = JSON.parse(jsonMatch[1]);
+      } else {
+        // Fallback: try to find raw JSON object with prd_summary key
+        const rawJsonMatch = parsed.text.match(/\{[\s\S]*"prd_summary"[\s\S]*\}/);
+        if (rawJsonMatch) {
+          specData = JSON.parse(rawJsonMatch[0]);
+        } else {
+          throw new Error("No JSON found in spec generation response");
+        }
+      }
 
       // Upsert into goal_specs
       const existing = db.prepare("SELECT id, version FROM goal_specs WHERE goal_id = ?").get(goalId) as any;
