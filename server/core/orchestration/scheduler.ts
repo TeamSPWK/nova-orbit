@@ -59,6 +59,14 @@ export function createScheduler(
     nextRetryAt: Date | null;
   }>();
 
+  // Deduplicate noisy "Deferring reviewer task" logs — log once per task, then only when remaining count changes
+  const lastDeferLog = new Map<string, number>();
+  function logDeferOnce(taskId: string, title: string, remaining: number): void {
+    if (lastDeferLog.get(taskId) === remaining) return;
+    lastDeferLog.set(taskId, remaining);
+    log.info(`Deferring reviewer task "${title}" — ${remaining} sibling tasks still incomplete`);
+  }
+
   function getBusyAgents(projectId: string): Set<string> {
     if (!busyAgents.has(projectId)) busyAgents.set(projectId, new Set());
     return busyAgents.get(projectId)!;
@@ -309,7 +317,7 @@ export function createScheduler(
         `).get(task.goal_id, task.id, projectId) as { remaining: number };
 
         if (siblings.remaining > 0) {
-          log.info(`Deferring reviewer task "${task.title}" — ${siblings.remaining} sibling tasks still incomplete`);
+          logDeferOnce(task.id, task.title, siblings.remaining);
           continue;
         }
       }
@@ -318,6 +326,30 @@ export function createScheduler(
       usedAgents.add(task.assignee_id);
     }
     return picked;
+  }
+
+  /**
+   * Check if the queue should auto-stop:
+   * No todo, in_progress, pending_approval, or retryable blocked tasks remain.
+   */
+  function shouldAutoStop(projectId: string): boolean {
+    const remaining = db.prepare(`
+      SELECT COUNT(*) as cnt FROM tasks
+      WHERE project_id = ?
+        AND status IN ('todo', 'in_progress', 'pending_approval')
+    `).get(projectId) as { cnt: number };
+
+    if (remaining.cnt > 0) return false;
+
+    // Check for blocked tasks that could still be retried
+    const retryable = db.prepare(`
+      SELECT COUNT(*) as cnt FROM tasks
+      WHERE project_id = ?
+        AND status = 'blocked'
+        AND (retry_count < ? OR reassign_count < ?)
+    `).get(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { cnt: number };
+
+    return retryable.cnt === 0;
   }
 
   function scheduleNextPoll(projectId: string): void {
@@ -446,6 +478,13 @@ export function createScheduler(
     const tasks = pickNextTasks(projectId, availableSlots);
 
     if (tasks.length === 0) {
+      // No tasks to pick — check if queue should auto-stop
+      if (busy.size === 0 && shouldAutoStop(projectId)) {
+        log.info(`Queue auto-stopped for project ${projectId} — no remaining work`);
+        stopQueueInternal(projectId);
+        broadcast("queue:stopped", { projectId, reason: "completed" });
+        return;
+      }
       scheduleNextPoll(projectId);
       return;
     }

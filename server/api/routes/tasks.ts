@@ -67,6 +67,15 @@ export function createTaskRoutes(ctx: AppContext): Router {
     }
   });
 
+  // Helper: auto-resume queue for autopilot projects when todo tasks appear
+  function ensureQueueRunning(projectId: string): void {
+    if (ctx.scheduler?.isRunning(projectId)) return;
+    const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+    if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+      ctx.scheduler?.startQueue(projectId);
+    }
+  }
+
   // Valid status transitions (Sprint 5: pending_approval added)
   const VALID_TRANSITIONS: Record<string, string[]> = {
     pending_approval: ["todo", "blocked"],
@@ -131,6 +140,11 @@ export function createTaskRoutes(ctx: AppContext): Router {
       // Update goal progress if task status changed
       if (status) {
         updateGoalProgress(db, existing.goal_id);
+      }
+
+      // Auto-resume queue when task becomes todo in autopilot mode
+      if (status === "todo") {
+        ensureQueueRunning(existing.project_id);
       }
 
       res.json(updated);
@@ -224,6 +238,9 @@ export function createTaskRoutes(ctx: AppContext): Router {
 
     const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
     broadcast("task:updated", updated);
+
+    // Rejected task goes back to todo — auto-resume queue in autopilot mode
+    ensureQueueRunning(task.project_id);
 
     db.prepare(
       "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_rejected', ?)",

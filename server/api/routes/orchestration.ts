@@ -578,6 +578,15 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     res.json({ status: "queue_resumed", projectId });
   });
 
+  // Helper: auto-resume queue for autopilot projects when todo tasks appear
+  function ensureQueueRunning(projectId: string): void {
+    if (ctx.scheduler?.isRunning(projectId)) return;
+    const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+    if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+      ctx.scheduler?.startQueue(projectId);
+    }
+  }
+
   // ─── Approval Gate (Sprint 5) ──────────────────────────────────────────────
 
   // Approve a single pending_approval task → todo
@@ -597,6 +606,9 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
     broadcast("task:updated", updated);
     broadcast("project:updated", { projectId });
+
+    // Auto-resume queue if autopilot is on and queue is stopped
+    ensureQueueRunning(projectId);
 
     db.prepare(
       "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
@@ -652,6 +664,9 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     broadcast("project:updated", { projectId });
 
     if (result.changes > 0) {
+      // Auto-resume queue if autopilot is on and queue is stopped
+      ensureQueueRunning(projectId);
+
       db.prepare(
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_approved', ?)",
       ).run(projectId, `Approved all ${result.changes} pending tasks`);
