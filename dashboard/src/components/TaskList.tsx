@@ -258,7 +258,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
           )}
           {task.status === "done" && usage && (
             <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded shrink-0">
-              ${usage.costUsd.toFixed(2)}
+              ${(usage.costUsd ?? 0).toFixed(2)}
             </span>
           )}
         </div>
