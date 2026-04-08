@@ -104,11 +104,22 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
   // Accumulate usage per task from WebSocket events
   useEffect(() => {
     const handler = (e: Event) => {
-      const payload = (e as CustomEvent<{ taskId: string; costUsd: number; totalTokens: number }>).detail;
+      const payload = (e as CustomEvent<{
+        taskId: string;
+        usage?: {
+          totalCostUsd?: number;
+          inputTokens?: number;
+          outputTokens?: number;
+          cacheCreationTokens?: number;
+        };
+      }>).detail;
       if (!payload.taskId) return;
+      const u = payload.usage;
+      const costUsd = u?.totalCostUsd ?? 0;
+      const totalTokens = (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0) + (u?.cacheCreationTokens ?? 0);
       setTaskUsage((prev) => {
         const next = new Map(prev);
-        next.set(payload.taskId, { costUsd: payload.costUsd, totalTokens: payload.totalTokens });
+        next.set(payload.taskId, { costUsd, totalTokens });
         return next;
       });
     };

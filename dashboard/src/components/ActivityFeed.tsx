@@ -60,9 +60,9 @@ function formatWsMessage(
       return t("activitySystemError", { message: p.message ?? type });
     case "task:git": {
       const parts: string[] = [];
-      if (p.committed) parts.push(t("gitCommitted", { count: String(p.files ?? "") }));
+      if (p.committed) parts.push(t("gitCommitted", { count: String(p.filesChanged ?? 0) }));
       if (p.pushed) parts.push(t("gitPushed"));
-      if (p.pr) parts.push(t("gitPrCreated"));
+      if (p.prUrl) parts.push(t("gitPrCreated"));
       return parts.length > 0 ? parts.join(" → ") : t("activityGitEvent");
     }
     default:

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { getApiKey } from "../lib/api";
 
 interface ClaudeStatus {
@@ -57,6 +58,7 @@ function Gauge({ percent, segments = 7 }: { percent: number; segments?: number }
 }
 
 export function StatusBar() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<ClaudeStatus | null>(null);
   const [novaRules, setNovaRules] = useState<NovaRulesVersion | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -123,7 +125,7 @@ export function StatusBar() {
     return (
       <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-400" />
-        <span>Claude status unavailable</span>
+        <span>{t("claudeStatusUnavailable")}</span>
       </div>
     );
   }

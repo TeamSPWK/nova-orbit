@@ -1,7 +1,7 @@
 # Nova State
 
 ## Current
-- **Goal**: 버그 헌트 + 수정 + 목표 단위 순차 실행 (세션 마무리)
+- **Goal**: 전체 버그 헌트 + 수정 (데이터 컨트랙트, i18n, UX 문자열)
 - **Phase**: done
 - **Blocker**: none
 
@@ -19,9 +19,9 @@
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
+| 전체 버그 헌트 2차 (task:usage 평면/nested 불일치, 활동피드 필드명, i18n 키, 하드코딩 영문) | 2026-04-08 | PASS | 8파일, tsc+빌드 통과 |
 | 버그 헌트 + 수정 + 순차 실행 (Critical 4 / High 6 / Medium 8 / Low 2 + sequential) | 2026-04-08 | PASS | 3 commits, tsc+빌드 통과 |
 | Full Autopilot 안정화 + UX 대폭 개선 | 2026-04-08 | PASS | 15+파일, 세션/큐/UX 전반 |
-| Orbit UX 6개 개선 | 2026-04-06 | PASS | 15파일, +450줄 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -35,6 +35,14 @@
 | `agents.parent_id` FK 부재 | 코드에서 수동 정리 (마이그레이션 위험으로 보류) | Low |
 
 ## Key Changes This Session
+### 전체 버그 헌트 2차 (신규 커밋)
+- `TaskList.tsx` — task:usage payload nested 구조 읽도록 수정 (totalCostUsd/inputTokens/outputTokens). 기존 평면 필드(`costUsd`, `totalTokens`)는 engine에서 보내지 않아 항상 undefined였음. TaskList 비용/토큰 배지 복구.
+- `ActivityFeed.tsx` — `p.files` → `p.filesChanged`, `p.pr` → `p.prUrl`. "개 파일 커밋"이 빈 count로 표시되고 PR 생성 이벤트도 무시되던 버그.
+- `ko.ts`, `en.ts` — `gitCommitted` 문구 자연스럽게("파일 {count}개 커밋"). `specGeneratedByAI/Manual`, `specHeaderTitle`, `specFlowAction/Expected`, `specFeatureRequirements`, `keyboardShortcutsClose`, `claudeStatusUnavailable` 신규 키 추가.
+- `GoalSpecPanel.tsx` — 하드코딩 영문("Structured Spec", "Action", "Expected", "Requirements", "User does...", "System responds...", "AI") 전부 i18n화. `specEdit`("편집") 키를 생성자 라벨로 오용하던 문제 수정.
+- `KeyboardShortcuts.tsx`, `StatusBar.tsx` — "Esc to close", "Claude status unavailable" i18n화.
+- `verification.ts` — POST /verifications broadcast 시 `JSON.parse` try/catch로 방어. 잘못된 dimensions/issues가 저장되면 전체 응답이 500으로 터지던 위험 제거.
+
 ### 버그 헌트 + 수정 (a824b89)
 - `evaluator.ts` — concurrent verification guard 제거 + evaluatorId sessionKey 분리
 - `engine.ts`, `delegation.ts`, `scheduler.ts` — delegated parent task verify 통합 (parentVerifier 주입)
@@ -57,9 +65,9 @@
 - `scheduler.ts`, `agents.ts` — dead 'verified' status 정리 (4곳)
 
 ## Last Activity
-- 버그 헌트 + 수정 + 목표 단위 순차 실행 적용 + 깨끗한 재시작. Pulsar에서 high priority "발행 콘텐츠 롤백" goal이 즉시 active로 선택되어 "CLI 롤백 커맨드 구현" 실행 중. 다른 3개 goal(플러그인/다국어/A/B)은 대기. | 2026-04-08
+- 2차 버그 헌트. 사용자 제보(활동 피드 "개 파일 커밋" 카운트 누락 + 어색한 한국어)에서 시작해 서브에이전트 adversarial evaluator로 전체 스윕 → 데이터 컨트랙트 불일치(task:usage nested vs 평면), i18n 키 오용/누락, 하드코딩 영문 수정. tsc + vite build 통과. | 2026-04-08
 
 ## Refs
 - Plan: docs/plans/phase2-production-ready.md
 - Last Verification: tsc PASS (server + dashboard) + vite build PASS + dry-run on Pulsar PASS
-- Commits: a824b89 (25 bugs) → 214ee3b (sequential goal) → 05600c9 (safety net + cleanup)
+- Commits: a824b89 (25 bugs) → 214ee3b (sequential goal) → 05600c9 (safety net) → 353ec22 (docs) → (신규: task:usage + i18n + UX strings)

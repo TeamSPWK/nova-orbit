@@ -174,22 +174,22 @@ function FlowDiagram({
                   </div>
                   {/* Action */}
                   <div className="mb-2">
-                    <span className="text-[9px] uppercase tracking-wider text-gray-400 font-medium">Action</span>
+                    <span className="text-[9px] uppercase tracking-wider text-gray-400 font-medium">{t("specFlowAction")}</span>
                     <EditableText
                       value={step.action}
                       onChange={(v) => onUpdate(i, { ...step, action: v })}
                       className="text-xs text-gray-800 dark:text-gray-100 font-medium block mt-0.5"
-                      placeholder="User does..."
+                      placeholder={t("specFlowActionPlaceholder")}
                     />
                   </div>
                   {/* Expected */}
                   <div>
-                    <span className="text-[9px] uppercase tracking-wider text-gray-400 font-medium">Expected</span>
+                    <span className="text-[9px] uppercase tracking-wider text-gray-400 font-medium">{t("specFlowExpected")}</span>
                     <EditableText
                       value={step.expected}
                       onChange={(v) => onUpdate(i, { ...step, expected: v })}
                       className="text-xs text-gray-600 dark:text-gray-400 block mt-0.5"
-                      placeholder="System responds..."
+                      placeholder={t("specFlowExpectedPlaceholder")}
                     />
                   </div>
                 </div>
@@ -466,10 +466,10 @@ export default function GoalSpecPanel({ goalId, onClose, onGeneratingClose }: Go
               <span className="text-base">📝</span>
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Structured Spec</h2>
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{t("specHeaderTitle")}</h2>
               {hasSpec && (
                 <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                  {t("specVersion", { version: String(spec!.version) })} · {spec!.generated_by === "ai" ? "AI" : t("specEdit")}
+                  {t("specVersion", { version: String(spec!.version) })} · {spec!.generated_by === "ai" ? t("specGeneratedByAI") : t("specGeneratedByManual")}
                 </span>
               )}
             </div>
@@ -739,7 +739,7 @@ export default function GoalSpecPanel({ goalId, onClose, onGeneratingClose }: Go
                           className="text-sm text-gray-600 dark:text-gray-400 mb-3 block"
                         />
                         <div className="mt-2">
-                          <span className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold">Requirements</span>
+                          <span className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold">{t("specFeatureRequirements")}</span>
                           <EditableList
                             items={f.requirements || []}
                             onUpdate={(items) => {

@@ -52,7 +52,7 @@ export function KeyboardShortcuts({ onClose }: KeyboardShortcutsProps) {
             </li>
           ))}
         </ul>
-        <p className="mt-4 text-[11px] text-gray-400 text-center">Esc to close</p>
+        <p className="mt-4 text-[11px] text-gray-400 text-center">{t("keyboardShortcutsClose")}</p>
       </div>
     </div>
   );

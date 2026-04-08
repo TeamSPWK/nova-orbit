@@ -85,17 +85,17 @@ export function createVerificationRoutes(ctx: AppContext): Router {
       );
     }
 
-    broadcast("verification:result", {
-      ...verification,
-      dimensions: JSON.parse(verification.dimensions),
-      issues: JSON.parse(verification.issues),
-    });
+    let parsedDimensions: unknown = {};
+    let parsedIssues: unknown[] = [];
+    try { parsedDimensions = JSON.parse(verification.dimensions); } catch { /* invalid JSON */ }
+    try {
+      const p = JSON.parse(verification.issues);
+      parsedIssues = Array.isArray(p) ? p : [];
+    } catch { /* invalid JSON */ }
 
-    res.status(201).json({
-      ...verification,
-      dimensions: JSON.parse(verification.dimensions),
-      issues: JSON.parse(verification.issues),
-    });
+    const payload = { ...verification, dimensions: parsedDimensions, issues: parsedIssues };
+    broadcast("verification:result", payload);
+    res.status(201).json(payload);
   });
 
   // Create a fix task from a failed verification
