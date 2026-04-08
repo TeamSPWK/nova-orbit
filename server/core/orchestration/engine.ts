@@ -7,7 +7,7 @@ import { createDelegationEngine } from "./delegation.js";
 import { executeGitWorkflow, getDefaultBranch, type GitHubConfig } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
-import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL } from "../../utils/constants.js";
+import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL, MAX_TASK_RETRIES, MAX_REASSIGNS } from "../../utils/constants.js";
 import type { VerificationScope } from "../../../shared/types.js";
 import { appendMemory } from "../agent/memory.js";
 import { createNovaRulesEngine } from "../nova-rules/index.js";
@@ -159,6 +159,34 @@ export function createOrchestrationEngine(
             log.warn(`Architect phase failed, proceeding without design: ${archErr.message}`);
           } finally {
             sessionManager.killSession(ctoAgent.id);
+            // Defensive sweep: the architect is told NOT to create files but
+            // historically has still done so (Nova incident: architect wrote
+            // auth-infrastructure.md to project root → every subsequent task's
+            // merge-to-main failed for 8h with "Your local changes would be
+            // overwritten"). Auto-commit any residue immediately so future
+            // merges see a clean tree.
+            try {
+              const { spawnSync } = await import("node:child_process");
+              const statusRes = spawnSync("git", ["status", "--porcelain"], {
+                cwd: workdir, stdio: "pipe", timeout: 5_000, encoding: "utf-8",
+              });
+              const dirty = statusRes.stdout?.trim();
+              if (dirty) {
+                log.warn(`Architect phase left uncommitted changes despite read-only instruction — auto-committing as docs(nova-architect):\n${dirty.slice(0, 500)}`);
+                spawnSync("git", ["add", "-A"], { cwd: workdir, stdio: "pipe", timeout: 10_000 });
+                const commitRes = spawnSync("git", [
+                  "commit", "-m",
+                  `docs(nova-architect): residue from "${task.title.slice(0, 60)}" architect phase\n\nNova Orbit auto-committed files left by the CTO architect session.\nThis prevents them from blocking subsequent task merges.`,
+                ], { cwd: workdir, stdio: "pipe", timeout: 10_000, encoding: "utf-8" });
+                if (commitRes.status === 0) {
+                  db.prepare(
+                    "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)"
+                  ).run(task.project_id, `Architect가 파일을 생성했습니다 — 자동 커밋으로 충돌 방지: ${dirty.split('\n').length}개 파일`);
+                }
+              }
+            } catch (sweepErr: any) {
+              log.warn(`Architect residue sweep failed: ${sweepErr.message}`);
+            }
           }
         }
       }
@@ -410,7 +438,18 @@ Fix ONLY these issues. Do not modify other code.
         if (passed) {
           const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
           if (gitResult?.error) {
+            // Git failures (merge conflict, nothing-to-commit race, etc.) are
+            // NOT fixable by re-running the same agent on a fresh worktree —
+            // every retry creates another orphan branch that conflicts the
+            // same way. Mark as permanently blocked so the scheduler moves on
+            // instead of burning API budget on 6+ merge-conflict retries.
+            db.prepare(
+              "UPDATE tasks SET retry_count = ?, reassign_count = ? WHERE id = ?",
+            ).run(MAX_TASK_RETRIES, MAX_REASSIGNS, task.id);
             transitionTask(db, broadcast, task, "blocked");
+            db.prepare(
+              "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'git_error', ?)",
+            ).run(task.project_id, task.assignee_id, `Permanently blocked — git workflow failure (not retryable): ${task.title}`);
             return { success: false, verdict: "git-error" };
           }
         }
@@ -1016,6 +1055,17 @@ function buildArchitectPrompt(task: TaskRow, novaRules: ReturnType<typeof create
   return `# Architecture Design — CPS Pattern
 
 You are the Architect. Design ONLY, do NOT implement.
+
+## ⚠️ CRITICAL: Read-Only Session
+**Do NOT create, edit, or modify any files. Do NOT use the Write, Edit, or
+NotebookEdit tools.** Respond with the design as text in your stdout
+response only. Files created in this session pollute the project root and
+break subsequent merge operations (Nova incident: stuck for 8h on merge
+conflicts from an architect-created design doc).
+
+You MAY use Read/Glob/Grep to understand the codebase, but absolutely no
+writes. If you feel the need to produce a design document file, inline it
+into your response instead.
 
 ## Task
 "${task.title}"

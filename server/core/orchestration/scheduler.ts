@@ -82,6 +82,133 @@ export function createScheduler(
     log.info(`Deferring reviewer task "${title}" — ${remaining} sibling tasks still incomplete`);
   }
 
+  /**
+   * Per-project stuck-state detection. When pickNextTasks returns nothing
+   * repeatedly but there IS outstanding work, the scheduler is silently
+   * idle — the user sees "Auto 실행 중" with no activity and no idea why.
+   * Track consecutive empty polls and surface a diagnosis when it crosses
+   * a threshold, with dedup so we don't spam activities.
+   */
+  const stuckState = new Map<string, {
+    emptyPollCount: number;
+    lastWarnedAt: number;
+    lastDiagnosisKey: string;
+  }>();
+  const STUCK_POLL_THRESHOLD = 30; // ~30s of empty polls before warning
+  const STUCK_REWARN_MS = 5 * 60 * 1000; // re-warn every 5 min
+
+  /**
+   * Explain WHY pickNextTasks is returning nothing even though work exists.
+   * Returns a short Korean summary suitable for the activity feed.
+   */
+  function diagnoseStuck(projectId: string): { summary: string; code: string } | null {
+    const counts = db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+        SUM(CASE WHEN status = 'in_review' THEN 1 ELSE 0 END) AS in_review,
+        SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+        SUM(CASE WHEN status = 'blocked' AND retry_count >= ? AND reassign_count >= ? THEN 1 ELSE 0 END) AS permanent_blocked,
+        SUM(CASE WHEN status = 'todo' AND assignee_id IS NULL THEN 1 ELSE 0 END) AS unassigned_todo
+      FROM tasks WHERE project_id = ?
+    `).get(MAX_TASK_RETRIES, MAX_REASSIGNS, projectId) as any;
+
+    if (!counts || (counts.todo === 0 && counts.blocked === 0)) {
+      return null; // genuinely nothing to do
+    }
+
+    if (counts.unassigned_todo > 0) {
+      const agentCount = (db.prepare("SELECT COUNT(*) as n FROM agents WHERE project_id = ?").get(projectId) as { n: number }).n;
+      if (agentCount === 0) {
+        return {
+          code: "no_agents",
+          summary: `할당 가능한 에이전트가 없습니다 — 에이전트를 추가해주세요 (미할당 태스크 ${counts.unassigned_todo}개)`,
+        };
+      }
+    }
+
+    // Check if all remaining todo tasks are reviewer-gated
+    const reviewerGated = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM tasks t
+      WHERE t.project_id = ? AND t.status = 'todo'
+        AND t.assignee_id IN (SELECT id FROM agents WHERE project_id = ? AND role IN ('qa-reviewer','reviewer','qa'))
+        AND EXISTS (
+          SELECT 1 FROM tasks s
+          WHERE s.goal_id = t.goal_id AND s.id != t.id AND s.status != 'done'
+            AND NOT (s.status = 'blocked' AND s.retry_count >= ? AND s.reassign_count >= ?)
+            AND s.assignee_id NOT IN (SELECT id FROM agents WHERE project_id = ? AND role IN ('qa-reviewer','reviewer','qa'))
+        )
+    `).get(projectId, projectId, MAX_TASK_RETRIES, MAX_REASSIGNS, projectId) as { cnt: number };
+
+    const allTodo = (counts.todo ?? 0) as number;
+    if (reviewerGated.cnt > 0 && reviewerGated.cnt === allTodo) {
+      return {
+        code: "reviewer_gate_lock",
+        summary: `모든 남은 태스크가 리뷰어 대기 중 — 형제 태스크를 먼저 완료해야 합니다 (${reviewerGated.cnt}개 gated)`,
+      };
+    }
+
+    if (counts.permanent_blocked > 0) {
+      return {
+        code: "permanent_blocked",
+        summary: `재시도 불가능한 차단된 태스크 ${counts.permanent_blocked}개 — 수동 개입 필요`,
+      };
+    }
+
+    if (counts.blocked > 0 && counts.todo === 0 && counts.in_progress === 0) {
+      return {
+        code: "all_blocked",
+        summary: `모든 활성 태스크가 차단됨 (blocked ${counts.blocked}개) — 원인 확인 필요`,
+      };
+    }
+
+    return {
+      code: "unknown_idle",
+      summary: `태스크 ${allTodo}개가 대기 중이지만 실행되지 않음 — 큐 상태 확인 필요`,
+    };
+  }
+
+  function checkStuckState(projectId: string, pickedCount: number): void {
+    if (pickedCount > 0) {
+      stuckState.delete(projectId);
+      return;
+    }
+    const state = stuckState.get(projectId) ?? { emptyPollCount: 0, lastWarnedAt: 0, lastDiagnosisKey: "" };
+    state.emptyPollCount++;
+
+    if (state.emptyPollCount < STUCK_POLL_THRESHOLD) {
+      stuckState.set(projectId, state);
+      return;
+    }
+
+    const diagnosis = diagnoseStuck(projectId);
+    if (!diagnosis) {
+      stuckState.set(projectId, state);
+      return;
+    }
+
+    const now = Date.now();
+    const diagnosisChanged = state.lastDiagnosisKey !== diagnosis.code;
+    if (diagnosisChanged || now - state.lastWarnedAt > STUCK_REWARN_MS) {
+      log.warn(`[stuck] project ${projectId}: ${diagnosis.summary} (${state.emptyPollCount} empty polls)`);
+      try {
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)",
+        ).run(projectId, `🟡 자동 실행 정체: ${diagnosis.summary}`);
+      } catch { /* best-effort */ }
+      broadcast("autopilot:stuck", {
+        projectId,
+        code: diagnosis.code,
+        summary: diagnosis.summary,
+        emptyPollCount: state.emptyPollCount,
+      });
+      broadcast("project:updated", { projectId });
+      state.lastWarnedAt = now;
+      state.lastDiagnosisKey = diagnosis.code;
+    }
+    stuckState.set(projectId, state);
+  }
+
   function getBusyAgents(projectId: string): Set<string> {
     if (!busyAgents.has(projectId)) busyAgents.set(projectId, new Set());
     return busyAgents.get(projectId)!;
@@ -306,6 +433,13 @@ export function createScheduler(
     // Auto-retry blocked tasks that haven't exceeded retry limit
     retryBlockedTasks(projectId);
 
+    // Recompute goal progress accounting for permanently-blocked tasks.
+    // Previously this only fired from inside retryBlockedTasks when there were
+    // retry-exhausted-but-reassignable tasks — so a goal that reached fully
+    // permanent-blocked state never got its progress corrected and appeared
+    // stuck at 67% forever. Idempotent + cheap; safe to run every poll.
+    updateGoalProgressExcludingBlocked(projectId);
+
     // Then auto-assign any unassigned tasks
     autoAssignUnassigned(projectId);
 
@@ -413,13 +547,19 @@ export function createScheduler(
       if (picked.length >= maxSlots) break;
       if (usedAgents.has(task.assignee_id)) continue; // agent already occupied
 
-      // Gate: reviewer tasks wait until all sibling tasks in the same goal are done
+      // Gate: reviewer tasks wait until all sibling tasks in the same goal are
+      // done. Permanently-blocked siblings (retry + reassign both exhausted)
+      // are treated as "done-for-gating-purposes" — otherwise the entire goal
+      // halts forever on a single task the scheduler can no longer make
+      // progress on, and the whole project sits idle waiting for a human.
       if (task.goal_id && reviewerAgentIds.has(task.assignee_id)) {
         const siblings = db.prepare(`
           SELECT COUNT(*) as remaining FROM tasks
-          WHERE goal_id = ? AND id != ? AND status != 'done'
+          WHERE goal_id = ? AND id != ?
+            AND status != 'done'
+            AND NOT (status = 'blocked' AND retry_count >= ? AND reassign_count >= ?)
             AND assignee_id NOT IN (SELECT id FROM agents WHERE project_id = ? AND role IN ('qa-reviewer', 'reviewer', 'qa'))
-        `).get(task.goal_id, task.id, projectId) as { remaining: number };
+        `).get(task.goal_id, task.id, MAX_TASK_RETRIES, MAX_REASSIGNS, projectId) as { remaining: number };
 
         if (siblings.remaining > 0) {
           logDeferOnce(task.id, task.title, siblings.remaining);
@@ -709,6 +849,10 @@ export function createScheduler(
     }
 
     const tasks = pickNextTasks(projectId, availableSlots);
+
+    // Surface stuck state: if we keep polling with nothing executable but
+    // there IS outstanding work, the user needs to know why.
+    checkStuckState(projectId, tasks.length);
 
     if (tasks.length === 0) {
       // No tasks to pick — try to process unhandled goals in background (non-blocking)
