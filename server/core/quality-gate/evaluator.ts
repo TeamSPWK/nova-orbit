@@ -232,14 +232,27 @@ If you CANNOT execute Layer 3 (no DB, no runtime, no test runner):
     "craft": { "value": 7, "notes": "..." },
     "edgeCases": { "value": 6, "notes": "..." }
   },
-  "issues": [],
+  "issues": [
+    {
+      "severity": "critical",
+      "file": "path/to/file.py",
+      "line": 42,
+      "message": "Concrete description of the problem — what is wrong and why it breaks. REQUIRED. Never omit or leave blank. The auto-fix agent reads this verbatim.",
+      "suggestion": "Concrete fix guidance — what code change resolves it. REQUIRED for critical/hard-block."
+    }
+  ],
   "knownGaps": []
 }
 \`\`\`
 
-- severity: "auto-resolve" (minor), "soft-block" (runtime risk), "hard-block" (security/data loss)
-- issues: only list actual problems found, empty array if none
-- knownGaps: areas that could not be verified (Layer 3 not executed, etc.)
+- \`verdict\`: "pass" | "conditional" | "fail"
+- \`severity\`: "auto-resolve" (minor), "soft-block" (runtime risk), "hard-block" (security/data loss)
+- \`issues\`: only list actual problems found, empty array if none.
+  **CRITICAL: every issue MUST have a non-empty \`message\` field.** An issue
+  without a message is useless — the auto-fix loop cannot act on it and the
+  task will get stuck retrying. If you cannot describe the problem concretely,
+  do not file the issue.
+- \`knownGaps\`: areas that could not be verified (Layer 3 not executed, etc.)
 `;
 }
 
@@ -303,13 +316,34 @@ function parseVerificationResult(
     const rawVerdict = String(parsed.verdict ?? "fail").toLowerCase().trim();
     let verdict: Verdict = VALID_VERDICTS.has(rawVerdict) ? (rawVerdict as Verdict) : "fail";
 
+    // Resolve message across known field name variants. Different evaluator
+    // runs have returned the payload under `message`, `description`, `detail`,
+    // `text`, `issue`, or `title` — accept any of them so the auto-fix loop
+    // receives a concrete problem statement instead of "No description".
+    const pickMessage = (issue: any): string => {
+      const candidates = [
+        issue.message,
+        issue.description,
+        issue.detail,
+        issue.text,
+        issue.issue,
+        issue.title,
+        issue.reason,
+        issue.problem,
+      ];
+      for (const c of candidates) {
+        if (typeof c === "string" && c.trim()) return c;
+      }
+      return "No description";
+    };
+
     const issues = (parsed.issues ?? []).map((issue: any, i: number) => ({
       id: `issue-${i}`,
       severity: issue.severity ?? "warning",
       file: issue.file,
       line: issue.line,
-      message: issue.message ?? "No description",
-      suggestion: issue.suggestion,
+      message: pickMessage(issue),
+      suggestion: issue.suggestion ?? issue.fix ?? issue.recommendation,
     }));
 
     // Also correct severity based on actual issues
