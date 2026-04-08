@@ -52,7 +52,7 @@ export function recoverOnStartup(db: Database): RecoveryResult {
   db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE status = 'active' AND pid IS NULL").run();
 
   // 3. 에이전트 상태 초기화: working → idle, current_task_id 해제
-  db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE status = 'working'").run();
+  db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE status = 'working'").run();
 
   // 4. 잔존 worktree + agent branch 정리 (프로젝트별)
   let cleanedWorktrees = 0;

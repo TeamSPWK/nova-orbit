@@ -357,6 +357,12 @@ export function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_goal_specs_goal ON goal_specs(goal_id);
   `);
 
+  // current_activity on agents — what the agent is currently doing (human-readable)
+  const agentCols3 = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
+  if (!agentCols3.some((c) => c.name === "current_activity")) {
+    db.exec("ALTER TABLE agents ADD COLUMN current_activity TEXT");
+  }
+
 }
 
 export function generateId(): string {

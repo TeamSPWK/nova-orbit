@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
-import type { NotificationType } from "../stores/useNotifications";
+
 import { TaskTimeline } from "./TaskTimeline";
 import { OrgChart } from "./OrgChart";
 import { AgentDetail } from "./AgentDetail";
@@ -13,7 +13,7 @@ import { AddAgentDialog } from "./AddAgentDialog";
 import { KanbanBoard } from "./KanbanBoard";
 import { ProjectSettings } from "./ProjectSettings";
 import { InputDialog } from "./InputDialog";
-import { Toast } from "./Toast";
+import { useToast } from "../stores/useToast";
 import { WelcomeGuide } from "./WelcomeGuide";
 import { ProjectStats } from "./ProjectStats";
 import { AutopilotModal } from "./AutopilotModal";
@@ -24,29 +24,84 @@ type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
 
 // ─── AddGoalDialog ───────────────────────────────────
 function AddGoalDialog({
+  projectId,
   onCreateDirect,
   onCreateWithSpec,
   onCancel,
 }: {
+  projectId: string;
   onCreateDirect: (title: string, description: string) => void;
   onCreateWithSpec: (title: string, description: string) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<"input" | "suggest">("input");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  // AI suggestion state
+  const [suggestions, setSuggestions] = useState<Array<{ title: string; description: string; priority: string; reason: string }>>([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError, setSuggestError] = useState("");
+  const [suggestErrorDetail, setSuggestErrorDetail] = useState("");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [withSpec, setWithSpec] = useState(true);
 
-  const handleSubmit = (mode: "direct" | "spec") => {
+  useEffect(() => { if (mode === "input") inputRef.current?.focus(); }, [mode]);
+
+  const handleSubmit = (submitMode: "direct" | "spec") => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
-    if (mode === "spec") {
+    if (submitMode === "spec") {
       onCreateWithSpec(title.trim(), description.trim());
     } else {
       onCreateDirect(title.trim(), description.trim());
+    }
+  };
+
+  const handleSuggest = async () => {
+    setMode("suggest");
+    setSuggestLoading(true);
+    setSuggestError("");
+    setSuggestErrorDetail("");
+    setSuggestions([]);
+    setSelected(new Set());
+    try {
+      const result = await api.goals.suggest(projectId);
+      if (result.length === 0) {
+        setSuggestError(t("addGoalAiSuggestEmpty"));
+      } else {
+        setSuggestions(result);
+      }
+    } catch (err: any) {
+      setSuggestError(err.message || t("addGoalAiSuggestError"));
+      setSuggestErrorDetail(err.detail || "");
+    } finally {
+      setSuggestLoading(false);
+    }
+  };
+
+  const toggleSelect = (idx: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleAddSelected = () => {
+    if (selected.size === 0 || submitting) return;
+    setSubmitting(true);
+    const selectedGoals = [...selected].map((i) => suggestions[i]);
+    for (const goal of selectedGoals) {
+      if (withSpec) {
+        onCreateWithSpec(goal.title, goal.description);
+      } else {
+        onCreateDirect(goal.title, goal.description);
+      }
     }
   };
 
@@ -56,76 +111,203 @@ function AddGoalDialog({
       onClick={onCancel}
     >
       <div
-        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[520px] overflow-hidden"
+        className="bg-white dark:bg-[#25253d] rounded-xl shadow-lg w-[560px] max-h-[80vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 space-y-3">
+        <div className="px-5 py-4 space-y-3 flex-1 overflow-y-auto">
           <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
             {t("addGoalTitle")}
           </h3>
-          <input
-            ref={inputRef}
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && title.trim() && !description) handleSubmit("direct");
-              if (e.key === "Escape") onCancel();
-            }}
-            placeholder={t("promptGoalTitleHint")}
-            disabled={submitting}
-            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
-          />
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") onCancel();
-            }}
-            placeholder={t("promptGoalDescHint")}
-            disabled={submitting}
-            rows={3}
-            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50 resize-none"
-          />
-          <p className="text-[11px] text-gray-400 dark:text-gray-500">{t("goalDescHelp")}</p>
-        </div>
-        <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-2">
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleSubmit("direct")}
-              disabled={!title.trim() || submitting}
-              className="flex-1 text-xs px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors text-left"
-            >
-              <div className="font-semibold">{t("addGoalCreateDirect")}</div>
-              <div className="mt-0.5 opacity-60">{t("addGoalCreateDirectDesc")}</div>
-            </button>
-            <button
-              onClick={() => handleSubmit("spec")}
-              disabled={!title.trim() || submitting}
-              className="flex-1 text-xs px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors text-left"
-            >
-              {submitting ? (
-                <div className="flex items-center gap-2">
-                  <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+
+          {mode === "input" ? (
+            <>
+              <input
+                ref={inputRef}
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && title.trim() && !description) handleSubmit("direct");
+                  if (e.key === "Escape") onCancel();
+                }}
+                placeholder={t("promptGoalTitleHint")}
+                disabled={submitting}
+                className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+              />
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") onCancel();
+                }}
+                placeholder={t("promptGoalDescHint")}
+                disabled={submitting}
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50 resize-none"
+              />
+              <p className="text-[11px] text-gray-400 dark:text-gray-500">{t("goalDescHelp")}</p>
+            </>
+          ) : (
+            <div className="space-y-2">
+              {suggestLoading ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-3">
+                  <svg className="animate-spin w-6 h-6 text-indigo-500" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
-                  <span>{t("loading")}</span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{t("addGoalAiSuggestLoading")}</p>
+                </div>
+              ) : suggestError ? (
+                <div className="text-center py-6 space-y-2">
+                  <p className="text-xs text-red-500">{suggestError}</p>
+                  {suggestErrorDetail && (
+                    <pre className="text-[10px] text-red-400 bg-red-50 dark:bg-red-900/20 rounded px-3 py-2 text-left whitespace-pre-wrap break-all max-h-24 overflow-y-auto mx-4">
+                      {suggestErrorDetail}
+                    </pre>
+                  )}
+                  <div className="flex justify-center gap-3">
+                    <button onClick={handleSuggest} className="text-xs text-indigo-500 hover:text-indigo-600">
+                      {t("retry")}
+                    </button>
+                    <button onClick={() => setMode("input")} className="text-xs text-gray-400 hover:text-gray-600">
+                      {t("addGoalCreateDirect")}
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <>
-                  <div className="font-semibold">{t("addGoalWithSpec")}</div>
-                  <div className="mt-0.5 opacity-60">{t("addGoalWithSpecDesc")}</div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">{t("addGoalAiSuggestSelect")}</p>
+                  {suggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      onClick={() => toggleSelect(i)}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                        selected.has(i)
+                          ? "border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-500"
+                          : "border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center ${
+                          selected.has(i)
+                            ? "bg-indigo-500 border-indigo-500 text-white"
+                            : "border-gray-300 dark:border-gray-500"
+                        }`}>
+                          {selected.has(i) && (
+                            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-medium text-gray-800 dark:text-gray-200">{s.title}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              s.priority === "high" ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"
+                              : s.priority === "low" ? "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                              : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                            }`}>{s.priority}</span>
+                          </div>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{s.description}</p>
+                          <p className="text-[10px] text-indigo-500 dark:text-indigo-400 mt-1">{s.reason}</p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                 </>
               )}
-            </button>
-          </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-2">
+          {mode === "input" ? (
+            <>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleSubmit("direct")}
+                  disabled={!title.trim() || submitting}
+                  className="flex-1 text-xs px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors text-left"
+                >
+                  <div className="font-semibold">{t("addGoalCreateDirect")}</div>
+                  <div className="mt-0.5 opacity-60">{t("addGoalCreateDirectDesc")}</div>
+                </button>
+                <button
+                  onClick={() => handleSubmit("spec")}
+                  disabled={!title.trim() || submitting}
+                  className="flex-1 text-xs px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors text-left"
+                >
+                  {submitting ? (
+                    <div className="flex items-center gap-2">
+                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      <span>{t("loading")}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="font-semibold">{t("addGoalWithSpec")}</div>
+                      <div className="mt-0.5 opacity-60">{t("addGoalWithSpecDesc")}</div>
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                <span className="text-[10px] text-gray-400">or</span>
+                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+              </div>
+              <button
+                onClick={handleSuggest}
+                disabled={submitting}
+                className="w-full text-xs px-4 py-2.5 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-40 transition-colors text-center"
+              >
+                <div className="font-semibold flex items-center justify-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                  </svg>
+                  {t("addGoalAiSuggest")}
+                </div>
+                <div className="mt-0.5 opacity-60">{t("addGoalAiSuggestDesc")}</div>
+              </button>
+            </>
+          ) : !suggestLoading && !suggestError && suggestions.length > 0 ? (
+            <>
+              <label className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={withSpec}
+                  onChange={(e) => setWithSpec(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-400 w-3.5 h-3.5"
+                />
+                {t("addGoalAiSuggestWithSpec")}
+              </label>
+              <button
+                onClick={handleAddSelected}
+                disabled={selected.size === 0 || submitting}
+                className="w-full text-xs px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors font-semibold"
+              >
+                {submitting ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    <span>{t("loading")}</span>
+                  </div>
+                ) : (
+                  `${t("addGoalAiSuggestAddSelected")} (${selected.size})`
+                )}
+              </button>
+            </>
+          ) : null}
           <button
-            onClick={onCancel}
+            onClick={mode === "suggest" && !suggestLoading ? () => setMode("input") : onCancel}
             disabled={submitting}
             className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
           >
-            {t("cancel")}
+            {mode === "suggest" && !suggestLoading ? "← " + t("addGoalCreateDirect") : t("cancel")}
           </button>
         </div>
       </div>
@@ -330,7 +512,7 @@ export function ProjectHome() {
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: NotificationType } | null>(null);
+  // toast state removed — using global useToast store
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
   const [reDecomposeGoalId, setReDecomposeGoalId] = useState<string | null>(null);
   const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
@@ -371,9 +553,7 @@ export function ProjectHome() {
 
   const specPollRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
-  const showToast = useCallback((message: string, type: NotificationType = "info") => {
-    setToast({ message, type });
-  }, []);
+  const { showToast } = useToast();
 
   const loadData = useCallback(() => {
     if (!currentProjectId) return;
@@ -414,6 +594,17 @@ export function ProjectHome() {
       setAutopilotMode((project as any).autopilot ?? "off");
     }
   }, [project]);
+
+  // Resume spec polling for goals that are still generating (survives page refresh)
+  useEffect(() => {
+    for (const goal of goals) {
+      if ((goal as any).spec_status === "generating" && !specPollRefs.current.has(goal.id)) {
+        startSpecPolling(goal.id);
+      }
+    }
+  // Only run when goals array reference changes (initial load / refresh)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goals]);
 
   // Listen for WebSocket refresh events
   useEffect(() => {
@@ -618,7 +809,10 @@ export function ProjectHome() {
     // Prevent duplicate polling
     if (specPollRefs.current.has(goalId)) return;
     setGeneratingSpecGoalIds((prev) => new Set(prev).add(goalId));
+    let retryCount = 0;
+    const MAX_RETRIES = 60; // 3s × 60 = 3min max
     const timer = setInterval(async () => {
+      retryCount++;
       try {
         const data = await api.goals.getSpec(goalId);
         const status = data?.prd_summary?._status;
@@ -631,12 +825,26 @@ export function ProjectHome() {
             return next;
           });
           if (status === "failed") {
-            showToast(t("specGenerateFailed"), "error");
+            showToast(t("specGenerateFailed"), "error", data?.prd_summary?._error);
           } else {
             showToast(t("specGenerateComplete"), "success");
           }
         }
-      } catch {
+      } catch (err: any) {
+        // 404 = spec row not yet created, keep polling
+        if (err.status === 404) {
+          if (retryCount >= MAX_RETRIES) {
+            clearInterval(timer);
+            specPollRefs.current.delete(goalId);
+            setGeneratingSpecGoalIds((prev) => {
+              const next = new Set(prev);
+              next.delete(goalId);
+              return next;
+            });
+            showToast(t("specGenerateFailed"), "error", "Timeout: spec generation took too long");
+          }
+          return; // keep polling
+        }
         clearInterval(timer);
         specPollRefs.current.delete(goalId);
         setGeneratingSpecGoalIds((prev) => {
@@ -644,7 +852,7 @@ export function ProjectHome() {
           next.delete(goalId);
           return next;
         });
-        showToast(t("specGenerateFailed"), "error");
+        showToast(t("specGenerateFailed"), "error", err.message);
       }
     }, 3000);
     specPollRefs.current.set(goalId, timer);
@@ -658,7 +866,7 @@ export function ProjectHome() {
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
     } catch (err: any) {
-      showToast(err.message ?? t("decomposeFailed"), "error");
+      showToast(t("decomposeFailed"), "error", err.message);
     }
   };
 
@@ -673,7 +881,7 @@ export function ProjectHome() {
       await api.goals.generateSpec(goal.id);
       startSpecPolling(goal.id);
     } catch (err: any) {
-      showToast(err.message ?? t("specGenerateFailed"), "error");
+      showToast(t("specGenerateFailed"), "error", err.message);
     }
   };
 
@@ -684,7 +892,7 @@ export function ProjectHome() {
       setGoals(goals.map((g) => g.id === goalId ? { ...g, ...updated } : g));
       showToast(t("goalUpdated"), "success");
     } catch (err: any) {
-      showToast(err.message ?? "Failed to update goal", "error");
+      showToast(t("decomposeFailed"), "error", err.message);
     }
   };
 
@@ -704,8 +912,8 @@ export function ProjectHome() {
       await api.orchestration.decomposeGoal(goalId);
       loadData();
       showToast(isReDecompose ? t("reDecomposeSuccess") : t("decomposeSuccess"), "success");
-    } catch {
-      showToast(t("decomposeFailed"), "error");
+    } catch (err: any) {
+      showToast(t("decomposeFailed"), "error", err.message);
     } finally {
       setDecomposingGoalId(null);
     }
@@ -784,7 +992,7 @@ export function ProjectHome() {
       updateProject(updated);
       setAutopilotMode(mode);
     } catch (err: any) {
-      showToast(err.message ?? "Failed to change autopilot mode", "error");
+      showToast("Failed to change autopilot mode", "error", err.message);
     } finally {
       setAutopilotChanging(false);
     }
@@ -797,7 +1005,7 @@ export function ProjectHome() {
       setQueuePaused(false);
       setQueuePausedInfo(null);
     } catch (err: any) {
-      showToast(err.message ?? "Failed to resume queue", "error");
+      showToast("Failed to resume queue", "error", err.message);
     }
   };
 
@@ -829,7 +1037,7 @@ export function ProjectHome() {
       const result = await api.projects.startDevServer(currentProjectId);
       setDevServerStatus({ running: true, port: result.port, url: result.url });
     } catch (err: any) {
-      showToast(err.message ?? "Failed to start dev server", "error");
+      showToast("Failed to start dev server", "error", err.message);
     } finally {
       setDevServerStarting(false);
     }
@@ -841,7 +1049,7 @@ export function ProjectHome() {
       await api.projects.stopDevServer(currentProjectId);
       setDevServerStatus({ running: false, port: null, url: null });
     } catch (err: any) {
-      showToast(err.message ?? "Failed to stop dev server", "error");
+      showToast("Failed to stop dev server", "error", err.message);
     }
   };
 
@@ -886,8 +1094,9 @@ export function ProjectHome() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {showDialog === "addGoal" && (
+      {showDialog === "addGoal" && currentProjectId && (
         <AddGoalDialog
+          projectId={currentProjectId}
           onCreateDirect={handleAddGoalDirect}
           onCreateWithSpec={handleAddGoalWithSpec}
           onCancel={() => setShowDialog(null)}
@@ -942,9 +1151,8 @@ export function ProjectHome() {
           />
         );
       })()}
-      {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
       {specGoalId && (
-        <GoalSpecPanel goalId={specGoalId} onClose={() => setSpecGoalId(null)} />
+        <GoalSpecPanel goalId={specGoalId} onClose={() => setSpecGoalId(null)} onGeneratingClose={() => startSpecPolling(specGoalId)} />
       )}
       {showAutopilotModal && (
         <AutopilotModal
@@ -1311,7 +1519,7 @@ export function ProjectHome() {
                                 onClick={() => setSpecGoalId(goal.id)}
                                 className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors whitespace-nowrap"
                               >
-                                {t("specView")}
+                                {(goal as any).has_spec ? t("specView") : t("specGenerate")}
                               </button>
                             )}
                             {(() => {
@@ -1637,7 +1845,7 @@ export function ProjectHome() {
                       </div>
                     </div>
                   )}
-                  <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} />
+                  <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} autopilotMode={autopilotMode} />
                 </div>
               </section>
             </div>

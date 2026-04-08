@@ -75,7 +75,7 @@ export function createOrchestrationEngine(
   broadcast: (event: string, data: unknown) => void,
 ) {
   const qualityGate = createQualityGate(db, sessionManager);
-  const delegationEngine = createDelegationEngine(db, sessionManager, broadcast);
+  const delegationEngine = createDelegationEngine(db, sessionManager, broadcast, qualityGate);
 
   return {
     /**
@@ -116,7 +116,7 @@ export function createOrchestrationEngine(
             log.info(`Task "${task.title}" delegated to ${delegation.subtaskIds.length} subtasks`);
             // Reset agent status — delegation engine's finally already handles this,
             // but ensure it's clean on the return path
-            db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
+            db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE id = ?")
               .run(task.assignee_id);
             broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
             return { success: true, verdict: "delegated" };
@@ -214,9 +214,10 @@ export function createOrchestrationEngine(
           error,
         });
       });
-      db.prepare("UPDATE agents SET status = 'working', current_task_id = ? WHERE id = ?")
-        .run(taskId, task.assignee_id);
-      broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "working", taskId });
+      const execActivity = `task:${task.title?.slice(0, 80) ?? ""}`;
+      db.prepare("UPDATE agents SET status = 'working', current_task_id = ?, current_activity = ? WHERE id = ?")
+        .run(taskId, execActivity, task.assignee_id);
+      broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "working", taskId, activity: execActivity });
       broadcast("task:started", { taskId, agentId: task.assignee_id, startedAt: new Date().toISOString() });
 
       try {
@@ -348,8 +349,8 @@ Fix ONLY these issues. Do not modify other code.
 `;
           // Spawn a NEW session for fix (prevent context pollution — Nova rule)
           // Keep agent in 'working' state during fix to prevent scheduler double-assignment
-          db.prepare("UPDATE agents SET status = 'working', current_task_id = ? WHERE id = ?")
-            .run(taskId, task.assignee_id);
+          db.prepare("UPDATE agents SET status = 'working', current_task_id = ?, current_activity = ? WHERE id = ?")
+            .run(taskId, `fix:${task.title?.slice(0, 80) ?? ""}`, task.assignee_id);
           const fixSession = sessionManager.spawnAgent(task.assignee_id, effectiveWorkdir);
           fixSession.on("rate-limit", (info: { waitMs: number; stderr: string }) => {
             broadcast("system:rate-limit", {
@@ -440,7 +441,7 @@ Fix ONLY these issues. Do not modify other code.
         throw err;
       } finally {
         // Reset agent status
-        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
+        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE id = ?")
           .run(task.assignee_id);
         broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
 
@@ -478,9 +479,10 @@ Fix ONLY these issues. Do not modify other code.
         throw new Error("No agents available for task decomposition");
       }
 
+      const decomposeSessionKey = `decompose-${goal.id}`;
       let session;
       try {
-        session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd());
+        session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd(), decomposeSessionKey);
       } catch (err: any) {
         throw new Error(`Failed to spawn agent for decomposition: ${err.message}`);
       }
@@ -555,9 +557,12 @@ Respond in this EXACT JSON format:
 `;
 
       const runResult = await session.send(decomposePrompt);
+
+      log.info(`Decompose raw: exitCode=${runResult.exitCode}, stdoutLen=${runResult.stdout.length}, stderrLen=${runResult.stderr.length}, stdout500=${runResult.stdout.slice(0, 500)}`);
+
       const parsed = parseStreamJson(runResult.stdout);
 
-      log.info(`Decompose response: exitCode=${runResult.exitCode}, textLen=${parsed.text.length}, first200=${parsed.text.slice(0, 200)}`);
+      log.info(`Decompose parsed: textLen=${parsed.text.length}, lineCount=${parsed.lineCount}, errors=${parsed.errors.join("; ")}, first200=${parsed.text.slice(0, 200)}`);
       if (runResult.exitCode !== 0) {
         log.error(`Decompose CLI error: stderr=${runResult.stderr.slice(0, 300)}`);
       }
@@ -642,7 +647,7 @@ Respond in this EXACT JSON format:
         throw err;
       } finally {
         // Cleanup decompose session to free the agent
-        sessionManager.killSession(agent.id);
+        sessionManager.killSession(decomposeSessionKey);
       }
     },
 
@@ -686,8 +691,14 @@ Respond in this EXACT JSON format:
 
       log.info(`Full autopilot: generating goals from mission "${project.mission.slice(0, 50)}..."`);
 
+      // Set CTO activity
+      db.prepare("UPDATE agents SET status = 'working', current_activity = 'goal_generation' WHERE id = ?")
+        .run(ctoAgent.id);
+      broadcast("agent:status", { id: ctoAgent.id, status: "working", activity: "goal_generation" });
+
       const ctoWorkdir = project.workdir || (() => { throw new Error("Project has no workdir configured"); })();
-      const session = sessionManager.spawnAgent(ctoAgent.id, ctoWorkdir);
+      const missionSessionKey = `mission-${projectId}-${Date.now()}`;
+      const session = sessionManager.spawnAgent(ctoAgent.id, ctoWorkdir, missionSessionKey);
 
       try {
       const existingGoalsSection = existingGoals.length > 0
@@ -721,24 +732,68 @@ Respond in this EXACT JSON format:
 `;
 
       const runResult = await session.send(prompt);
+
+      log.info(`Mission analysis raw: exitCode=${runResult.exitCode}, stdoutLen=${runResult.stdout.length}, stderrLen=${runResult.stderr.length}`);
+
+      // Debug: dump raw stdout to file for analysis
+      try {
+        const fs = await import("node:fs");
+        const debugPath = "/tmp/nova-mission-debug.txt";
+        fs.writeFileSync(debugPath, `exitCode=${runResult.exitCode}\nstderr=${runResult.stderr}\n---STDOUT---\n${runResult.stdout}`);
+        log.info(`Mission analysis debug dumped to ${debugPath}`);
+      } catch { /* ignore */ }
+
       const parsed = parseStreamJson(runResult.stdout);
 
-      const jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
-      if (!jsonMatch) throw new Error("No JSON found in mission analysis response");
+      log.info(`Mission analysis parsed: textLen=${parsed.text.length}, errors=${parsed.errors.join("; ")}`);
 
-      const data = JSON.parse(jsonMatch[1]);
+      // Try multiple extraction strategies
+      let jsonMatch = parsed.text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) {
+        jsonMatch = parsed.text.match(/(\{[\s\S]*"goals"\s*:\s*\[[\s\S]*\][\s\S]*\})/);
+      }
+      if (!jsonMatch) throw new Error(`No JSON found in mission analysis response (textLen=${parsed.text.length}, errors=${parsed.errors.join("; ")}, first300=${parsed.text.slice(0, 300)})`);
+
+      let data: any;
+      try {
+        data = JSON.parse(jsonMatch[1]);
+      } catch (parseErr: any) {
+        // Truncated JSON recovery: extract complete goal objects from partial JSON
+        log.warn(`Mission JSON parse failed (${parseErr.message}), attempting truncated recovery`);
+        const partialGoals: any[] = [];
+        const goalPattern = /\{\s*"title"\s*:\s*"[^"]+"\s*,\s*"description"\s*:\s*"[^"]*"\s*,\s*"priority"\s*:\s*"[^"]*"\s*\}/g;
+        let match;
+        while ((match = goalPattern.exec(jsonMatch[1])) !== null) {
+          try { partialGoals.push(JSON.parse(match[0])); } catch { /* skip malformed */ }
+        }
+        if (partialGoals.length === 0) throw parseErr;
+        log.info(`Recovered ${partialGoals.length} goals from truncated JSON`);
+        data = { goals: partialGoals };
+      }
+
       const goals = (data.goals ?? []).slice(0, remainingSlots);
       const VALID_PRIORITIES = ["critical", "high", "medium", "low"];
-      const goalIds: string[] = [];
 
-      for (const [index, g] of goals.entries()) {
-        if (!g.description || typeof g.description !== "string") continue;
-        const priority = VALID_PRIORITIES.includes(g.priority) ? g.priority : "medium";
-        const row = db.prepare(
-          "INSERT INTO goals (project_id, title, description, priority, sort_order) VALUES (?, ?, ?, ?, ?) RETURNING id",
-        ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority, index) as { id: string };
-        goalIds.push(row.id);
-      }
+      // Validate ALL goals before any INSERT — prevents partial-insert orphans
+      // when the loop would throw midway through.
+      const validGoals = goals
+        .map((g: any, index: number) => ({ g, index }))
+        .filter(({ g }: { g: any }) => g && typeof g.description === "string" && g.description.length > 0);
+
+      // Wrap inserts in a transaction so partial failures roll back cleanly
+      const insertGoals = db.transaction((entries: { g: any; index: number }[]): string[] => {
+        const ids: string[] = [];
+        for (const { g, index } of entries) {
+          const priority = VALID_PRIORITIES.includes(g.priority) ? g.priority : "medium";
+          const row = db.prepare(
+            "INSERT INTO goals (project_id, title, description, priority, sort_order) VALUES (?, ?, ?, ?, ?) RETURNING id",
+          ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority, index) as { id: string };
+          ids.push(row.id);
+        }
+        return ids;
+      });
+
+      const goalIds: string[] = insertGoals(validGoals);
 
       log.info(`Full autopilot: created ${goalIds.length} goals from mission`);
       broadcast("project:updated", { projectId });
@@ -750,7 +805,7 @@ Respond in this EXACT JSON format:
       return { goalIds };
       } finally {
         // Cleanup CTO session — 성공/실패 모두
-        sessionManager.killSession(ctoAgent.id);
+        sessionManager.killSession(missionSessionKey);
       }
     },
   };
@@ -766,6 +821,13 @@ function transitionTask(
   db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?")
     .run(newStatus, task.id);
   broadcast("task:updated", { ...task, status: newStatus });
+
+  // Update agent activity based on task state
+  if (newStatus === "in_review" && task.assignee_id) {
+    db.prepare("UPDATE agents SET current_activity = ? WHERE id = ?")
+      .run(`review:${(task.title ?? "").slice(0, 80)}`, task.assignee_id);
+  }
+
   if (newStatus === "done" && !task.parent_task_id) {
     updateGoalProgress(db, task.goal_id);
   }
@@ -875,12 +937,19 @@ async function runGitWorkflow(
 }
 
 function updateGoalProgress(db: Database, goalId: string): void {
-  const stats = db.prepare(`
-    SELECT COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
-    FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
-  `).get(goalId) as { total: number; done: number };
-  const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
-  db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalId);
+  // Atomic UPDATE to avoid SELECT-then-UPDATE race with concurrent task updates.
+  // Clamped to 0..100 defensively.
+  db.prepare(`
+    UPDATE goals SET progress = (
+      SELECT
+        CASE
+          WHEN COUNT(*) = 0 THEN 0
+          ELSE MAX(0, MIN(100, CAST(ROUND(100.0 * SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) / COUNT(*)) AS INTEGER)))
+        END
+      FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+    )
+    WHERE id = ?
+  `).run(goalId, goalId);
 }
 
 /**

@@ -6,6 +6,31 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { AgentWorkflowGuide } from "./AgentWorkflowGuide";
 import { api } from "../lib/api";
 
+/** Parse activity key (e.g. "task:Build API" → { key: "activityTask", name: "Build API" }) */
+export function parseActivity(raw: string | null | undefined, t: (k: string, opts?: any) => string): string | null {
+  if (!raw) return null;
+  const ACTIVITY_MAP: Record<string, string> = {
+    "task": "activityTask",
+    "fix": "activityFix",
+    "review": "activityReview",
+    "spec_gen": "activitySpecGen",
+    "decompose": "activityDecompose",
+    "goal_generation": "activityGoalGen",
+    "branch_merge": "activityBranchMerge",
+  };
+  const colonIdx = raw.indexOf(":");
+  if (colonIdx > 0) {
+    const prefix = raw.slice(0, colonIdx);
+    const name = raw.slice(colonIdx + 1);
+    const key = ACTIVITY_MAP[prefix];
+    if (key) return t(key, { name });
+  }
+  // No colon — try exact match
+  const key = ACTIVITY_MAP[raw];
+  if (key) return t(key);
+  return raw; // fallback: show raw
+}
+
 /** BFS로 agentId의 모든 하위 노드 ID 집합 반환 (순환 방지용) */
 function getDescendantIds(agents: Agent[], agentId: string): Set<string> {
   const ids = new Set<string>();
@@ -74,6 +99,7 @@ interface NodeProps {
 }
 
 function OrgNode({ agent, agents, childrenMap, selectedId, onSelect, onQuickPrompt, onDrop, dragOverId, onDragOverChange, depth }: NodeProps) {
+  const { t } = useTranslation();
   const children = childrenMap[agent.id] ?? [];
   const isSelected = selectedId === agent.id;
   const isWorking = agent.status === "working";
@@ -139,6 +165,11 @@ function OrgNode({ agent, agents, childrenMap, selectedId, onSelect, onQuickProm
               {STATUS_LABEL[agent.status] ?? "idle"}
             </span>
           </div>
+          {isWorking && (agent as any).current_activity && (
+            <p className="text-[8px] text-indigo-500 dark:text-indigo-400 truncate w-full px-1 leading-tight">
+              {parseActivity((agent as any).current_activity, t)}
+            </p>
+          )}
         </button>
 
         {/* Quick prompt button — inside padded container to avoid clipping */}

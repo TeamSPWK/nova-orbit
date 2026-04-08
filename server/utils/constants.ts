@@ -14,7 +14,10 @@ export const MAX_SUMMARY_LEN = 500;
 export const MAX_TASKS_PER_GOAL = 10;
 
 // --- Scheduler ---
-export const POLL_INTERVAL_MS = parseInt(process.env.NOVA_POLL_INTERVAL_MS ?? "3000", 10);
+// Poll interval when idle (no work). Executor loop uses a short 100ms follow-up
+// after task completion, so this only affects the "waiting for new work" path.
+// 1s provides snappier response for manual task additions without significant load.
+export const POLL_INTERVAL_MS = parseInt(process.env.NOVA_POLL_INTERVAL_MS ?? "1000", 10);
 export const BACKOFF_BASE_MS = parseInt(process.env.NOVA_BACKOFF_BASE_MS ?? "60000", 10);
 export const BACKOFF_MAX_MS = parseInt(process.env.NOVA_BACKOFF_MAX_MS ?? "300000", 10);
 export const MAX_CONSECUTIVE_RATE_LIMITS = parseInt(process.env.NOVA_MAX_RATE_LIMITS ?? "3", 10);

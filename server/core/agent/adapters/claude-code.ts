@@ -220,8 +220,9 @@ export function createClaudeCodeAdapter() {
             proc.stdin!.write(message);
             proc.stdin!.end();
 
-            proc.on("close", (code: number | null) => {
+            proc.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
               clearAllTimers();
+              const wasKilled = proc.killed;
               session.process = null;
 
               // Try to extract sessionId from stream-json output
@@ -246,17 +247,24 @@ export function createClaudeCodeAdapter() {
                   stdoutLen: stdout.length,
                   stderrLen: stderr.length,
                   stderr: stderr.slice(0, 1000),
+                  signal,
+                  wasKilled,
                   hasReceivedOutput,
                 });
               }
 
               if (stdout.trim() === "") {
-                log.warn(`Claude Code produced empty stdout (exit code: ${code})`, {
+                log.warn(`Claude Code produced empty stdout (exit code: ${code}, signal: ${signal ?? "none"}, killed: ${wasKilled})`, {
                   stderr: stderr.slice(0, 500),
                 });
               }
 
-              resolve({ stdout: stdout.trim(), stderr, exitCode: code, sessionId: session.lastSessionId });
+              // Surface signal/kill info via stderr so upstream parsers can see it
+              const enrichedStderr = code === null && signal
+                ? `${stderr}${stderr.endsWith("\n") ? "" : "\n"}[nova] process terminated by signal ${signal}${wasKilled ? " (killed)" : ""}`
+                : stderr;
+
+              resolve({ stdout: stdout.trim(), stderr: enrichedStderr, exitCode: code, sessionId: session.lastSessionId });
             });
 
             proc.on("error", (err: Error) => {

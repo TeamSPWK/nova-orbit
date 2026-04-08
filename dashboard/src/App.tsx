@@ -14,6 +14,7 @@ import { GettingStarted } from "./components/GettingStarted";
 import { RateLimitBanner } from "./components/RateLimitBanner";
 import { StatusBar } from "./components/StatusBar";
 import { useNotifications } from "./stores/useNotifications";
+import { ToastContainer } from "./components/Toast";
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -216,6 +217,7 @@ function App() {
           <ProjectHome />
         )}
       </main>
+      <ToastContainer />
     </div>
   );
 }

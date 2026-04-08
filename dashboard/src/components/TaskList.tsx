@@ -40,6 +40,7 @@ interface TaskListProps {
   agents: Array<{ id: string; name: string }>;
   projectId?: string;
   onUpdate?: () => void;
+  autopilotMode?: string; // 'off' | 'goal' | 'full'
 }
 
 const DONE_PREVIEW_COUNT = 5;
@@ -53,7 +54,8 @@ function groupBy<T>(arr: T[], key: keyof T): Record<string, T[]> {
   }, {});
 }
 
-export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) {
+export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "off" }: TaskListProps) {
+  const isAutopilot = autopilotMode !== "off";
   const { t } = useTranslation();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
   const [verifyingTasks, setVerifyingTasks] = useState<Set<string>>(new Set());
@@ -306,7 +308,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
           </select>
 
           {/* Approval Gate: Approve/Reject for pending_approval tasks */}
-          {task.status === "pending_approval" && (
+          {task.status === "pending_approval" && !isAutopilot && (
             <>
               <button
                 onClick={async (e) => {
@@ -330,9 +332,19 @@ export function TaskList({ tasks, agents, projectId, onUpdate }: TaskListProps) 
               </button>
             </>
           )}
+          {task.status === "pending_approval" && isAutopilot && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/20 text-blue-500 dark:text-blue-400 rounded">
+              Auto
+            </span>
+          )}
 
           {/* Governance: Verify → Approve/Reject for in_review tasks */}
-          {task.status === "in_review" && (
+          {task.status === "in_review" && isAutopilot && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/20 text-blue-500 dark:text-blue-400 rounded">
+              Auto
+            </span>
+          )}
+          {task.status === "in_review" && !isAutopilot && (
             <>
               {task.verification_id ? (
                 <>

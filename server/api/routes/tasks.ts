@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { AppContext } from "../../index.js";
+import { MAX_TITLE_LEN, MAX_DESC_LEN } from "../../utils/constants.js";
 
 export function createTaskRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -49,15 +50,41 @@ export function createTaskRoutes(ctx: AppContext): Router {
   // Create task
   router.post("/", (req, res) => {
     const { goal_id, project_id, title, description = "", assignee_id } = req.body;
-    if (!goal_id || !project_id || !title) {
-      return res.status(400).json({ error: "goal_id, project_id, and title are required" });
+    // Type + length validation
+    if (typeof goal_id !== "string" || !goal_id) {
+      return res.status(400).json({ error: "goal_id (string) is required" });
     }
+    if (typeof project_id !== "string" || !project_id) {
+      return res.status(400).json({ error: "project_id (string) is required" });
+    }
+    if (typeof title !== "string" || !title) {
+      return res.status(400).json({ error: "title (string) is required" });
+    }
+    if (typeof description !== "string") {
+      return res.status(400).json({ error: "description must be a string" });
+    }
+    // Verify parent resources exist (provides clean 404 instead of FK error)
+    const goal = db.prepare("SELECT id, project_id FROM goals WHERE id = ?").get(goal_id) as { id: string; project_id: string } | undefined;
+    if (!goal) return res.status(404).json({ error: "Goal not found" });
+    if (goal.project_id !== project_id) {
+      return res.status(400).json({ error: "goal_id does not belong to project_id" });
+    }
+    if (assignee_id != null) {
+      if (typeof assignee_id !== "string") {
+        return res.status(400).json({ error: "assignee_id must be a string or null" });
+      }
+      const agent = db.prepare("SELECT id FROM agents WHERE id = ? AND project_id = ?").get(assignee_id, project_id) as { id: string } | undefined;
+      if (!agent) return res.status(404).json({ error: "Assignee agent not found in this project" });
+    }
+
+    const boundedTitle = title.slice(0, MAX_TITLE_LEN);
+    const boundedDesc = description.slice(0, MAX_DESC_LEN);
 
     try {
       const result = db.prepare(`
         INSERT INTO tasks (goal_id, project_id, title, description, assignee_id)
         VALUES (?, ?, ?, ?, ?)
-      `).run(goal_id, project_id, title, description, assignee_id ?? null);
+      `).run(goal_id, project_id, boundedTitle, boundedDesc, assignee_id ?? null);
 
       const task = db.prepare("SELECT * FROM tasks WHERE rowid = ?").get(result.lastInsertRowid);
       broadcast("task:updated", task);
@@ -106,6 +133,16 @@ export function createTaskRoutes(ctx: AppContext): Router {
       }
     }
 
+    // Input type + length validation
+    if (title != null && typeof title !== "string") {
+      return res.status(400).json({ error: "title must be a string" });
+    }
+    if (description != null && typeof description !== "string") {
+      return res.status(400).json({ error: "description must be a string" });
+    }
+    const boundedTitle = typeof title === "string" ? title.slice(0, MAX_TITLE_LEN) : null;
+    const boundedDesc = typeof description === "string" ? description.slice(0, MAX_DESC_LEN) : null;
+
     try {
       // assignee_id needs special handling: explicit null means "unassign",
       // undefined means "don't change". COALESCE(NULL, x) = x, so we can't use it.
@@ -116,25 +153,32 @@ export function createTaskRoutes(ctx: AppContext): Router {
         ? [assignee_id]
         : [];
 
-      db.prepare(`
-        UPDATE tasks SET
-          title = COALESCE(?, title),
-          description = COALESCE(?, description),
-          ${assigneeClause}
-          status = COALESCE(?, status),
-          verification_id = COALESCE(?, verification_id),
-          updated_at = datetime('now')
-        WHERE id = ?
-      `).run(
-        title ?? null,
-        description ?? null,
-        ...assigneeParams,
-        status ?? null,
-        verification_id ?? null,
-        req.params.id,
-      );
+      // Atomic re-check + update — prevents race with concurrent DELETE
+      const run = db.transaction(() => {
+        const current = db.prepare("SELECT id FROM tasks WHERE id = ?").get(req.params.id) as { id: string } | undefined;
+        if (!current) return null;
+        db.prepare(`
+          UPDATE tasks SET
+            title = COALESCE(?, title),
+            description = COALESCE(?, description),
+            ${assigneeClause}
+            status = COALESCE(?, status),
+            verification_id = COALESCE(?, verification_id),
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).run(
+          boundedTitle,
+          boundedDesc,
+          ...assigneeParams,
+          status ?? null,
+          verification_id ?? null,
+          req.params.id,
+        );
+        return db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+      });
 
-      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);
+      const updated = run();
+      if (!updated) return res.status(404).json({ error: "Task not found (deleted concurrently)" });
       broadcast("task:updated", updated);
 
       // Update goal progress if task status changed
@@ -262,13 +306,18 @@ export function createTaskRoutes(ctx: AppContext): Router {
 }
 
 function updateGoalProgress(db: any, goalId: string): void {
-  const stats = db.prepare(`
-    SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
-    FROM tasks WHERE goal_id = ?
-  `).get(goalId) as { total: number; done: number };
-
-  const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
-  db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalId);
+  // Single atomic statement — avoids SELECT-then-UPDATE race when tasks
+  // update concurrently. Result is clamped to 0..100 via MIN/MAX.
+  // Only root tasks (parent_task_id IS NULL) count — subtasks roll up via their parent.
+  db.prepare(`
+    UPDATE goals SET progress = (
+      SELECT
+        CASE
+          WHEN COUNT(*) = 0 THEN 0
+          ELSE MAX(0, MIN(100, CAST(ROUND(100.0 * SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) / COUNT(*)) AS INTEGER)))
+        END
+      FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+    )
+    WHERE id = ?
+  `).run(goalId, goalId);
 }

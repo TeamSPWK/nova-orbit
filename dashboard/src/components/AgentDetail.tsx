@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { AgentTerminal } from "./AgentTerminal";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { parseActivity } from "./OrgChart";
 import { AgentAvatar } from "./AgentAvatar";
 
 interface Agent {
@@ -438,14 +439,21 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
                   </span>
                 </div>
               )}
-              {currentTask && (
+              {currentTask ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{t("agentDetailCurrentTask")}</span>
                   <span className="text-xs text-gray-700 dark:text-gray-300 text-right">
                     {currentTask.title}
                   </span>
                 </div>
-              )}
+              ) : (agent as any).current_activity ? (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{t("agentDetailCurrentTask")}</span>
+                  <span className="text-xs text-indigo-600 dark:text-indigo-400 text-right">
+                    {parseActivity((agent as any).current_activity, t)}
+                  </span>
+                </div>
+              ) : null}
             </div>
           </section>
 

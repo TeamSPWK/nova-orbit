@@ -234,8 +234,8 @@ ${branchList}
       return;
     }
     (async () => {
-      db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agent.id);
-      broadcast("agent:status", { id: agent.id, name: agent.name, status: "working" });
+      db.prepare("UPDATE agents SET status = 'working', current_activity = 'branch_merge' WHERE id = ?").run(agent.id);
+      broadcast("agent:status", { id: agent.id, name: agent.name, status: "working", activity: "branch_merge" });
       broadcast("project:branch-merge-started", { projectId, agentId: agent.id, agentName: agent.name, branches });
 
       let session;
@@ -277,11 +277,19 @@ ${branchList}
           projectId, agentId: agent.id, error: err.message, merged: 0, remaining: branches,
         });
       } finally {
-        sm.killSession(agent.id);
-        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?").run(agent.id);
-        broadcast("agent:status", { id: agent.id, name: agent.name, status: "idle" });
+        // finally must never throw — wrap each side-effect so a single failure
+        // doesn't become an unhandled rejection
+        try { sm.killSession(agent.id); } catch (e: any) { log.warn(`merge cleanup: killSession failed — ${e?.message ?? e}`); }
+        try {
+          db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?").run(agent.id);
+        } catch (e: any) { log.warn(`merge cleanup: agent status reset failed — ${e?.message ?? e}`); }
+        try { broadcast("agent:status", { id: agent.id, name: agent.name, status: "idle" }); } catch { /* ignore */ }
       }
-    })();
+    })().catch((err: any) => {
+      // Defense-in-depth: catch anything the try/catch missed so Node never
+      // sees an unhandled promise rejection from this IIFE.
+      log.error(`merge-all IIFE crashed unexpectedly: ${err?.message ?? err}`);
+    });
   });
 
   /** Delete all agent branches (force) */

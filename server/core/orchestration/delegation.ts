@@ -45,18 +45,33 @@ export interface DelegationResult {
  * - Subtask failure → parent task blocked
  */
 function updateGoalProgress(db: Database, goalId: string): void {
-  const stats = db.prepare(`
-    SELECT COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
-    FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
-  `).get(goalId) as { total: number; done: number };
-  const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
-  db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalId);
+  // Atomic UPDATE with clamping — see tasks.ts/engine.ts for identical logic.
+  db.prepare(`
+    UPDATE goals SET progress = (
+      SELECT
+        CASE
+          WHEN COUNT(*) = 0 THEN 0
+          ELSE MAX(0, MIN(100, CAST(ROUND(100.0 * SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) / COUNT(*)) AS INTEGER)))
+        END
+      FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+    )
+    WHERE id = ?
+  `).run(goalId, goalId);
+}
+
+/**
+ * Lightweight QualityGate interface — accepts any object with a compatible verify().
+ * Using a structural type avoids a circular import with quality-gate/evaluator.
+ */
+interface ParentVerifier {
+  verify: (taskId: string, config?: { workdir?: string; scope?: any }) => Promise<{ verdict: string; severity?: string; issues?: unknown[] }>;
 }
 
 export function createDelegationEngine(
   db: Database,
   sessionManager: SessionManager,
   broadcast: (event: string, data: unknown) => void,
+  parentVerifier?: ParentVerifier,
 ) {
   return {
     /**
@@ -222,9 +237,13 @@ Respond in this EXACT JSON format:
 
     /**
      * Check if all subtasks of a parent task are done.
-     * If so, mark the parent as done. If any are blocked/failed, mark parent as blocked.
+     * If so, verify the parent via Quality Gate (when a verifier is provided)
+     * and transition to done/blocked based on the verdict.
+     * If any subtask is blocked, mark parent as blocked immediately.
+     *
+     * Callers invoke this fire-and-forget; errors are caught and logged internally.
      */
-    checkParentCompletion(parentTaskId: string): void {
+    async checkParentCompletion(parentTaskId: string): Promise<void> {
       const subtasks = db.prepare(
         "SELECT status FROM tasks WHERE parent_task_id = ?",
       ).all(parentTaskId) as { status: string }[];
@@ -239,11 +258,56 @@ Respond in this EXACT JSON format:
       if (!task) return;
 
       if (allDone) {
-        db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
+        // Guard: prevent duplicate verification if multiple subtasks finish concurrently
+        if (task.status === "in_review" || task.status === "done") return;
+
+        // Transition parent to in_review while verification runs
+        db.prepare("UPDATE tasks SET status = 'in_review', updated_at = datetime('now') WHERE id = ?")
           .run(parentTaskId);
-        broadcast("task:updated", { ...task, status: "done" });
-        updateGoalProgress(db, task.goal_id);
-        log.info(`Parent task ${parentTaskId} completed — all subtasks done`);
+        broadcast("task:updated", { ...task, status: "in_review" });
+
+        if (!parentVerifier) {
+          // No verifier wired in — fall back to immediate done (legacy behavior)
+          db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
+            .run(parentTaskId);
+          broadcast("task:updated", { ...task, status: "done" });
+          updateGoalProgress(db, task.goal_id);
+          log.info(`Parent task ${parentTaskId} completed (no verifier) — all subtasks done`);
+          return;
+        }
+
+        // Run Quality Gate verification on the aggregated subtask changes
+        try {
+          log.info(`Parent task ${parentTaskId}: all subtasks done, running verification`);
+          const verification = await parentVerifier.verify(parentTaskId, {});
+          broadcast("verification:result", verification);
+
+          const passed = verification.verdict === "pass" || verification.verdict === "conditional";
+          const finalStatus = passed ? "done" : "blocked";
+          db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(finalStatus, parentTaskId);
+          broadcast("task:updated", { ...task, status: finalStatus });
+
+          if (passed) {
+            updateGoalProgress(db, task.goal_id);
+            log.info(`Parent task ${parentTaskId} verified PASS`);
+          } else {
+            log.warn(`Parent task ${parentTaskId} verification FAILED (${verification.verdict})`);
+            db.prepare(
+              "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'verification_fail', ?)"
+            ).run(task.project_id, task.assignee_id, `Parent task blocked after verification: ${task.title}`);
+          }
+        } catch (verifyErr: any) {
+          log.error(`Parent verification crashed for ${parentTaskId}: ${verifyErr.message}`);
+          // Revert to done so we don't lose the subtask work — flag for manual review
+          db.prepare("UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?")
+            .run(parentTaskId);
+          broadcast("task:updated", { ...task, status: "done" });
+          updateGoalProgress(db, task.goal_id);
+          db.prepare(
+            "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'verification_error', ?)"
+          ).run(task.project_id, task.assignee_id, `Parent verification error (marked done): ${task.title} — ${verifyErr.message?.slice(0, 160)}`);
+        }
       } else if (anyBlocked && allFinished) {
         // Only block parent when all subtasks have finished (some done, some blocked)
         db.prepare("UPDATE tasks SET status = 'blocked', updated_at = datetime('now') WHERE id = ?")

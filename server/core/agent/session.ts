@@ -8,7 +8,8 @@ import { loadMemory } from "./memory.js";
 const log = createLogger("session-manager");
 
 export interface SessionManager {
-  spawnAgent: (agentId: string, projectWorkdir: string) => ClaudeCodeSession;
+  /** Spawn a session. sessionKey defaults to agentId; use a unique key for concurrent sessions on the same agent. */
+  spawnAgent: (agentId: string, projectWorkdir: string, sessionKey?: string) => ClaudeCodeSession;
   getSession: (agentId: string) => ClaudeCodeSession | undefined;
   killSession: (agentId: string) => void;
   killAll: () => void;
@@ -18,17 +19,21 @@ export interface SessionManager {
 
 export function createSessionManager(db: Database): SessionManager {
   const sessions = new Map<string, ClaudeCodeSession>();
+  /** Maps session key → real agent ID (for DB operations) */
+  const keyToAgentId = new Map<string, string>();
+  /** Maps session key → sessions.id row — precise DB updates when multiple
+   *  sessionKeys share the same agentId (e.g., concurrent verifications). */
+  const keyToSessionRowId = new Map<string, string>();
   const adapter = createClaudeCodeAdapter();
 
   return {
-    spawnAgent(agentId: string, projectWorkdir: string): ClaudeCodeSession {
-      // Cleanup existing session if any
-      const existing = sessions.get(agentId);
+    spawnAgent(agentId: string, projectWorkdir: string, sessionKey?: string): ClaudeCodeSession {
+      const key = sessionKey ?? agentId;
+
+      // Cleanup existing session for this key (memory map)
+      const existing = sessions.get(key);
       if (existing) {
         existing.cleanup();
-        // Mark previous active sessions as killed in DB
-        db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
-          .run(agentId);
       }
 
       // Get agent config from DB
@@ -97,21 +102,24 @@ export function createSessionManager(db: Database): SessionManager {
           // Capture real PID once the process is confirmed running
           db.prepare("UPDATE sessions SET pid = ? WHERE id = ?").run(session.process.pid, sessionRow.id);
         }
-        db.prepare("UPDATE agents SET status = ? WHERE id = ?").run(
-          status === "working" ? "working" : "idle",
-          agentId,
-        );
+        if (status === "working") {
+          db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agentId);
+        } else {
+          db.prepare("UPDATE agents SET status = 'idle', current_activity = NULL WHERE id = ?").run(agentId);
+        }
       });
 
       session.on("output", (text: string) => {
-        // Store last output snippet
-        db.prepare(`
-          UPDATE sessions SET last_output = ? WHERE agent_id = ? AND status = 'active'
-        `).run(text.slice(-500), agentId);
+        // Store last output snippet — scope to this specific session row to avoid
+        // clobbering sibling sessions that share the same agent_id.
+        db.prepare("UPDATE sessions SET last_output = ? WHERE id = ?")
+          .run(text.slice(-500), sessionRow.id);
       });
 
-      sessions.set(agentId, session);
-      log.info(`Spawned session for agent ${agentId} (${agent.role})`);
+      sessions.set(key, session);
+      keyToAgentId.set(key, agentId);
+      keyToSessionRowId.set(key, sessionRow.id);
+      log.info(`Spawned session for agent ${agentId} (key=${key}, role=${agent.role})`);
       return session;
     },
 
@@ -119,30 +127,56 @@ export function createSessionManager(db: Database): SessionManager {
       return sessions.get(agentId);
     },
 
-    killSession(agentId: string): void {
-      const session = sessions.get(agentId);
+    killSession(keyOrAgentId: string): void {
+      const session = sessions.get(keyOrAgentId);
       if (session) {
+        const realAgentId = keyToAgentId.get(keyOrAgentId) ?? keyOrAgentId;
+        const sessionRowId = keyToSessionRowId.get(keyOrAgentId);
         session.removeAllListeners();
         session.cleanup();
-        sessions.delete(agentId);
-        db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
-          .run(agentId);
-        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
-          .run(agentId);
-        log.info(`Killed session for agent ${agentId}`);
+        sessions.delete(keyOrAgentId);
+        keyToAgentId.delete(keyOrAgentId);
+        keyToSessionRowId.delete(keyOrAgentId);
+        // Target the specific sessions row when we know it; otherwise fall back
+        // to the legacy behavior. This prevents killing sibling active sessions
+        // that share the same agent_id.
+        if (sessionRowId) {
+          db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE id = ?")
+            .run(sessionRowId);
+        } else {
+          db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
+            .run(realAgentId);
+        }
+        // Only reset the agent row to idle if no sibling session for the same
+        // agent_id remains alive (otherwise it should stay 'working').
+        const remaining = [...keyToAgentId.values()].filter((a) => a === realAgentId).length;
+        if (remaining === 0) {
+          db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE id = ?")
+            .run(realAgentId);
+        }
+        log.info(`Killed session for agent ${realAgentId} (key=${keyOrAgentId})`);
       }
     },
 
     killAll(): void {
-      for (const [agentId, session] of sessions) {
+      for (const [key, session] of sessions) {
+        const realAgentId = keyToAgentId.get(key) ?? key;
+        const sessionRowId = keyToSessionRowId.get(key);
         session.removeAllListeners();
         session.cleanup();
-        db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
-          .run(agentId);
-        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL WHERE id = ?")
-          .run(agentId);
+        if (sessionRowId) {
+          db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE id = ?")
+            .run(sessionRowId);
+        } else {
+          db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE agent_id = ? AND status = 'active'")
+            .run(realAgentId);
+        }
+        db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE id = ?")
+          .run(realAgentId);
       }
       sessions.clear();
+      keyToAgentId.clear();
+      keyToSessionRowId.clear();
       log.info("Killed all sessions");
     },
 

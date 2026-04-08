@@ -55,21 +55,14 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
 
       log.info(`Starting verification for task "${task.title}" [scope: ${opts.scope}]`);
 
-      // Guard: prevent concurrent verification on the same project's evaluator
-      // spawnAgent kills existing sessions for the same agentId, which would
-      // abort a verification already in progress
-      const activeVerifications = db.prepare(
-        "SELECT COUNT(*) as count FROM tasks WHERE project_id = ? AND status = 'in_review' AND id != ?",
-      ).get(task.project_id, taskId) as { count: number };
-      if (activeVerifications.count > 0) {
-        log.warn(`Skipping concurrent verification for "${task.title}" — another verification is in progress`);
-      }
-
       // Build evaluation prompt
       const evaluationPrompt = buildEvaluationPrompt(task, project, opts.scope);
 
       // Spawn independent Evaluator session (NOT the Generator session)
-      // This is the core Generator-Evaluator separation
+      // This is the core Generator-Evaluator separation.
+      // Per-task sessionKey lets multiple verifications run concurrently on the
+      // same evaluator agent without aborting each other (spawnAgent cleanup
+      // only affects the same sessionKey).
       const evaluatorId = `evaluator-${taskId}`;
 
       // Find reviewer agent — Generator-Evaluator separation requires a DIFFERENT agent
@@ -100,6 +93,7 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
         const session = sessionManager.spawnAgent(
           evaluatorAgent.id,
           evalWorkdir,
+          evaluatorId,
         );
 
         const runResult = await session.send(evaluationPrompt);
@@ -156,7 +150,7 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
         throw err;
       } finally {
         // Cleanup evaluator session to prevent leak
-        sessionManager.killSession(evaluatorAgent.id);
+        sessionManager.killSession(evaluatorId);
       }
     },
   };

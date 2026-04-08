@@ -63,3 +63,9 @@ body {
 .animate-shimmer {
   animation: shimmer 2s ease-in-out infinite;
 }
+
+/* Toast slide-up animation */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

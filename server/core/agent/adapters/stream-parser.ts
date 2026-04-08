@@ -53,21 +53,39 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
 
   let jsonParsed = 0;
   let jsonFailed = 0;
+  const typesFound = new Set<string>();
 
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line);
       jsonParsed++;
 
+      const eventType = parsed.type ?? "unknown";
+      typesFound.add(eventType);
+
       // Extract session ID
       if (parsed.session_id && !result.sessionId) {
         result.sessionId = parsed.session_id;
       }
 
-      // Extract assistant text
+      // Extract assistant text — support multiple content structures
       if (parsed.type === "assistant" && parsed.message?.content) {
         for (const block of parsed.message.content) {
           if (block.type === "text") {
+            result.text += block.text;
+          }
+        }
+      }
+
+      // content_block_delta — streaming text chunks (Claude Code v3.14+)
+      if (parsed.type === "content_block_delta" && parsed.delta?.text) {
+        result.text += parsed.delta.text;
+      }
+
+      // message_delta with text — alternative streaming format
+      if (parsed.type === "message" && parsed.content) {
+        for (const block of Array.isArray(parsed.content) ? parsed.content : []) {
+          if (block.type === "text" && block.text) {
             result.text += block.text;
           }
         }
@@ -80,6 +98,12 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
           // otherwise keep assistant text which may contain structured output (e.g. JSON blocks)
           if (parsed.result.length > result.text.length) {
             result.text = parsed.result;
+          }
+        }
+        // Also check subtype text
+        if (parsed.subtype === "text" && parsed.text) {
+          if (parsed.text.length > result.text.length) {
+            result.text = parsed.text;
           }
         }
 
@@ -110,6 +134,11 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
       if (parsed.type === "error") {
         result.errors.push(parsed.message ?? parsed.error ?? "Unknown error");
       }
+
+      // Track rate limit events
+      if (parsed.type === "rate_limit_event" || eventType === "rate_limit_event") {
+        result.errors.push(`Rate limit hit: ${parsed.message ?? "API usage limit reached. Please wait before retrying."}`);
+      }
     } catch {
       jsonFailed++;
     }
@@ -122,7 +151,7 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
     );
   } else if (result.text === "" && jsonParsed > 0) {
     result.errors.push(
-      `Parsed ${jsonParsed} JSON lines but extracted no text — no assistant/result events found`
+      `Parsed ${jsonParsed} JSON lines but extracted no text — event types found: [${[...typesFound].join(", ")}]. First 500 chars: ${rawOutput.slice(0, 500)}`
     );
   }
 

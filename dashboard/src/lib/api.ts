@@ -41,8 +41,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       window.dispatchEvent(new CustomEvent("nova:server-status", { detail: { up: true } }));
     }
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error ?? "Request failed");
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      const err = new Error(body.error ?? "Request failed");
+      (err as any).status = res.status;
+      (err as any).detail = body.detail;
+      throw err;
     }
     return res.json();
   } catch (err: any) {
@@ -130,6 +133,8 @@ export const api = {
       request<any>(`/goals/${goalId}/generate-spec`, { method: "POST" }),
     refineSpec: (goalId: string, prompt: string) =>
       request<any>(`/goals/${goalId}/refine-spec`, { method: "POST", body: JSON.stringify({ prompt }) }),
+    suggest: (projectId: string) =>
+      request<Array<{ title: string; description: string; priority: string; reason: string }>>("/goals/suggest", { method: "POST", body: JSON.stringify({ project_id: projectId }) }),
   },
   tasks: {
     list: (projectId: string) => request<any[]>(`/tasks?projectId=${projectId}`),

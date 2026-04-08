@@ -2,6 +2,7 @@ import type { Database } from "better-sqlite3";
 import type { SessionManager } from "../agent/session.js";
 import { createOrchestrationEngine } from "./engine.js";
 import { createDelegationEngine } from "./delegation.js";
+import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createLogger } from "../../utils/logger.js";
 import {
   POLL_INTERVAL_MS, BACKOFF_BASE_MS, BACKOFF_MAX_MS,
@@ -41,12 +42,25 @@ export function createScheduler(
   db: Database,
   sessionManager: SessionManager,
   broadcast: (event: string, data: unknown) => void,
-): Scheduler {
+): Scheduler & { setSpecGenerator: (fn: (goalId: string) => Promise<any>) => void } {
   const engine = createOrchestrationEngine(db, sessionManager, broadcast);
-  const delegationEngine = createDelegationEngine(db, sessionManager, broadcast);
+  // Share the same quality gate so parent-task verification works from both
+  // engine (direct execution) and scheduler (delegation completion paths).
+  const qualityGate = createQualityGate(db, sessionManager);
+  const delegationEngine = createDelegationEngine(db, sessionManager, broadcast, qualityGate);
+  let generateGoalSpec: ((goalId: string) => Promise<any>) | null = null;
 
   // projectId → timer handle
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Prevent duplicate pipeline work. Two disjoint key namespaces share this
+   * Set intentionally:
+   * - `${projectId}`       → mission → goals generation (full autopilot)
+   * - `process-${projectId}` → sequential goal processing (processNextGoal)
+   * They gate different operations, so using one Set with prefixed keys keeps
+   * them independent without extra state.
+   */
+  const fullAutopilotLock = new Set<string>();
 
   // projectId → set of currently busy agent IDs
   const busyAgents = new Map<string, Set<string>>();
@@ -247,7 +261,21 @@ export function createScheduler(
       ).all(projectId) as { id: string; role: string }[];
     }
 
-    if (agents.length === 0) return;
+    if (agents.length === 0) {
+      // Rate-limit warning to avoid spam: only log once per polling cycle
+      log.warn(`Cannot auto-assign ${unassigned.length} task(s) in project ${projectId} — no agents available`);
+      // Record activity so the user sees it in the UI (deduped by recent message)
+      const lastWarn = db.prepare(
+        "SELECT id FROM activities WHERE project_id = ? AND type = 'autopilot_warning' AND created_at > datetime('now', '-5 minutes') LIMIT 1"
+      ).get(projectId) as { id: number } | undefined;
+      if (!lastWarn) {
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)"
+        ).run(projectId, `작업 ${unassigned.length}개를 자동 할당할 수 없습니다 — 에이전트가 없습니다. 에이전트를 추가해주세요.`);
+        broadcast("project:updated", { projectId });
+      }
+      return;
+    }
 
     // Round-robin assignment among available agents
     for (let i = 0; i < unassigned.length; i++) {
@@ -329,6 +357,30 @@ export function createScheduler(
   }
 
   /**
+   * Non-blocking: check for unprocessed goals and process them in background.
+   * Does NOT stop the queue — current todo tasks keep running.
+   */
+  function triggerGoalProcessingIfNeeded(projectId: string): void {
+    const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+    if (!project || (project.autopilot !== "goal" && project.autopilot !== "full")) return;
+
+    const nextGoal = db.prepare(`
+      SELECT g.id FROM goals g
+      WHERE g.project_id = ?
+        AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id) = 0
+      ORDER BY
+        CASE g.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+        g.sort_order ASC,
+        g.created_at ASC
+      LIMIT 1
+    `).get(projectId) as { id: string } | undefined;
+
+    if (nextGoal) {
+      processNextGoal(projectId, nextGoal.id);
+    }
+  }
+
+  /**
    * Check if the queue should auto-stop:
    * No todo, in_progress, pending_approval, or retryable blocked tasks remain.
    */
@@ -349,7 +401,102 @@ export function createScheduler(
         AND (retry_count < ? OR reassign_count < ?)
     `).get(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { cnt: number };
 
-    return retryable.cnt === 0;
+    if (retryable.cnt > 0) return false;
+
+    return true;
+  }
+
+  /**
+   * Process a SINGLE goal — spec → decompose → auto-approve.
+   * Sequential pipeline: one goal at a time by priority.
+   * After this goal's tasks complete, shouldAutoStop picks the next goal.
+   */
+  function processNextGoal(projectId: string, goalId: string): void {
+    if (fullAutopilotLock.has(`process-${projectId}`)) return;
+    fullAutopilotLock.add(`process-${projectId}`);
+
+    const ctoAgent = db.prepare(
+      "SELECT id FROM agents WHERE project_id = ? AND role = 'cto' LIMIT 1"
+    ).get(projectId) as { id: string } | undefined;
+
+    const setActivity = (activity: string) => {
+      if (ctoAgent) {
+        db.prepare("UPDATE agents SET status = 'working', current_activity = ? WHERE id = ?").run(activity, ctoAgent.id);
+        broadcast("agent:status", { id: ctoAgent.id, status: "working", activity });
+      }
+    };
+    const clearActivity = () => {
+      if (ctoAgent) {
+        db.prepare("UPDATE agents SET status = 'idle', current_activity = NULL WHERE id = ?").run(ctoAgent.id);
+        broadcast("agent:status", { id: ctoAgent.id, status: "idle" });
+      }
+    };
+
+    const goalRow = db.prepare("SELECT id, title FROM goals WHERE id = ?").get(goalId) as { id: string; title: string } | undefined;
+    if (!goalRow) { fullAutopilotLock.delete(`process-${projectId}`); return; }
+    const goalTitle = goalRow.title || goalId;
+
+    const spec = db.prepare("SELECT prd_summary FROM goal_specs WHERE goal_id = ?").get(goalId) as { prd_summary: string } | undefined;
+    const prd = spec?.prd_summary;
+    const isGenerating = prd && prd.includes('"_status":"generating"');
+    const hasSpec = prd && !isGenerating && !prd.includes('"_status":"failed"');
+
+    if (isGenerating) {
+      fullAutopilotLock.delete(`process-${projectId}`);
+      scheduleNextPoll(projectId);
+      return;
+    }
+
+    log.info(`Sequential pipeline: processing goal "${goalTitle}" (${goalId})`);
+
+    (async () => {
+      try {
+        // Step 1: Generate spec if needed
+        if (!hasSpec && generateGoalSpec) {
+          setActivity(`spec_gen:${goalTitle.slice(0, 60)}`);
+          db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)").run(
+            projectId, `기획서 생성 중: "${goalTitle.slice(0, 60)}"`
+          );
+          broadcast("project:updated", { projectId });
+          db.prepare(
+            "INSERT OR REPLACE INTO goal_specs (goal_id, prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations, generated_by) VALUES (?, '{\"_status\":\"generating\"}', '[]', '[]', '[]', '[]', 'ai')"
+          ).run(goalId);
+          await generateGoalSpec(goalId);
+          broadcast("project:updated", { projectId });
+        }
+
+        // Step 2: Decompose
+        setActivity(`decompose:${goalTitle.slice(0, 60)}`);
+        db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)").run(
+          projectId, `태스크 분할 중: "${goalTitle.slice(0, 60)}"`
+        );
+        broadcast("project:updated", { projectId });
+        await engine.decomposeGoal(goalId);
+
+        // Step 3: Auto-approve
+        const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+        if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+          db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(goalId);
+        }
+        broadcast("project:updated", { projectId });
+
+        // Resume queue — will pick up new tasks for THIS goal only
+        if (!timers.has(projectId)) {
+          busyAgents.set(projectId, new Set());
+          pauseState.delete(projectId);
+          timers.set(projectId, setTimeout(() => poll(projectId), 0));
+        }
+      } catch (err: any) {
+        log.error(`Failed to process goal ${goalId}`, err);
+        db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)").run(
+          projectId, `목표 처리 실패 "${goalTitle.slice(0, 40)}": ${err.message?.slice(0, 150)}`
+        );
+        broadcast("project:updated", { projectId });
+      } finally {
+        clearActivity();
+        fullAutopilotLock.delete(`process-${projectId}`);
+      }
+    })();
   }
 
   function scheduleNextPoll(projectId: string): void {
@@ -478,11 +625,71 @@ export function createScheduler(
     const tasks = pickNextTasks(projectId, availableSlots);
 
     if (tasks.length === 0) {
-      // No tasks to pick — check if queue should auto-stop
+      // No tasks to pick — try to process unhandled goals in background (non-blocking)
+      triggerGoalProcessingIfNeeded(projectId);
+
+      // Check if queue should auto-stop
       if (busy.size === 0 && shouldAutoStop(projectId)) {
         log.info(`Queue auto-stopped for project ${projectId} — no remaining work`);
         stopQueueInternal(projectId);
         broadcast("queue:stopped", { projectId, reason: "completed" });
+
+        // Full autopilot: generate new goals when all work is done
+        const project = db.prepare("SELECT autopilot, mission FROM projects WHERE id = ?").get(projectId) as { autopilot: string; mission: string } | undefined;
+        if (project?.autopilot === "full" && project.mission?.trim()) {
+          // Prevent duplicate triggers
+          if (fullAutopilotLock.has(projectId)) {
+            log.info(`Full autopilot: already running for ${projectId}, skipping`);
+            return;
+          }
+
+          const activeGoals = db.prepare(
+            "SELECT COUNT(*) as count FROM goals g WHERE g.project_id = ? AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status NOT IN ('done','blocked')) > 0",
+          ).get(projectId) as { count: number };
+
+          if (activeGoals.count === 0) {
+            fullAutopilotLock.add(projectId);
+            log.info(`Full autopilot: all goals complete for project ${projectId}, generating new goals`);
+
+            // Generate goals only — spec/decompose handled by processNextGoal (sequential pipeline)
+            (async () => {
+              try {
+                const { goalIds } = await engine.generateGoalsFromMission(projectId);
+                fullAutopilotLock.delete(projectId);
+
+                if (goalIds.length === 0) {
+                  log.info("Full autopilot: no more goals to generate, notifying user");
+                  db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)").run(
+                    projectId, "모든 목표가 완료되었습니다. 새로운 목표를 생성하지 못했습니다 — 미션을 업데이트하거나 직접 목표를 추가해주세요."
+                  );
+                  broadcast("project:updated", { projectId });
+                  broadcast("autopilot:idle", { projectId, reason: "no_new_goals" });
+                  return;
+                }
+
+                broadcast("project:updated", { projectId });
+
+                // Restart queue — shouldAutoStop will find unprocessed goals
+                // and processNextGoal will handle them one by one in priority order
+                if (!timers.has(projectId)) {
+                  busyAgents.set(projectId, new Set());
+                  pauseState.delete(projectId);
+                  timers.set(projectId, setTimeout(() => poll(projectId), 0));
+                  log.info(`Full autopilot: restarted queue with ${goalIds.length} new goals`);
+                }
+              } catch (err: any) {
+                fullAutopilotLock.delete(projectId);
+                log.error(`Full autopilot: goal generation failed for ${projectId}`, err);
+                db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)").run(
+                  projectId, `자동 목표 생성에 실패했습니다: ${err.message?.slice(0, 200)}`
+                );
+                broadcast("project:updated", { projectId });
+                broadcast("autopilot:idle", { projectId, reason: "generation_failed" });
+              }
+            })();
+          }
+        }
+
         return;
       }
       scheduleNextPoll(projectId);
@@ -535,7 +742,13 @@ export function createScheduler(
       log.info(`Queue manually resumed for project ${projectId}`);
       broadcast("queue:resumed", { projectId });
 
-      if (timers.has(projectId)) poll(projectId);
+      // If timers were cleared while paused (e.g. after a stopQueue), schedule a
+      // fresh poll so the queue actually resumes work.
+      if (!timers.has(projectId)) {
+        timers.set(projectId, setTimeout(() => poll(projectId), 0));
+      } else {
+        poll(projectId);
+      }
     },
 
     getQueueState(projectId: string): QueueState {
@@ -548,6 +761,10 @@ export function createScheduler(
         rateLimitRetries: state.consecutiveRateLimits,
         nextRetryAt: state.nextRetryAt?.toISOString() ?? null,
       };
+    },
+
+    setSpecGenerator(fn: (goalId: string) => Promise<any>): void {
+      generateGoalSpec = fn;
     },
   };
 }

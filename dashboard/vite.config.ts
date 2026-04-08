@@ -9,8 +9,12 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://127.0.0.1:7200",
+        timeout: 300000, // 5 min for long AI operations
         configure: (proxy) => {
           proxy.on("error", () => {}); // Suppress proxy errors (server restart)
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setTimeout(300000);
+          });
         },
       },
       // /ws proxy 제거 — Vite proxy가 WS 탐침 연결을 시도해 EPIPE 유발

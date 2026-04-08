@@ -7,6 +7,9 @@ import { createScheduler } from "../../core/orchestration/scheduler.js";
 import { createQualityGate } from "../../core/quality-gate/evaluator.js";
 import { MAX_PROMPT_LEN, MAX_TITLE_LEN, MAX_DESC_LEN } from "../../utils/constants.js";
 import { parseStreamJson } from "../../core/agent/adapters/stream-parser.js";
+import { createLogger } from "../../utils/logger.js";
+
+const log = createLogger("orchestration");
 
 export function createOrchestrationRoutes(ctx: AppContext): Router {
   const router = Router();
@@ -35,9 +38,15 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     if (!jsonMatch) return false;
 
     const jsonStr = jsonMatch[1] ?? jsonMatch[0];
-    const data = JSON.parse(jsonStr);
-    const tasks = data.tasks ?? [];
-    if (tasks.length === 0) return false;
+    let data: any;
+    try {
+      data = JSON.parse(jsonStr);
+    } catch (parseErr: any) {
+      log.warn(`extractAndCreateCtoGoal: JSON parse failed (${parseErr.message})`);
+      return false;
+    }
+    const tasks = data?.tasks ?? [];
+    if (!Array.isArray(tasks) || tasks.length === 0) return false;
 
     const goalDesc = data.goal ?? data.analysis ?? fallbackDesc.slice(0, 200);
     const goalRow = db.prepare(
@@ -106,7 +115,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
   });
 
   // Decompose a goal into tasks (waits for completion)
-  router.post("/goals/:goalId/decompose", async (req, res) => {
+  router.post("/goals/:goalId/decompose", (req, res) => {
     const { goalId } = req.params;
 
     const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as any;
@@ -132,8 +141,11 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       broadcast("project:updated", { projectId: goal.project_id });
     }
 
-    try {
-      await engine.decomposeGoal(goalId);
+    // Return immediately — decompose runs in background
+    res.status(202).json({ status: "decomposing", goalId });
+
+    // Background decompose
+    engine.decomposeGoal(goalId).then(() => {
       broadcast("project:updated", { projectId: goal.project_id });
 
       // Auto-approve tasks if project is in autopilot mode
@@ -152,12 +164,16 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
         }
       }
 
-      const tasks = db.prepare("SELECT * FROM tasks WHERE goal_id = ?").all(goalId);
-      res.json({ status: "completed", goalId, taskCount: tasks.length });
-    } catch (err: any) {
-      broadcast("project:updated", { projectId: goal.project_id, error: err.message });
-      res.status(500).json({ error: err.message });
-    }
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_created', ?)",
+      ).run(goal.project_id, `Tasks created for goal: "${(goal.title || goal.description).slice(0, 80)}"`);
+      broadcast("project:updated", { projectId: goal.project_id });
+    }).catch((err: any) => {
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)",
+      ).run(goal.project_id, `Task decompose failed: ${err.message?.slice(0, 200)}`);
+      broadcast("project:updated", { projectId: goal.project_id });
+    });
   });
 
   // Verify a task (Quality Gate only, no execution)
@@ -283,8 +299,9 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
 
     (async () => {
       // Update agent status to working
-      db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agentId);
-      broadcast("agent:status", { id: agentId, name: agent.name, status: "working" });
+      const activityLabel = message.slice(0, 50).replace(/\n/g, " ");
+      db.prepare("UPDATE agents SET status = 'working', current_activity = ? WHERE id = ?").run(activityLabel, agentId);
+      broadcast("agent:status", { id: agentId, name: agent.name, status: "working", activity: activityLabel });
 
       let session;
       try {
@@ -432,8 +449,9 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
         }
 
         // Mark agent as working
-        db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agent.id);
-        broadcast("agent:status", { id: agent.id, name: agent.name, status: "working" });
+        const multiActivity = message.slice(0, 50).replace(/\n/g, " ");
+        db.prepare("UPDATE agents SET status = 'working', current_activity = ? WHERE id = ?").run(multiActivity, agent.id);
+        broadcast("agent:status", { id: agent.id, name: agent.name, status: "working", activity: multiActivity });
 
         let agentResult = "";
         let session: any;
@@ -707,10 +725,18 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
       const path = await import("node:path");
       const exists = fs.existsSync, readFile = fs.readFileSync, readdir = fs.readdirSync;
       const pathJoin = path.join;
+      const pathResolve = path.resolve;
+      const workdirAbs = pathResolve(project.workdir);
       const docParts: string[] = [];
       let docLen = 0;
       const DOC_LIMIT = 6000; // Keep total docs under ~1500 tokens
       const PER_FILE_LIMIT = 2000; // 한 파일이 전체를 독점하지 않도록
+
+      // Path traversal guard: resolved path must stay inside workdir
+      const withinWorkdir = (abs: string): boolean => {
+        const normalized = pathResolve(abs);
+        return normalized === workdirAbs || normalized.startsWith(workdirAbs + path.sep);
+      };
 
       // 1) User-selected references first (highest priority)
       if (goal.references) {
@@ -719,7 +745,13 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
           if (Array.isArray(refs)) {
             for (const ref of refs) {
               if (docLen >= DOC_LIMIT) break;
-              const fullPath = pathJoin(project.workdir, ref);
+              if (typeof ref !== "string" || ref.length === 0) continue;
+              // Reject absolute paths and anything that escapes workdir
+              const fullPath = pathResolve(workdirAbs, ref);
+              if (!withinWorkdir(fullPath)) {
+                log.warn(`Rejected goal reference outside workdir: ${ref}`);
+                continue;
+              }
               if (!exists(fullPath)) continue;
               try {
                 const c = readFile(fullPath, "utf-8").slice(0, Math.min(PER_FILE_LIMIT, DOC_LIMIT - docLen));
@@ -804,9 +836,10 @@ Rules:
 - Keep it concise but comprehensive (3-7 features, 5-10 flow steps)
 `;
 
+    const specSessionKey = `spec-${goalId}`;
     let session;
     try {
-      session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd());
+      session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd(), specSessionKey);
       const result = await session.send(specPrompt);
 
       // Check CLI exit code
@@ -876,23 +909,10 @@ Rules:
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'spec_generated', ?)",
       ).run(goal.project_id, `Structured spec generated for goal: "${(goal.title || goal.description).slice(0, 80)}"`);
 
-      // Autopilot: spec 완료 후 decompose 재트리거 (spec generating 중 스킵된 경우)
-      const proj = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(goal.project_id) as { autopilot: string } | undefined;
-      if (proj && (proj.autopilot === "goal" || proj.autopilot === "full")) {
-        const existingTasks = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?").get(goalId) as { count: number };
-        if (existingTasks.count === 0) {
-          console.log(`[orchestration] Spec completed — triggering autopilot decompose for goal ${goalId}`);
-          engine.decomposeGoal(goalId).then((result) => {
-            if (result.taskCount > 0) {
-              db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(goalId);
-              ensureQueueRunning(goal.project_id);
-              broadcast("project:updated", { projectId: goal.project_id });
-            }
-          }).catch((err) => {
-            console.error(`[orchestration] Autopilot decompose after spec failed for goal ${goalId}`, err);
-          });
-        }
-      }
+      // NOTE: Decompose는 호출자(goals.ts triggerAutopilotDecompose, scheduler processNextGoal,
+      // POST /goals)가 직접 처리한다. 여기서 추가로 트리거하면 동일한 sessionKey
+      // (`decompose-${goalId}`)로 두 번 spawn되면서 race condition 발생 → 첫 번째
+      // 세션이 SIGTERM으로 죽고 textLen=0/exitCode=null로 실패한다.
 
       return {
         ...saved,
@@ -903,7 +923,7 @@ Rules:
         tech_considerations: JSON.parse(saved.tech_considerations),
       };
     } finally {
-      if (session) sessionManager.killSession(agent.id);
+      if (session) sessionManager.killSession(specSessionKey);
     }
   }
 
@@ -965,9 +985,10 @@ Rules:
 - Keep existing items unless explicitly asked to remove them
 `;
 
+    const refineSessionKey = `refine-${goalId}`;
     let session;
     try {
-      session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd());
+      session = sessionManager.spawnAgent(agent.id, project?.workdir || process.cwd(), refineSessionKey);
       const result = await session.send(refinePrompt);
       const parsed = parseStreamJson(result.stdout);
 
@@ -1003,7 +1024,7 @@ Rules:
         tech_considerations: JSON.parse(saved.tech_considerations),
       };
     } finally {
-      if (session) sessionManager.killSession(agent.id);
+      if (session) sessionManager.killSession(refineSessionKey);
     }
   }
 
@@ -1012,6 +1033,9 @@ Rules:
   ctx.generateGoalSpec = generateGoalSpec;
   (ctx as any).refineGoalSpec = refineGoalSpec;
   ctx.scheduler = scheduler;
+
+  // Register spec generator with scheduler for full autopilot cycle
+  scheduler.setSpecGenerator(generateGoalSpec);
 
   return router;
 }

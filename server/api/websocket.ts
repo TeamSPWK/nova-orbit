@@ -8,16 +8,27 @@ export function createWSHandler(wss: WebSocketServer, apiKey: string): void {
   });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    // 인증 확인 — 실패해도 close하지 않음 (proxy EPIPE 방지)
-    // 미인증 연결은 태깅만 하고 broadcast에서 제외
+    // 인증 확인 — close()는 proxy EPIPE 가능성이 있어 유예 close 사용
+    // 미인증 연결은 subscribe/broadcast 모두 차단되고 10초 후 close
     const url = new URL(req.url ?? "", "http://localhost");
     const token = url.searchParams.get("token");
-    (ws as any).__authenticated = token === apiKey;
+    const authed = token === apiKey;
+    (ws as any).__authenticated = authed;
 
     // Handle client errors gracefully
     ws.on("error", (err) => {
       console.error("[WS Client] Error:", err.message);
     });
+
+    if (!authed) {
+      // Delayed close lets proxies finish their handshake cleanly
+      try { ws.send(JSON.stringify({ type: "error", payload: { code: "unauthorized" } })); } catch { /* ignore */ }
+      const closeTimer = setTimeout(() => {
+        try { ws.close(4001, "Unauthorized"); } catch { /* already closed */ }
+      }, 10_000);
+      ws.on("close", () => clearTimeout(closeTimer));
+      return; // Do NOT register message handler — reject subscriptions outright
+    }
 
     ws.on("message", (raw) => {
       try {

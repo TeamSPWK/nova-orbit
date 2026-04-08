@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 interface GoalSpecPanelProps {
   goalId: string;
   onClose: () => void;
+  onGeneratingClose?: () => void;
 }
 
 interface PrdSummary {
@@ -269,7 +270,7 @@ function EditableList({
 }
 
 // ─── Main Component ──────────────────────────────────
-export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
+export default function GoalSpecPanel({ goalId, onClose, onGeneratingClose }: GoalSpecPanelProps) {
   const { t } = useTranslation();
   const [spec, setSpec] = useState<SpecData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -867,7 +868,7 @@ export default function GoalSpecPanel({ goalId, onClose }: GoalSpecPanelProps) {
       {confirmClose && (
         <ConfirmDialog
           message={t("specCloseWhileBusy")}
-          onConfirm={onClose}
+          onConfirm={() => { onGeneratingClose?.(); onClose(); }}
           onCancel={() => setConfirmClose(false)}
         />
       )}
