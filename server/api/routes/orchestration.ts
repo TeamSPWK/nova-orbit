@@ -49,9 +49,13 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     if (!Array.isArray(tasks) || tasks.length === 0) return false;
 
     const goalDesc = data.goal ?? data.analysis ?? fallbackDesc.slice(0, 200);
+    // Assign sort_order at end so this goal doesn't jump above existing ones.
+    const sortOrder = (db.prepare(
+      "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM goals WHERE project_id = ?",
+    ).get(projectId) as { next: number }).next;
     const goalRow = db.prepare(
-      "INSERT INTO goals (project_id, title, description, priority) VALUES (?, ?, ?, 'high') RETURNING id",
-    ).get(projectId, goalDesc.slice(0, 100), goalDesc) as { id: string } | undefined;
+      "INSERT INTO goals (project_id, title, description, priority, sort_order) VALUES (?, ?, ?, 'high', ?) RETURNING id",
+    ).get(projectId, goalDesc.slice(0, 100), goalDesc, sortOrder) as { id: string } | undefined;
 
     if (!goalRow) return false;
 

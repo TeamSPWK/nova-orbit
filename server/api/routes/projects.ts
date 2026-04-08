@@ -141,9 +141,29 @@ export function createProjectRoutes(ctx: AppContext): Router {
     broadcast("autopilot:mode-changed", { projectId: req.params.id, mode: autopilot ?? existing.autopilot });
     res.json(updated);
 
-    // Trigger Full autopilot if switching to 'full' from another mode
+    // Trigger Full autopilot if switching to 'full' from another mode.
+    // Skip CTO mission re-generation when incomplete goals already exist —
+    // the scheduler will resume them. This prevents accidental goal
+    // inflation (and sort_order collisions) when users toggle
+    // full → semi → full mid-execution.
     if (autopilot === "full" && existing.autopilot !== "full") {
-      triggerFullAutopilot(req.params.id);
+      const incomplete = db.prepare(
+        "SELECT COUNT(*) as cnt FROM goals WHERE project_id = ? AND progress < 100",
+      ).get(req.params.id) as { cnt: number };
+      if (incomplete.cnt === 0) {
+        triggerFullAutopilot(req.params.id);
+      } else {
+        // Ensure the queue is actually running. If the queue had auto-stopped
+        // (e.g. all tasks were blocked without retries when the user switched
+        // away), we must restart it so remaining goals can make progress.
+        // startQueue is a no-op when the queue is already running.
+        if (ctx.scheduler && !ctx.scheduler.isRunning(req.params.id)) {
+          ctx.scheduler.startQueue(req.params.id);
+          log.info(`Full autopilot re-entry: ${incomplete.cnt} incomplete goal(s) exist, restarted stopped queue`);
+        } else {
+          log.info(`Full autopilot re-entry: ${incomplete.cnt} incomplete goal(s) exist, queue already running — skipping mission generation`);
+        }
+      }
     }
   });
 

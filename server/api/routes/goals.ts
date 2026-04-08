@@ -63,9 +63,15 @@ export function createGoalRoutes(ctx: AppContext): Router {
     }
 
     try {
+      // Assign sort_order at end of existing goals so new entries don't
+      // collide with (and jump above) existing ones in scheduler ordering.
+      const sortOrder = (db.prepare(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM goals WHERE project_id = ?",
+      ).get(project_id) as { next: number }).next;
+
       const result = db.prepare(
-        "INSERT INTO goals (project_id, title, description, priority, \"references\") VALUES (?, ?, ?, ?, ?)",
-      ).run(project_id, goalTitle, goalDescription, priority, goalRefs);
+        "INSERT INTO goals (project_id, title, description, priority, \"references\", sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(project_id, goalTitle, goalDescription, priority, goalRefs, sortOrder);
 
       const goal = db.prepare("SELECT * FROM goals WHERE rowid = ?").get(result.lastInsertRowid) as any;
       broadcast("project:updated", { projectId: project_id });

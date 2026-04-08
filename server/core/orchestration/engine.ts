@@ -775,10 +775,18 @@ Respond in this EXACT JSON format:
       const VALID_PRIORITIES = ["critical", "high", "medium", "low"];
 
       // Validate ALL goals before any INSERT — prevents partial-insert orphans
-      // when the loop would throw midway through.
+      // when the loop would throw midway through. Re-index AFTER filtering so
+      // sort_order is contiguous (no gaps from dropped entries).
       const validGoals = goals
-        .map((g: any, index: number) => ({ g, index }))
-        .filter(({ g }: { g: any }) => g && typeof g.description === "string" && g.description.length > 0);
+        .filter((g: any) => g && typeof g.description === "string" && g.description.length > 0)
+        .map((g: any, index: number) => ({ g, index }));
+
+      // Offset sort_order so new goals never collide with existing ones.
+      // Without this, new goals (sort_order = 0, 1, 2...) would jump above
+      // existing same-priority goals in scheduler ordering.
+      const sortOrderBase = (db.prepare(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS base FROM goals WHERE project_id = ?",
+      ).get(projectId) as { base: number }).base;
 
       // Wrap inserts in a transaction so partial failures roll back cleanly
       const insertGoals = db.transaction((entries: { g: any; index: number }[]): string[] => {
@@ -787,7 +795,7 @@ Respond in this EXACT JSON format:
           const priority = VALID_PRIORITIES.includes(g.priority) ? g.priority : "medium";
           const row = db.prepare(
             "INSERT INTO goals (project_id, title, description, priority, sort_order) VALUES (?, ?, ?, ?, ?) RETURNING id",
-          ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority, index) as { id: string };
+          ).get(projectId, (g.title ?? g.description).slice(0, 100), g.description.slice(0, 500), priority, sortOrderBase + index) as { id: string };
           ids.push(row.id);
         }
         return ids;

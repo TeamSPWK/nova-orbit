@@ -1,27 +1,27 @@
 # Nova State
 
 ## Current
-- **Goal**: 전체 버그 헌트 + 수정 (데이터 컨트랙트, i18n, UX 문자열)
+- **Goal**: goal 재진입 순서 버그 수정 (sort_order 충돌 + mode 토글 가드)
 - **Phase**: done
 - **Blocker**: none
 
 ## Tasks
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
-| Critical 수정 (verification guard, path traversal, mission JSON) | done | PASS | sessionKey 분리 + path.resolve guard + truncated recovery |
-| High 수정 (delegated parent verify, progress race, 입력 제한, assignee hang, WS auth, sessions row) | done | PASS | qualityGate 주입 + atomic UPDATE clamping + 검증 6건 |
-| Medium 수정 (JSON parse, PATCH/DELETE txn, resumeQueue, signal info, merge-all) | done | PASS | db.transaction 래핑 + IIFE catch + close signal log |
-| Low 수정 (POLL_INTERVAL, dead 'verified' status) | done | PASS | 3000→1000ms, 4곳 != 'done' 정리 |
-| 목표 단위 순차 실행 (pickNextTasks 재설계) | done | PASS | 한 번에 1 active goal, 내부 병렬 유지 |
-| Sequential goal stale 안전망 | done | PASS | 30분+ idle in_progress 자동 todo 복구 |
-| 서버 재시작 + 동작 확인 | done | PASS | recovery 1건 복구, high goal "CLI 롤백" 즉시 실행 |
+| Fix 1: engine.ts generateGoalsFromMission sort_order 오프셋 | done | PASS | `MAX(sort_order)+1+index` + validGoals 재인덱싱 |
+| Fix 2: projects.ts PATCH 재진입 가드 | done | PASS | `progress<100` 있으면 CTO 재생성 스킵 |
+| Fix 2b: queue 정지 상태일 때 startQueue 재시작 | done | PASS | blocked-only Hard-Block 방어 (QA 지적) |
+| Fix 3: goals.ts 사용자 수동 생성 sort_order | done | PASS | 같은 근본 버그, 범위 확장 |
+| Fix 4: orchestration.ts extractAndCreateCtoGoal sort_order | done | PASS | 같은 근본 버그, 범위 확장 |
+| Adversarial QA 서브에이전트 검증 | done | PASS | Hard-Block 1 + High 2 + Medium 2 전부 반영 |
+| DB 시뮬레이션 (in-memory sqlite) | done | PASS | 5 기존+3 신규 시나리오 순서 정합성 확인 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
+| goal 재진입 순서 버그 (sort_order 충돌 + full 재진입 CTO 재생성) | 2026-04-08 | PASS | 4파일, QA+DB 시뮬레이션 |
 | 전체 버그 헌트 2차 (task:usage 평면/nested 불일치, 활동피드 필드명, i18n 키, 하드코딩 영문) | 2026-04-08 | PASS | 8파일, tsc+빌드 통과 |
 | 버그 헌트 + 수정 + 순차 실행 (Critical 4 / High 6 / Medium 8 / Low 2 + sequential) | 2026-04-08 | PASS | 3 commits, tsc+빌드 통과 |
-| Full Autopilot 안정화 + UX 대폭 개선 | 2026-04-08 | PASS | 15+파일, 세션/큐/UX 전반 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -65,9 +65,9 @@
 - `scheduler.ts`, `agents.ts` — dead 'verified' status 정리 (4곳)
 
 ## Last Activity
-- 2차 버그 헌트. 사용자 제보(활동 피드 "개 파일 커밋" 카운트 누락 + 어색한 한국어)에서 시작해 서브에이전트 adversarial evaluator로 전체 스윕 → 데이터 컨트랙트 불일치(task:usage nested vs 평면), i18n 키 오용/누락, 하드코딩 영문 수정. tsc + vite build 통과. | 2026-04-08
+- Pulsar 프로젝트 사용자 제보: Full Auto → Semi Auto → Full Auto 토글 시 CTO가 새 goal을 즉시 생성하고 기존 goal 사이에 섞임. 근본 원인 2개 확인 — (1) 신규 goal의 `sort_order = index`가 기존 goal과 충돌, (2) `triggerFullAutopilot`이 재진입 조건 없이 호출됨. nova:qa-engineer 서브에이전트 검토에서 추가로 "blocked-only goal + queue 정지 상태 재진입" Hard-Block 발견 → `startQueue` 재시작 보강. orchestration.ts / goals.ts의 동일 근본 버그 경로도 함께 수정. 실제 sqlite DB 시뮬레이션으로 순서 정합성 검증. | 2026-04-08
 
 ## Refs
 - Plan: docs/plans/phase2-production-ready.md
-- Last Verification: tsc PASS (server + dashboard) + vite build PASS + dry-run on Pulsar PASS
-- Commits: a824b89 (25 bugs) → 214ee3b (sequential goal) → 05600c9 (safety net) → 353ec22 (docs) → (신규: task:usage + i18n + UX strings)
+- Last Verification: tsc PASS + build PASS + adversarial QA PASS + DB 시뮬레이션 PASS
+- Commits: a824b89 → 214ee3b → 05600c9 → 353ec22 → ac3ebba → (신규: goal 재진입 순서)
