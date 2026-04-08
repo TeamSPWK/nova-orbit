@@ -851,8 +851,15 @@ export function createScheduler(
     const tasks = pickNextTasks(projectId, availableSlots);
 
     // Surface stuck state: if we keep polling with nothing executable but
-    // there IS outstanding work, the user needs to know why.
-    checkStuckState(projectId, tasks.length);
+    // there IS outstanding work, the user needs to know why. Only count
+    // as "stuck" when NOTHING is running — when busy.size > 0, empty picks
+    // are normal (remaining tasks may need the same agent or be gated on
+    // the currently running one).
+    if (busy.size === 0) {
+      checkStuckState(projectId, tasks.length);
+    } else {
+      stuckState.delete(projectId);
+    }
 
     if (tasks.length === 0) {
       // No tasks to pick — try to process unhandled goals in background (non-blocking)
