@@ -926,6 +926,26 @@ Rules:
         acceptance_criteria: JSON.parse(saved.acceptance_criteria),
         tech_considerations: JSON.parse(saved.tech_considerations),
       };
+    } catch (err: any) {
+      // Clear the '{"_status":"generating"}' placeholder so the row doesn't
+      // stay stuck forever. A stuck 'generating' row makes processNextGoal
+      // short-circuit on every poll cycle (isGenerating branch), which
+      // historically triggered the scheduleNextPoll timer-leak bug and
+      // saturated the event loop. Even with that bug fixed, leaving the
+      // placeholder means the goal can never progress — surface the failure.
+      try {
+        const errorMsg = (err?.message ?? String(err)).slice(0, 500);
+        const failedJson = JSON.stringify({ _status: "failed", _error: errorMsg });
+        const existingRow = db.prepare("SELECT id FROM goal_specs WHERE goal_id = ?").get(goalId);
+        if (existingRow) {
+          db.prepare("UPDATE goal_specs SET prd_summary = ?, updated_at = datetime('now') WHERE goal_id = ?")
+            .run(failedJson, goalId);
+        }
+        broadcast("project:updated", { projectId: goal.project_id });
+      } catch (cleanupErr) {
+        log.warn(`Failed to mark goal_specs as failed for ${goalId}: ${(cleanupErr as any)?.message}`);
+      }
+      throw err;
     } finally {
       if (session) sessionManager.killSession(specSessionKey);
     }

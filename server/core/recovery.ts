@@ -54,6 +54,24 @@ export function recoverOnStartup(db: Database): RecoveryResult {
   // 3. 에이전트 상태 초기화: working → idle, current_task_id 해제
   db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE status = 'working'").run();
 
+  // 3b. goal_specs stuck at '{"_status":"generating"}' → failed
+  //
+  // If the prior process died mid spec-generation (crash, SIGKILL, tsx watch
+  // reload), the placeholder row stays forever and makes processNextGoal
+  // short-circuit every poll cycle. Mark any such row as failed so the
+  // autopilot can retry or surface the error instead of looping silently.
+  const stuckSpecs = db
+    .prepare(
+      `UPDATE goal_specs
+       SET prd_summary = '{"_status":"failed","_error":"Generation interrupted by server restart"}',
+           updated_at = datetime('now')
+       WHERE prd_summary = '{"_status":"generating"}'`,
+    )
+    .run();
+  if (stuckSpecs.changes > 0) {
+    log.warn(`Cleared ${stuckSpecs.changes} stuck goal_specs row(s) left in 'generating' state`);
+  }
+
   // 4. 잔존 worktree + agent branch 정리 (프로젝트별)
   let cleanedWorktrees = 0;
   try {
