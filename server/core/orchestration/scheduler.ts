@@ -8,6 +8,7 @@ import {
   POLL_INTERVAL_MS, BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   MAX_CONSECUTIVE_RATE_LIMITS, DEFAULT_MAX_CONCURRENCY,
   MAX_TASK_RETRIES, MAX_REASSIGNS, BLOCKED_RETRY_DELAY_MS,
+  TASK_TIMEOUT_MS,
 } from "../../utils/constants.js";
 
 const log = createLogger("scheduler");
@@ -106,7 +107,7 @@ export function createScheduler(
     const fixed = db.prepare(`
       UPDATE tasks SET assignee_id = NULL
       WHERE project_id = ? AND assignee_id IS NOT NULL
-        AND status NOT IN ('done', 'verified')
+        AND status != 'done'
         AND assignee_id NOT IN (SELECT id FROM agents WHERE project_id = ?)
     `).run(projectId, projectId);
 
@@ -310,6 +311,31 @@ export function createScheduler(
 
     const busy = getBusyAgents(projectId);
 
+    // Safety net: clean up "ghost" in_progress tasks whose runtime context was
+    // lost (e.g., server killed without graceful shutdown, executeOne crashed
+    // before transitioning the task). In sequential goal mode such a ghost
+    // would pin a goal as active forever and block all other goals.
+    //
+    // Heuristic: an in_progress / in_review task is a ghost if its assignee is
+    // NOT in the in-memory busyAgents set AND it has not been updated within
+    // a generous window (3x task timeout). The window guard prevents racing
+    // with a task that was just transitioned but hasn't been added to busy yet.
+    const STALE_THRESHOLD_SECONDS = Math.ceil((TASK_TIMEOUT_MS * 3) / 1000);
+    const staleCandidates = db.prepare(`
+      SELECT id, assignee_id, status FROM tasks
+      WHERE project_id = ?
+        AND status IN ('in_progress', 'in_review')
+        AND (strftime('%s', 'now') - strftime('%s', updated_at)) > ?
+    `).all(projectId, STALE_THRESHOLD_SECONDS) as { id: string; assignee_id: string | null; status: string }[];
+    for (const ghost of staleCandidates) {
+      if (ghost.assignee_id && busy.has(ghost.assignee_id)) continue; // really running
+      db.prepare("UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?").run(ghost.id);
+      log.warn(`Stale ${ghost.status} task ${ghost.id} reset to todo (no live runtime, idle > ${STALE_THRESHOLD_SECONDS}s)`);
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)"
+      ).run(projectId, `중단된 작업 자동 복구: 진행 상태 → todo`);
+    }
+
     // Step 1: identify the active goal (one at a time)
     const goalOrder = `
       CASE g.priority
@@ -391,7 +417,7 @@ export function createScheduler(
       if (task.goal_id && reviewerAgentIds.has(task.assignee_id)) {
         const siblings = db.prepare(`
           SELECT COUNT(*) as remaining FROM tasks
-          WHERE goal_id = ? AND id != ? AND status NOT IN ('done', 'verified')
+          WHERE goal_id = ? AND id != ? AND status != 'done'
             AND assignee_id NOT IN (SELECT id FROM agents WHERE project_id = ? AND role IN ('qa-reviewer', 'reviewer', 'qa'))
         `).get(task.goal_id, task.id, projectId) as { remaining: number };
 

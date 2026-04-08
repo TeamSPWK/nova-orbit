@@ -351,7 +351,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
       db.prepare(`
         UPDATE tasks SET assignee_id = NULL,
           status = CASE WHEN status = 'in_progress' THEN 'todo' ELSE status END
-        WHERE assignee_id IN (${placeholders}) AND status NOT IN ('done', 'verified')
+        WHERE assignee_id IN (${placeholders}) AND status != 'done'
       `).run(...agentIds);
     }
     const result = db.prepare("DELETE FROM agents WHERE project_id = ?").run(projectId);
@@ -370,7 +370,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
     db.prepare(`
       UPDATE tasks SET assignee_id = NULL,
         status = CASE WHEN status = 'in_progress' THEN 'todo' ELSE status END
-      WHERE assignee_id = ? AND status NOT IN ('done', 'verified')
+      WHERE assignee_id = ? AND status != 'done'
     `).run(agentId);
     // Reassign children to this agent's parent (prevents orphaned subtree)
     db.prepare("UPDATE agents SET parent_id = ? WHERE parent_id = ?").run(agent.parent_id ?? null, agentId);
