@@ -75,6 +75,17 @@ export function getDefaultBranch(workdir: string): string {
 // ─── Public API ────────────────────────────────────────
 
 /**
+ * Directories that Nova Orbit and Claude Code manage as linked git worktrees
+ * inside the project root. Their HEAD pointer shows up as a gitlink change
+ * whenever any worktree commits — but those updates are pure noise for the
+ * parent repo. Exclude them from every `git add` to stop polluting main.
+ */
+const WORKTREE_EXCLUDE_PATHSPECS = [
+  ":(exclude,top).nova-worktrees/",
+  ":(exclude,top).claude/worktrees/",
+];
+
+/**
  * Stage all changes and create a commit.
  * Returns { committed: false } when there are no staged changes.
  */
@@ -83,8 +94,19 @@ export function commitTaskResult(
   taskTitle: string,
   agentName: string,
 ): { committed: boolean; filesChanged: number } {
-  // Detect changes (use gitExec to catch .git missing / git not installed)
-  const { stdout: statusOutput } = gitExec(workdir, ["status", "--porcelain"]);
+  // Detect changes (excluding worktree pointer noise). Without the excludes a
+  // task running at project root picks up every sibling worktree's HEAD
+  // advance and commits them as gitlink updates — causing either spurious
+  // "nothing to commit" errors or empty noise commits (see bug: reviewer
+  // tasks being double-executed because their 1st commit committed only a
+  // worktree pointer).
+  const { stdout: statusOutput } = gitExec(workdir, [
+    "status",
+    "--porcelain",
+    "--",
+    ".",
+    ...WORKTREE_EXCLUDE_PATHSPECS,
+  ]);
   if (!statusOutput.trim()) {
     log.info("No changes to commit");
     return { committed: false, filesChanged: 0 };
@@ -97,8 +119,18 @@ export function commitTaskResult(
     log.warn(`No .gitignore found in ${workdir} — git add -A may stage unwanted files`);
   }
 
-  // Stage all changes
-  gitExec(workdir, ["add", "-A"]);
+  // Stage changes, explicitly excluding worktree pointer directories.
+  gitExec(workdir, ["add", "-A", "--", ".", ...WORKTREE_EXCLUDE_PATHSPECS]);
+
+  // Re-verify there's actually something staged. `git add -A -- . :(exclude)`
+  // can produce a status with only worktree changes that don't survive the
+  // exclude — if nothing was staged, commit would fail with "nothing to
+  // commit" and the outer retry path would loop on the same non-issue.
+  const { stdout: stagedDiff } = gitExec(workdir, ["diff", "--cached", "--name-only"]);
+  if (!stagedDiff.trim()) {
+    log.info("No stageable changes after worktree exclude — skipping commit");
+    return { committed: false, filesChanged: 0 };
+  }
 
   // Commit — title은 단일 행으로 sanitize
   const safeTitle = taskTitle.replace(/[\r\n]+/g, " ").slice(0, 72);

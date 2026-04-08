@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createLogger } from "../../utils/logger.js";
@@ -9,6 +9,37 @@ const log = createLogger("worktree");
 export interface WorktreeInfo {
   path: string;
   branch: string;
+}
+
+/**
+ * Add `.nova-worktrees/` (and `.claude/worktrees/`) to the project's
+ * `.gitignore` if not already present. Idempotent — safe to call every
+ * time a worktree is created. Prevents the parent repo from tracking
+ * worktree HEAD pointers as gitlink noise.
+ */
+function ensureGitignoreHasWorktreeExcludes(projectWorkdir: string): void {
+  const gitignorePath = join(projectWorkdir, ".gitignore");
+  const requiredLines = [".nova-worktrees/", ".claude/worktrees/"];
+  try {
+    let current = "";
+    if (existsSync(gitignorePath)) {
+      current = readFileSync(gitignorePath, "utf-8");
+    }
+    const lines = current.split(/\r?\n/).map((l) => l.trim());
+    const missing = requiredLines.filter((req) => !lines.includes(req));
+    if (missing.length === 0) return;
+
+    const prefix = current && !current.endsWith("\n") ? "\n" : "";
+    const block = `${prefix}\n# Nova Orbit — agent worktrees (do not commit)\n${missing.join("\n")}\n`;
+    if (existsSync(gitignorePath)) {
+      appendFileSync(gitignorePath, block);
+    } else {
+      writeFileSync(gitignorePath, block.replace(/^\n/, ""));
+    }
+    log.info(`Added worktree excludes to .gitignore: ${missing.join(", ")}`);
+  } catch (err: any) {
+    log.warn(`Could not update .gitignore at ${projectWorkdir}: ${err.message}`);
+  }
 }
 
 /**
@@ -29,6 +60,10 @@ export function createWorktree(
     log.info("Not a git repo — skipping worktree isolation");
     return null;
   }
+
+  // Ensure .gitignore excludes the worktree directory so agent tasks don't
+  // accidentally commit worktree HEAD pointers as gitlink noise.
+  ensureGitignoreHasWorktreeExcludes(projectWorkdir);
 
   // HEAD에 커밋이 있는지 확인 (빈 repo에서 worktree 생성 불가)
   const headCheck = spawnSync("git", ["rev-parse", "HEAD"], {
