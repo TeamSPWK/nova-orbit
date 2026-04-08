@@ -577,6 +577,15 @@ export function createScheduler(
   }
 
   function scheduleNextPoll(projectId: string): void {
+    // Clear any existing timer before scheduling a new one. Without this,
+    // code paths that call scheduleNextPoll twice in the same poll() cycle
+    // (e.g. processNextGoal's isGenerating early-return path followed by
+    // poll()'s own tail call at the end) leak orphan timers. Map.set only
+    // replaces the map entry — the previous setTimeout handle stays live
+    // and fires independently, doubling the timer count each poll cycle.
+    // Left unchecked this grows exponentially and saturates the event loop.
+    const existing = timers.get(projectId);
+    if (existing) clearTimeout(existing);
     const handle = setTimeout(() => poll(projectId), POLL_INTERVAL_MS);
     timers.set(projectId, handle);
   }
