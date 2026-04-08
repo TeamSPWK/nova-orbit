@@ -289,8 +289,15 @@ export function createScheduler(
   }
 
   /**
-   * Pick next executable tasks — returns multiple tasks for parallel execution.
-   * Skips tasks whose assignee is already busy.
+   * Pick next executable tasks — sequential goal processing.
+   *
+   * Goal-level sequencing: only ONE goal is active at a time within a project.
+   *   1) If any goal already has in_progress/in_review tasks → that goal stays active
+   *   2) Otherwise → highest-priority goal with todo tasks becomes active
+   *   3) Tasks within the active goal can still run in parallel (up to maxSlots)
+   *
+   * This prevents the previous behavior where multiple goals' tasks would
+   * interleave by global priority, making it hard to finish anything.
    */
   function pickNextTasks(projectId: string, maxSlots: number): any[] {
     if (maxSlots <= 0) return [];
@@ -303,23 +310,67 @@ export function createScheduler(
 
     const busy = getBusyAgents(projectId);
 
+    // Step 1: identify the active goal (one at a time)
+    const goalOrder = `
+      CASE g.priority
+        WHEN 'critical' THEN 0
+        WHEN 'high' THEN 1
+        WHEN 'medium' THEN 2
+        WHEN 'low' THEN 3
+        ELSE 4
+      END ASC, g.sort_order ASC, g.created_at ASC
+    `;
+
+    // Prefer a goal that already has work in flight — never abandon mid-goal
+    const startedGoal = db.prepare(`
+      SELECT g.id FROM goals g
+      WHERE g.project_id = ?
+        AND EXISTS (
+          SELECT 1 FROM tasks t
+          WHERE t.goal_id = g.id AND t.status IN ('in_progress', 'in_review')
+        )
+      ORDER BY ${goalOrder}
+      LIMIT 1
+    `).get(projectId) as { id: string } | undefined;
+
+    let activeGoalId: string | undefined = startedGoal?.id;
+
+    if (!activeGoalId) {
+      // No goal in progress — pick the next highest-priority goal that has
+      // ready (todo + assigned) tasks
+      const nextGoal = db.prepare(`
+        SELECT g.id FROM goals g
+        WHERE g.project_id = ?
+          AND EXISTS (
+            SELECT 1 FROM tasks t
+            WHERE t.goal_id = g.id
+              AND t.status = 'todo'
+              AND t.assignee_id IS NOT NULL
+          )
+        ORDER BY ${goalOrder}
+        LIMIT 1
+      `).get(projectId) as { id: string } | undefined;
+      activeGoalId = nextGoal?.id;
+    }
+
+    if (!activeGoalId) return [];
+
+    // Step 2: pick tasks ONLY from the active goal
     // Sprint 5: status = 'todo' naturally excludes 'pending_approval' tasks.
-    // pending_approval tasks must be explicitly approved (→ todo) via the Approval Gate API
-    // before the scheduler picks them up.
+    // pending_approval tasks must be explicitly approved (→ todo) via the
+    // Approval Gate API before the scheduler picks them up.
     const candidates = db.prepare(`
       SELECT t.* FROM tasks t
-      LEFT JOIN goals g ON t.goal_id = g.id
-      WHERE t.project_id = ?
+      WHERE t.goal_id = ?
         AND t.status = 'todo'
         AND t.assignee_id IS NOT NULL
       ORDER BY
         CASE WHEN t.parent_task_id IS NOT NULL THEN 0 ELSE 1 END,
         t.sort_order ASC,
         CASE t.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
-        CASE g.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
         t.created_at ASC
       LIMIT 20
-    `).all(projectId) as any[];
+    `).all(activeGoalId) as any[];
 
     // Reviewer/QA tasks should wait until all other tasks in the same goal are done
     const reviewerRoles = new Set(["qa-reviewer", "reviewer", "qa"]);
