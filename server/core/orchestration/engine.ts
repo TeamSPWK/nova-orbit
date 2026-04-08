@@ -127,10 +127,20 @@ export function createOrchestrationEngine(
       }
 
       // Phase 0.5: Complexity detection + Architect phase (Nova Orchestrator alignment)
+      //
+      // Skip architect phase for reviewer/qa roles: their job is to critique
+      // existing code, not to produce a new design. Running architect on a
+      // review task wastes a multi-minute CTO session and injects design
+      // suggestions that bias the evaluator away from "find problems" stance.
+      // Example: a review task that names 3 .py files in its description gets
+      // classified as "moderate" by the regex heuristic and burns ~5-10 min
+      // on architect output the reviewer never meaningfully uses.
+      const reviewerLikeRoles = new Set(["reviewer", "qa", "qa-reviewer"]);
+      const isReviewerTask = reviewerLikeRoles.has(agent?.role ?? "");
       const complexity = detectComplexity(task);
       let architectContext = "";
 
-      if (complexity !== "simple" && !task.parent_task_id) {
+      if (complexity !== "simple" && !task.parent_task_id && !isReviewerTask) {
         const ctoAgent = db.prepare(
           "SELECT * FROM agents WHERE project_id = ? AND role = 'cto' AND id != ? LIMIT 1",
         ).get(task.project_id, task.assignee_id) as AgentRow | undefined;
