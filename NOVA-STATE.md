@@ -1,30 +1,25 @@
 # Nova State
 
 ## Current
-- **Goal**: Pulsar 8h+ stuck state 진단 + root cause 5건 수정 + stuck detector 방어 레이어
+- **Goal**: Git-error 분류 시스템 + Autopilot 자동 복구 철학 (Pulsar 이후 재발 방지)
 - **Phase**: done
 - **Blocker**: none
 
 ## Tasks
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
-| scheduler 타이머 지수 증식 차단 | done | PASS | scheduleNextPoll clearTimeout 가드 (d36fa92) |
-| goal_specs stuck generating 자동 복구 | done | PASS | runtime catch + startup recovery (d428437) |
-| reviewer/qa architect phase 스킵 | done | PASS | 5-10분/태스크 절약 (6a6a436) |
-| 워크트리 pointer 노이즈 commit 차단 | done | PASS | :(exclude,top) pathspec + .gitignore 자동 append (9088656) |
-| evaluator message 필드 다중 폴백 | done | PASS | auto-fix "No description" 루프 해소 (c845dc3) |
-| Architect residue 자동 sweep | done | PASS | prompt 경고 + post-hook auto-commit (970e262) |
-| Reviewer gate: permanent blocked 형제 skip | done | PASS | gate 쿼리 필터 추가 (970e262) |
-| updateGoalProgressExcludingBlocked poll마다 호출 | done | PASS | early-return 경로 고정 (970e262) |
-| git-error 즉시 permanent blocked | done | PASS | 브랜치 폭증 차단 (970e262) |
-| Stuck detector + diagnoseStuck | done | PASS | 5 진단 코드 + autopilot_warning broadcast (970e262, dbf4f1d) |
+| pulsar 2 blocked tasks 수동 복구 | done | PASS | ignored-file false positive, DB 패치 (세션) |
+| classifyGitError 3분류 시스템 | done | PASS | recoverable/permanent/benign, 8/8 unit test |
+| commitTaskResult explicit-paths-from-porcelain | done | PASS | git add -A → status -z 파싱 → explicit add |
+| engine git-error classify 분기 | done | PASS | benign→done, permanent→MAX, recoverable→retry 예산 유지 |
+| reviewer/qa managed directory 경고 + sweep | done | PASS | 프롬프트 섹션 + post-kill 감지 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
+| Git-error 분류 + Autopilot 자동 복구 (reviewer ignored-file false positive) | 2026-04-09 | PASS | engine.ts + git-workflow.ts, tsc+build+unit+integration |
 | Pulsar 8h stuck 사건 — root cause 4 + 방어 레이어 | 2026-04-09 | PASS | 임시 해결 + 970e262 + dbf4f1d |
 | goal 재진입 순서 버그 (sort_order 충돌 + full 재진입 CTO 재생성) | 2026-04-08 | PASS | 4파일, QA+DB 시뮬레이션 |
-| 전체 버그 헌트 2차 (task:usage, 활동피드 필드명, i18n 키, 하드코딩 영문) | 2026-04-08 | PASS | 8파일, tsc+빌드 통과 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -67,10 +62,39 @@
 - `9088656` .nova-worktrees pointer noise + gitignore 자동
 - `c845dc3` evaluator message 필드 폴백 (description/detail/text/issue/title/reason/problem)
 
+## Key Changes (2026-04-09, 2차 — Git-error 분류 + Autopilot 자동 복구)
+
+### 발견된 후속 이슈
+- Pulsar 대시보드에 blocked 태스크 2개 잔존: 로컬라이제이션 파이프라인 **통합 테스트** / **품질 검증**
+- 두 태스크 모두 qa-reviewer가 실제로 검증 완료 (result_summary에 AC1~AC5 리포트)
+- 그런데 git workflow 단계에서 `git add failed: The following paths are ignored by .gitignore: .claude/worktrees, .nova-worktrees` 에러
+- 970e262의 "git-error 즉시 permanent blocked"가 **복구 가능한 에러까지 흡수**해서 permanent 처리
+
+### 임시 복구 + 근본 수정
+- DB 패치: 두 태스크 → done, goal `3e16c6d3` progress 재계산, activity에 근거 기록
+- `classifyGitError()` 추가 (git-workflow.ts): recoverable/permanent/benign 3분류, unknown은 recoverable default (Autopilot 우선주의)
+- `commitTaskResult` 재구현: `git add -A -- . :(exclude)` 패턴 폐기 → `git status --porcelain -z` 파싱해서 **explicit path add**. status가 이미 exclude 처리하므로 ignored-file 에러 **불가능**. rename/copy/공백 파일명 안전 처리
+- `engine.ts` git-error 분기 2곳 (initial + re-verify) 모두 classify 기반:
+  - `benign` → 즉시 done 전환 (성공 처리)
+  - `permanent` → 기존 로직 (MAX 강제 → 영구 blocked, skip ahead)
+  - `recoverable` → MAX 강제 **제거**, 기존 retry 예산 존중 → autopilot이 스스로 복구
+- reviewer/qa task (needs_worktree=0) 프롬프트에 **Managed Directories** 섹션 추가 (`.nova-worktrees/`, `.claude/worktrees/` 쓰기 금지)
+- killSession 직후 방어 sweep: managed dir residue 감지 시 `autopilot_warning` activity
+- `GitWorkflowResult`에 `errorClass`, `errorCode` 노출 / `runGitWorkflow` 반환 타입 확장
+
+### Autopilot 철학 반영
+> **기존**: git error → 무조건 permanent blocked (브랜치 폭증 방지 과잉 반응)
+> **변경**: git error 분류 → permanent만 skip ahead, recoverable은 autopilot이 자동 복구 / retry 예산 내 재시도. **사용자 개입 없이 스스로 해결하는 것이 Full Auto의 본질**
+
+### 검증
+- tsc PASS / build PASS
+- `classifyGitError` unit test 8/8 PASS (ignored-file, nothing-to-commit, merge-conflict, branch-exists, local-changes-overwrite, index-lock, auth-failed, unknown)
+- `commitTaskResult` 격리 repo 통합 테스트: residue + 공백 파일명 + ignored dir 동시 존재 → 정확한 파일만 커밋, 에러 없음
+
 ## Last Activity
-- 사용자가 대시보드 확인해서 Pulsar가 8시간+ 멈춰있다고 제보. 진단 결과 `docs/design/auth-infrastructure.md`가 architect phase에서 project root에 staged-uncommitted 상태로 생성됨 → 모든 다른 worktree의 merge가 "local changes would be overwritten"로 실패. locale-aware quality gate 태스크 6번 재시도 → 브랜치 6개 생성 → 전부 실패 → permanent blocked → reviewer gate가 이 blocked 형제에 영영 매달림 → 다국어 goal의 2개 리뷰어 태스크가 deferred → scheduler는 sequential goal mode라 다음 goal로 넘어가지 못함 → 8시간 idle. 임시 해결(수동 merge + DB 패치)로 즉시 복구 후 root cause 4건 + stuck detector 방어 레이어 커밋. | 2026-04-09
+- 사용자 제보: pulsar에 blocked 태스크 2개. 진단 결과 qa-reviewer가 검증 완료했으나 `.claude/worktrees`, `.nova-worktrees` ignored-file 에러로 permanent blocked. 970e262의 과보호 로직이 복구 가능한 케이스까지 잡음. DB 패치로 즉시 복구 후 **Autopilot은 복구 가능한 에러를 자동으로 해결해야 한다**는 방향으로 git-error 3분류 시스템 + commitTaskResult explicit-paths 재구현 + reviewer/qa defensive sweep 커밋. | 2026-04-09
 
 ## Refs
 - Plan: docs/plans/phase2-production-ready.md
-- Last Verification: tsc PASS + build PASS + 서버 hot reload + 리뷰어 태스크 정상 재개 확인
-- Commits: a824b89 → 214ee3b → 05600c9 → 353ec22 → ac3ebba → 201806c → d36fa92 → d428437 → 6a6a436 → 9088656 → c845dc3 → 970e262 → dbf4f1d
+- Last Verification: tsc PASS + build PASS + classifyGitError 8/8 + commitTaskResult 통합 테스트 PASS
+- Commits: a824b89 → 214ee3b → 05600c9 → 353ec22 → ac3ebba → 201806c → d36fa92 → d428437 → 6a6a436 → 9088656 → c845dc3 → 970e262 → dbf4f1d → (이번 커밋)

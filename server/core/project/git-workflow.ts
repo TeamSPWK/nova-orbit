@@ -86,6 +86,90 @@ const WORKTREE_EXCLUDE_PATHSPECS = [
 ];
 
 /**
+ * Directory names Nova/Claude manage as linked worktrees. Used to auto-clean
+ * residue when a non-worktree phase (reviewer/qa running at project root)
+ * accidentally stages them.
+ */
+export const WORKTREE_DIR_NAMES = [".nova-worktrees", ".claude/worktrees"];
+
+/**
+ * Git error classification for autopilot recovery decisions.
+ *
+ * - recoverable: transient/fixable errors that should NOT permanently block a
+ *   task (ignored-file, nothing-to-commit, lock contention). Autopilot should
+ *   either auto-fix or soft-retry.
+ * - permanent: errors where the same agent + same worktree + same input will
+ *   produce the same failure forever (merge conflict, branch already exists,
+ *   corrupted index). Skip to next task to avoid budget burn.
+ * - benign: not actually an error — no-op completion.
+ */
+export type GitErrorClass = "recoverable" | "permanent" | "benign";
+
+export interface ClassifiedGitError {
+  class: GitErrorClass;
+  code: string;
+  recoveryHint?: string;
+}
+
+/**
+ * Classify a git error message so the orchestrator can decide whether to
+ * auto-recover, retry, or permanently block a task. Autopilot default stance:
+ * prefer recoverable, escalate to permanent only for known-unrecoverable cases.
+ */
+export function classifyGitError(message: string): ClassifiedGitError {
+  const m = message.toLowerCase();
+
+  // Benign — nothing actually wrong
+  if (m.includes("nothing to commit") || m.includes("no changes added")) {
+    return { class: "benign", code: "nothing-to-commit" };
+  }
+
+  // Recoverable — auto-clean and retry
+  if (m.includes("ignored by") && m.includes(".gitignore")) {
+    return {
+      class: "recoverable",
+      code: "ignored-file",
+      recoveryHint: "Remove ignored worktree residue from staging and re-run add with --ignore-errors",
+    };
+  }
+  if (m.includes("index.lock") || m.includes("unable to create") && m.includes("lock")) {
+    return {
+      class: "recoverable",
+      code: "index-lock",
+      recoveryHint: "Wait briefly and retry; another git process was mid-operation",
+    };
+  }
+  if (m.includes("would be overwritten by merge") || m.includes("local changes would be overwritten")) {
+    return {
+      class: "recoverable",
+      code: "local-changes-overwrite",
+      recoveryHint: "Stash or commit working tree residue before the merge/checkout",
+    };
+  }
+
+  // Permanent — same input will keep failing
+  if (m.includes("merge conflict") || m.includes("automatic merge failed") || m.includes("conflict (")) {
+    return { class: "permanent", code: "merge-conflict" };
+  }
+  if (m.includes("already exists") && m.includes("branch")) {
+    return { class: "permanent", code: "branch-exists" };
+  }
+  if (m.includes("fatal: not a git repository")) {
+    return { class: "permanent", code: "not-a-repo" };
+  }
+  if (m.includes("refusing to merge unrelated histories")) {
+    return { class: "permanent", code: "unrelated-histories" };
+  }
+  if (m.includes("authentication failed") || m.includes("permission denied (publickey)")) {
+    return { class: "permanent", code: "auth-failed" };
+  }
+
+  // Unknown — default to recoverable so autopilot gives it a retry instead of
+  // burning the task. The scheduler's normal retry budget applies.
+  return { class: "recoverable", code: "unknown" };
+}
+
+/**
  * Stage all changes and create a commit.
  * Returns { committed: false } when there are no staged changes.
  */
@@ -100,35 +184,63 @@ export function commitTaskResult(
   // "nothing to commit" errors or empty noise commits (see bug: reviewer
   // tasks being double-executed because their 1st commit committed only a
   // worktree pointer).
+  //
+  // `-z` gives NUL-separated, unquoted paths — safe for paths with spaces,
+  // newlines, or unicode. We parse these into explicit paths and use them to
+  // stage. Critically, this avoids `git add -A -- . :(exclude)` which emits
+  // "paths ignored by .gitignore" errors when Nova's managed directories
+  // (.nova-worktrees/, .claude/worktrees/) exist with content — status
+  // already excluded them so explicit add of status-listed paths can't hit
+  // an ignored-file error. (Incident: locale-aware reviewer tasks permanent-
+  // blocked despite completing their work because of this edge case.)
   const { stdout: statusOutput } = gitExec(workdir, [
     "status",
     "--porcelain",
+    "-z",
     "--",
     ".",
     ...WORKTREE_EXCLUDE_PATHSPECS,
   ]);
-  if (!statusOutput.trim()) {
+  if (!statusOutput) {
     log.info("No changes to commit");
     return { committed: false, filesChanged: 0 };
   }
 
-  const filesChanged = statusOutput.trim().split("\n").filter(Boolean).length;
+  // Parse NUL-separated porcelain records. Rename/copy entries span two
+  // records: [new-path, old-path] — we only stage the new path.
+  const records = statusOutput.split("\0").filter(Boolean);
+  const dirtyPaths: string[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (rec.length < 3) continue;
+    const xy = rec.slice(0, 2);
+    const path = rec.slice(3);
+    dirtyPaths.push(path);
+    // Rename (R) / copy (C) — skip the following old-path record
+    if (xy[0] === "R" || xy[0] === "C") i++;
+  }
+
+  if (dirtyPaths.length === 0) {
+    log.info("No stageable paths after parse — skipping commit");
+    return { committed: false, filesChanged: 0 };
+  }
+
+  const filesChanged = dirtyPaths.length;
 
   // Warn if no .gitignore — risk of committing secrets/node_modules
   if (!existsSync(join(workdir, ".gitignore"))) {
-    log.warn(`No .gitignore found in ${workdir} — git add -A may stage unwanted files`);
+    log.warn(`No .gitignore found in ${workdir} — add may stage unwanted files`);
   }
 
-  // Stage changes, explicitly excluding worktree pointer directories.
-  gitExec(workdir, ["add", "-A", "--", ".", ...WORKTREE_EXCLUDE_PATHSPECS]);
+  // Stage ONLY the paths surfaced by status (already exclude-filtered).
+  // This replaces the old `git add -A -- . :(exclude)` pattern which could
+  // hit "ignored by .gitignore" errors at pathspec-match time.
+  gitExec(workdir, ["add", "--", ...dirtyPaths]);
 
-  // Re-verify there's actually something staged. `git add -A -- . :(exclude)`
-  // can produce a status with only worktree changes that don't survive the
-  // exclude — if nothing was staged, commit would fail with "nothing to
-  // commit" and the outer retry path would loop on the same non-issue.
+  // Re-verify there's actually something staged.
   const { stdout: stagedDiff } = gitExec(workdir, ["diff", "--cached", "--name-only"]);
   if (!stagedDiff.trim()) {
-    log.info("No stageable changes after worktree exclude — skipping commit");
+    log.info("No staged changes after add — skipping commit");
     return { committed: false, filesChanged: 0 };
   }
 
@@ -234,6 +346,10 @@ export interface GitWorkflowResult {
   branch: string;
   filesChanged: number;
   error?: string;
+  /** Classification of `error` — set whenever `error` is present. */
+  errorClass?: GitErrorClass;
+  /** Fine-grained error code for logging/metrics. */
+  errorCode?: string;
 }
 
 export type GitMode = "branch_only" | "pr" | "main_direct" | "local_only";
@@ -355,14 +471,18 @@ export function executeGitWorkflow(
       branch: activeBranch, filesChanged: commitResult.filesChanged,
     };
   } catch (err: any) {
-    log.error(`Git workflow failed for task "${taskTitle}"`, err);
+    const errorMessage = err.message ?? String(err);
+    const classified = classifyGitError(errorMessage);
+    log.error(`Git workflow failed for task "${taskTitle}" [${classified.class}/${classified.code}]`, err);
     return {
       committed: false,
       pushed: false,
       prUrl: null,
       branch: activeBranch,
       filesChanged: 0,
-      error: err.message,
+      error: errorMessage,
+      errorClass: classified.class,
+      errorCode: classified.code,
     };
   }
 }

@@ -4,7 +4,7 @@ import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createDelegationEngine } from "./delegation.js";
-import { executeGitWorkflow, getDefaultBranch, type GitHubConfig } from "../project/git-workflow.js";
+import { executeGitWorkflow, getDefaultBranch, type GitHubConfig, type GitWorkflowResult } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
 import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL, MAX_TASK_RETRIES, MAX_REASSIGNS } from "../../utils/constants.js";
@@ -276,7 +276,18 @@ ${autoApplyRules || "Follow clean code conventions and existing patterns."}
 - Run lint/type-check before finishing
 - DO NOT verify your own work — verification is handled by independent Evaluator
 - Fix ONLY what the task requires — do not refactor unrelated code
+${!needsWorktree ? `
+## Managed Directories — DO NOT TOUCH
+You are running directly in the project root (no isolated worktree). The
+following directories belong to OTHER concurrent tasks and Nova Orbit's
+worktree manager — do NOT create, modify, or delete files inside them:
+- \`.nova-worktrees/\`
+- \`.claude/worktrees/\`
 
+Any file you create elsewhere in the project will be committed as part of
+this task. Prefer returning findings as prose in your response rather than
+writing files for review/QA tasks.
+` : ""}
 When complete, provide a summary of changes made.
 `;
 
@@ -295,6 +306,41 @@ When complete, provide a summary of changes made.
 
         // 구현 세션 즉시 정리 — verification에서 같은 agentId 충돌 방지
         sessionManager.killSession(task.assignee_id);
+
+        // Defensive sweep: reviewer/qa tasks (needs_worktree=0) run at the
+        // project root. If they accidentally wrote into managed worktree
+        // directories, those writes belong to OTHER tasks — detect and
+        // auto-clean the residue so it doesn't pollute this commit or trigger
+        // `ignored by .gitignore` errors downstream. Only warns when the dirs
+        // actually exist with untracked content; does not touch linked
+        // worktrees themselves.
+        if (!needsWorktree) {
+          try {
+            const { spawnSync } = await import("node:child_process");
+            const statusRes = spawnSync(
+              "git",
+              ["status", "--porcelain", "--", ".nova-worktrees/", ".claude/worktrees/"],
+              { cwd: effectiveWorkdir, stdio: "pipe", timeout: 5_000, encoding: "utf-8" },
+            );
+            const dirty = statusRes.stdout?.trim();
+            if (dirty) {
+              const lines = dirty.split("\n").filter(Boolean);
+              log.warn(
+                `Reviewer/QA task "${task.title}" left ${lines.length} file(s) in managed worktree dirs — auto-excluded from commit:\n${dirty.slice(0, 400)}`,
+              );
+              db.prepare(
+                "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'autopilot_warning', ?)",
+              ).run(
+                task.project_id,
+                task.assignee_id,
+                `리뷰어/QA가 관리 디렉토리에 ${lines.length}개 파일 생성 — 자동으로 commit에서 제외됨`,
+              );
+            }
+          } catch (sweepErr: any) {
+            log.warn(`Reviewer residue sweep failed: ${sweepErr.message}`);
+          }
+        }
+
         log.info(`Implementation complete for task "${task.title}"`, {
           cost: implParsed.usage?.totalCostUsd,
           tokens: implParsed.usage ? implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens : 0,
@@ -418,6 +464,19 @@ Fix ONLY these issues. Do not modify other code.
           if (rePass) {
             const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
             if (gitResult?.error) {
+              const errorClass = gitResult.errorClass ?? "permanent";
+              const errorCode = gitResult.errorCode ?? "unknown";
+
+              if (errorClass === "benign") {
+                log.info(`Re-verify git workflow benign (${errorCode}) — marking done: ${task.title}`);
+                transitionTask(db, broadcast, task, "done");
+                return { success: true, verdict: reVerification.verdict };
+              }
+              if (errorClass === "permanent") {
+                db.prepare(
+                  "UPDATE tasks SET retry_count = ?, reassign_count = ? WHERE id = ?",
+                ).run(MAX_TASK_RETRIES, MAX_REASSIGNS, task.id);
+              }
               transitionTask(db, broadcast, task, "blocked");
               return { success: false, verdict: "git-error" };
             }
@@ -438,18 +497,39 @@ Fix ONLY these issues. Do not modify other code.
         if (passed) {
           const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
           if (gitResult?.error) {
-            // Git failures (merge conflict, nothing-to-commit race, etc.) are
-            // NOT fixable by re-running the same agent on a fresh worktree —
-            // every retry creates another orphan branch that conflicts the
-            // same way. Mark as permanently blocked so the scheduler moves on
-            // instead of burning API budget on 6+ merge-conflict retries.
-            db.prepare(
-              "UPDATE tasks SET retry_count = ?, reassign_count = ? WHERE id = ?",
-            ).run(MAX_TASK_RETRIES, MAX_REASSIGNS, task.id);
+            // Classify the git failure so autopilot can decide: auto-recover
+            // (recoverable), skip ahead (permanent), or treat as no-op (benign).
+            // Default autopilot stance is to prefer recoverable — permanent
+            // is reserved for errors that would deterministically re-fail.
+            const errorClass = gitResult.errorClass ?? "permanent";
+            const errorCode = gitResult.errorCode ?? "unknown";
+
+            if (errorClass === "benign") {
+              // e.g. nothing-to-commit — treat as success
+              log.info(`Git workflow benign result for "${task.title}" (${errorCode}) — marking done`);
+              transitionTask(db, broadcast, task, "done");
+              return { success: true, verdict: verification.verdict };
+            }
+
+            if (errorClass === "permanent") {
+              // Same input will re-fail — skip ahead to avoid budget burn.
+              db.prepare(
+                "UPDATE tasks SET retry_count = ?, reassign_count = ? WHERE id = ?",
+              ).run(MAX_TASK_RETRIES, MAX_REASSIGNS, task.id);
+              transitionTask(db, broadcast, task, "blocked");
+              db.prepare(
+                "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'git_error', ?)",
+              ).run(task.project_id, task.assignee_id, `Permanently blocked — git ${errorCode}: ${task.title}`);
+              return { success: false, verdict: "git-error" };
+            }
+
+            // Recoverable — let the scheduler's normal retry budget decide.
+            // Do NOT force retry_count/reassign_count to MAX. The task goes
+            // back to blocked but can be retried by retryBlockedTasks.
             transitionTask(db, broadcast, task, "blocked");
             db.prepare(
               "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'git_error', ?)",
-            ).run(task.project_id, task.assignee_id, `Permanently blocked — git workflow failure (not retryable): ${task.title}`);
+            ).run(task.project_id, task.assignee_id, `Recoverable git error (${errorCode}) — will retry: ${task.title}`);
             return { success: false, verdict: "git-error" };
           }
         }
@@ -917,7 +997,7 @@ async function runGitWorkflow(
   agentName: string,
   workdir: string,
   worktreeBranch?: string,
-): Promise<{ error?: string } | null> {
+): Promise<GitWorkflowResult | null> {
   const githubConfig = getGitHubConfig(db, task.project_id);
 
   // github_config 없어도 로컬 commit은 수행 (worktree 정리 전 코드 보존)
