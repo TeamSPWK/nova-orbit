@@ -1,100 +1,116 @@
 # Nova State
 
 ## Current
-- **Goal**: Git-error 분류 시스템 + Autopilot 자동 복구 철학 (Pulsar 이후 재발 방지)
-- **Phase**: done
+- **Goal**: Pulsar dogfooding로 발견한 갭 10종 연속 수리 — 가드 5단 체계 완성 (P0~P5) + decomposer 안정성 + rate-limit self-heal
+- **Phase**: done — Pulsar Analytics 목표가 Orbit에서 자율 실행 중 (수동 개입 없이)
 - **Blocker**: none
 
-## Tasks
+## Tasks (최신 세션)
 | Task | Status | Verdict | Note |
 |------|--------|---------|------|
-| pulsar 2 blocked tasks 수동 복구 | done | PASS | ignored-file false positive, DB 패치 (세션) |
-| classifyGitError 3분류 시스템 | done | PASS | recoverable/permanent/benign, 8/8 unit test |
-| commitTaskResult explicit-paths-from-porcelain | done | PASS | git add -A → status -z 파싱 → explicit add |
-| engine git-error classify 분기 | done | PASS | benign→done, permanent→MAX, recoverable→retry 예산 유지 |
-| reviewer/qa managed directory 경고 + sweep | done | PASS | 프롬프트 섹션 + post-kill 감지 |
+| P0 Silent failure gate (engine + errors.ts + 11 tests) | done | PASS | ECONNRESET/401/auth_error 패턴 — false-done 방지 |
+| P1 Evaluator git diff 주입 + scope check | done | PASS | 잘못된 디렉토리 감지 |
+| P2 tasks.target_files + stack_hint 스키마 + UI | done | PASS | DB 마이그레이션 + decomposer 규칙 + TaskDetail 표시 |
+| P3 execution-verify 태스크 full scope 자동 승격 + 18 tests | done | PASS | "렌더링 검증" hallucination 방지 |
+| P4 Entry Point Completeness (gated surface → Bootstrap task) + 26 tests | done | PASS | 인증 구현만 하고 로그인 경로 없는 갭 방지 |
+| P5 API Contract Mismatch (풀스택 계약 검증) + 16 tests | done | PASS | SLA/Content crash 재발 방지 |
+| Pulsar 전수 감사 + 계약 불일치 3종 수정 | done | PASS | /analytics, /content, /reliability 모두 정상 |
+| Pulsar Dev bypass (PULSAR_DEV_MODE loopback) | done | PASS | 솔로 dev가 로그인 없이 대시보드 열림 |
+| Pulsar Next.js 홈 + dev.sh + env 템플릿 | done | PASS | Layer 3 검증 (빌드+curl+playwright) |
+| Decomposer truncation 3종 수정 (prompt 압축, recovery, race lock) + 10 tests | done | PASS | balanced-brace 파서로 regex 대체 |
+| Autopilot PATCH → pending goal 자동 재스캔 | done | PASS | off→goal 전환 시 대기 중인 goal spec+decompose 재개 |
+| Decompose/Architect current_activity UX | done | PASS | 에이전트 activity 스캔으로 goal card 실시간 표시 |
+| Rate-limit 3회 → 15분 cooldown self-heal | done | PASS | 영구 정지 폐기, 자동 재개 + 카운터 리셋 |
+| Rate-limit pause overlay (카운트다운 + "지금 재시도") | done | PASS | 기다리지 않고 즉시 탈출 가능 |
+| version.json 거짓 dirty 방지 | done | PASS | sync-nova-rules.sh가 내용 변경 시만 덮어쓰기 |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| Git-error 분류 + Autopilot 자동 복구 (reviewer ignored-file false positive) | 2026-04-09 | PASS | engine.ts + git-workflow.ts, tsc+build+unit+integration |
-| Pulsar 8h stuck 사건 — root cause 4 + 방어 레이어 | 2026-04-09 | PASS | 임시 해결 + 970e262 + dbf4f1d |
-| goal 재진입 순서 버그 (sort_order 충돌 + full 재진입 CTO 재생성) | 2026-04-08 | PASS | 4파일, QA+DB 시뮬레이션 |
+| Pulsar Analytics 목표를 Orbit에서 자율 실행 (dogfooding 검증) | 2026-04-10 | PASS | 6 tasks decompose + scheduler가 첫 task architect phase 실행 중 |
+| 가드 5단 체계 완성 (P0~P5) + 71 회귀 테스트 | 2026-04-09~10 | PASS | 058f61b, b6caa90, 188031a |
+| Git-error 분류 + Autopilot 자동 복구 | 2026-04-09 | PASS | 54728ce |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
 |------|-------------------|----------|
+| P6 Fixture-masquerading-as-production-data | placeholder/TODO/하드코딩 seed가 실데이터처럼 집계되는 갭. Pulsar Analytics 목표 실행 결과가 이 패턴 잡아내는지 관찰 중 | **관찰 후 결정** |
+| Pulsar 백엔드 ghost endpoints (5개) | `/dlq/items`, `/health/services`, `/health/retry-stats`, `/sla/metrics`, `/sla/violations` 미구현. 프론트는 graceful fallback | Medium (별도 목표) |
+| Pulsar content 편집/승인 워크플로우 | PUT `/content/{id}` + `/escalation/action` UI 재활성화 | Low |
+| Pulsar `dashboard/` 레거시 vanilla JS | `api.server:/dashboard`로 mount 유지 중. Next.js 단일화 여부 결정 | Low |
 | Subtask verification | parent verification에 git diff 통합 | Medium |
-| Goal 의존성 | depends_on_goal_id 미구현 (현재는 priority + sort_order) | Low |
-| Sequential vs parallel goal 옵션 | 프로젝트별 선택 가능하게 | Low |
-| Rate limit 모달 | 진짜 rate limit일 때 전체 딤 모달 | Medium |
+| Goal 의존성 | depends_on_goal_id 미구현 | Low |
 | 비개발자 UX Phase 2 | Git 설정 단순화, 검증 시각화 | Medium |
-| npm publish | npmjs.com 미배포 | Low |
 | `agents.parent_id` FK 부재 | 수동 정리 (마이그레이션 위험) | Low |
-| tsx watch hot reload 중 in_progress 태스크 손실 | 매 파일 저장마다 recovery가 reset → 태스크 재실행 | Low (dev only) |
+| tsx watch hot reload 중 in_progress 태스크 손실 | 매 파일 저장마다 recovery reset | Low (dev only) |
+| npm publish | npmjs.com 미배포 | Low |
 
-## Key Changes This Session (2026-04-09)
+## Key Changes This Session (2026-04-09 ~ 2026-04-10)
 
-### 임시 해결 (Pulsar repo + DB 직접 조작)
-- `docs/design/auth-infrastructure.md` 수동 commit (Pulsar 73c0e06)
-- `agent/platform-dev/locale-aware-quality-gate-dd88eea7` 수동 merge to main (Pulsar)
-- Stale locale-aware 브랜치 6개 삭제
-- Nova DB: 영구 blocked 태스크 `02fe0bab538052af` → done 전환 + 모든 goal progress 재계산
+### 1차: 가드 5단 체계 완성 (P0~P5)
+Pulsar 감사에서 드러난 각기 다른 실패 패턴을 회귀 방지 가드로 체계화.
 
-### Root Cause 수정 (970e262)
-- **Architect phase 파일 오염**: 프롬프트에 "⚠️ Read-Only Session, Do NOT use Write/Edit/NotebookEdit" 명시 + 종료 후 `git status --porcelain` 체크 → residue 있으면 `docs(nova-architect):` prefix로 auto-commit + autopilot_warning 기록
-- **Reviewer gate 영구 lock**: sibling 쿼리에 `NOT (blocked AND retry_count >= MAX AND reassign_count >= MAX)` 추가. permanent-blocked는 "done 대체"로 취급
-- **Progress % 고착**: `updateGoalProgressExcludingBlocked`를 `pickNextTasks` 상단에서 idempotent 호출. 기존엔 `retryBlockedTasks`의 tail에서만 호출 → exhausted 없으면 early return으로 영영 호출 안됨
-- **Git merge conflict 브랜치 폭증**: executeTask의 git workflow 실패 시 retry_count/reassign_count를 즉시 MAX로 세팅 후 blocked 전환. 첫 번째 git 실패에서 바로 permanent → 재할당 루프 중단
+| 가드 | 감지 대상 | 동기 사례 (Pulsar) | 테스트 |
+|---|---|---|---|
+| **P0** | Silent CLI failure (ECONNRESET/401 leaks가 result_summary로 저장되고 done) | "로컬 개발 편의 스크립트 작성" | 11 |
+| **P1** | Git diff scope drift (잘못된 디렉토리) | dashboard/*.js vs web/src/app/page.tsx | (evaluator inline) |
+| **P2** | target_files/stack_hint 스코프 고정 (스키마 + decomposer + 구현 프롬프트 + UI) | Next.js 대신 vanilla JS로 오구현 | (schema + prompt) |
+| **P3** | 실행 검증 hallucination ("렌더링 검증"류 태스크 auto-full scope) | "프론트엔드 12개 페이지 렌더링 검증" 빈 result_summary | 18 |
+| **P4** | Entry Point Completeness (gated feature end-to-end 사용성) | users.yaml 빈 배열 + /login 없음 + dev bypass 없음 | 26 |
+| **P5** | API Contract Mismatch (풀스택 계약 검증) | SLA `{items}` vs `{products}` crash, content status 매핑 crash, 5개 ghost endpoint | 16 |
 
-### 방어 레이어 — Stuck State 감지 (970e262, dbf4f1d)
-- scheduler에 `stuckState` Map + `checkStuckState` + `diagnoseStuck` 추가
-- `pickNextTasks`가 빈 배열 반환 + `busy.size === 0`일 때만 카운팅 (False positive 방지 — dbf4f1d)
-- 30회 연속(≈30초) empty poll → 진단 수행
-- 진단 코드 5종: `no_agents` / `reviewer_gate_lock` / `permanent_blocked` / `all_blocked` / `unknown_idle`
-- `🟡 자동 실행 정체: <이유>` activity + `autopilot:stuck` WebSocket broadcast + `project:updated` 동반 발송
-- 5분 re-warn 간격, 진단 코드 변경 시 즉시 re-warn
+총 **71/71 회귀 테스트 통과**. 커밋: `058f61b`, `b6caa90`, `188031a`.
 
-### 이전 세션 잔여 수정 (커밋만 정리)
-- `d36fa92` scheduler 타이머 지수 증식 (100% CPU 포화 Hard-Block)
-- `d428437` goal_specs `_status:"generating"` 영구 고착 (runtime + startup)
-- `6a6a436` reviewer/qa architect phase 스킵
-- `9088656` .nova-worktrees pointer noise + gitignore 자동
-- `c845dc3` evaluator message 필드 폴백 (description/detail/text/issue/title/reason/problem)
+### 2차: Pulsar 전수 복구 (프론트엔드만 adapt)
+- **`/analytics` SLA crash**: `types/sla.ts` 재정의 (`items/healthy/violation_count`), `useSla` adapter, `SlaStatusCard` defensive + 새 스키마 렌더
+- **`/content` placeholder 복원 + 계약 재맞춤**: 커밋 032c34d 파일 복원 후 `ContentSummary`를 백엔드 실제 응답(quality_score/status:draft/generated_at/channels[])에 맞춤. 상세 페이지 `[id]` → `[...id]` catch-all. 편집/승인 제거하고 read-only 뷰.
+- **`/reliability` ghost endpoints**: use-health-stream이 404 수신 시 폴링 중단, 페이지 상단에 "백엔드 미구현" 안내 배너 (모든 API failed 시)
+- **`/products` Button 접근성 경고**: `nativeButton={false}` 명시
+- **Pulsar Next.js 대시보드 홈**: 8줄 placeholder → 277줄 KPI + 파이프라인 + 빠른 링크, Layer 3 검증 (빌드 + playwright + mock API)
+- **PULSAR_DEV_MODE loopback bypass**: `dependencies.py`에 env + loopback AND 조건, tenant-default + admin AuthContext
+- **`scripts/dev.sh`**: API + Web 동시 기동 + PULSAR_DEV_MODE 자동 export + JWT secret fallback
 
-## Key Changes (2026-04-09, 2차 — Git-error 분류 + Autopilot 자동 복구)
+커밋: `22d68e0`, `c3d9951`, `627b780` (Pulsar), `058f61b` (Nova Orbit)
 
-### 발견된 후속 이슈
-- Pulsar 대시보드에 blocked 태스크 2개 잔존: 로컬라이제이션 파이프라인 **통합 테스트** / **품질 검증**
-- 두 태스크 모두 qa-reviewer가 실제로 검증 완료 (result_summary에 AC1~AC5 리포트)
-- 그런데 git workflow 단계에서 `git add failed: The following paths are ignored by .gitignore: .claude/worktrees, .nova-worktrees` 에러
-- 970e262의 "git-error 즉시 permanent blocked"가 **복구 가능한 에러까지 흡수**해서 permanent 처리
+### 3차: Decomposer 안정성 3종 (Pulsar Analytics 목표 실전 검증 중 발견)
+Pulsar dogfooding 태스크를 실전 실행하면서 드러난 연쇄 버그.
 
-### 임시 복구 + 근본 수정
-- DB 패치: 두 태스크 → done, goal `3e16c6d3` progress 재계산, activity에 근거 기록
-- `classifyGitError()` 추가 (git-workflow.ts): recoverable/permanent/benign 3분류, unknown은 recoverable default (Autopilot 우선주의)
-- `commitTaskResult` 재구현: `git add -A -- . :(exclude)` 패턴 폐기 → `git status --porcelain -z` 파싱해서 **explicit path add**. status가 이미 exclude 처리하므로 ignored-file 에러 **불가능**. rename/copy/공백 파일명 안전 처리
-- `engine.ts` git-error 분기 2곳 (initial + re-verify) 모두 classify 기반:
-  - `benign` → 즉시 done 전환 (성공 처리)
-  - `permanent` → 기존 로직 (MAX 강제 → 영구 blocked, skip ahead)
-  - `recoverable` → MAX 강제 **제거**, 기존 retry 예산 존중 → autopilot이 스스로 복구
-- reviewer/qa task (needs_worktree=0) 프롬프트에 **Managed Directories** 섹션 추가 (`.nova-worktrees/`, `.claude/worktrees/` 쓰기 금지)
-- killSession 직후 방어 sweep: managed dir residue 감지 시 `autopilot_warning` activity
-- `GitWorkflowResult`에 `errorClass`, `errorCode` 노출 / `runGitWorkflow` 반환 타입 확장
+- **Prompt 압축**: P4/P5 섹션을 verbose past-incident 설명 → 5-7줄 규칙으로 압축. Claude output truncation 원인 제거.
+- **Balanced-brace JSON recovery**: 기존 regex가 `target_files` 필드 추가 후 **절대 매칭 안 됨** 상태로 recovery 완전 무력화. `recoverTasksFromPartialJson()` 신설 — 문자-단위 string/brace 추적. production 실패 케이스 포함 10 tests.
+- **In-flight decompose lock**: scheduler와 API가 동일 goalId로 동시 `decomposeGoal` 호출 시 같은 sessionKey로 race → SIGTERM(exit 143). `inflightDecompose` Set으로 두 번째 호출 조기 bail-out.
 
-### Autopilot 철학 반영
-> **기존**: git error → 무조건 permanent blocked (브랜치 폭증 방지 과잉 반응)
-> **변경**: git error 분류 → permanent만 skip ahead, recoverable은 autopilot이 자동 복구 / retry 예산 내 재시도. **사용자 개입 없이 스스로 해결하는 것이 Full Auto의 본질**
+커밋: `086688b`
 
-### 검증
-- tsc PASS / build PASS
-- `classifyGitError` unit test 8/8 PASS (ignored-file, nothing-to-commit, merge-conflict, branch-exists, local-changes-overwrite, index-lock, auth-failed, unknown)
-- `commitTaskResult` 격리 repo 통합 테스트: residue + 공백 파일명 + ignored dir 동시 존재 → 정확한 파일만 커밋, 에러 없음
+### 4차: Autopilot 전환/재시작/rate-limit self-heal + UX
+- **`rescuePendingGoals`**: `projects.ts` PATCH에서 autopilot off→goal/full 전환 시 progress=0 + task 0개 goal 재스캔 → spec + decompose 파이프라인 재실행
+- **Decompose 진행 상황 UX**: `decompose_started/completed/failed` activity 이벤트 + CTO `current_activity = decompose:{title}`, ProjectHome renderGoalCard가 agent activity 스캔해서 `decomposingGoalId` 로컬 state 없이도 pulse 표시
+- **Architect phase UX**: CTO `current_activity = architect:{title}` + `architect_started` activity. Goal card가 `architect:` prefix도 인식.
+- **Rate-limit self-heal**: `handleRateLimit`의 3회 연속 → `stopQueueInternal` → **15분 `RATE_LIMIT_COOLDOWN_MS` pause로 교체**. 카운터 리셋 + 자동 resume + timers 재건. 사용자 수동 개입 불필요.
+- **Rate-limit pause overlay UX**: `nextRetryAt` 기반 실시간 카운트다운(`MM:SS`), "HH:MM에 자동 재개" 절대 시각, long cooldown은 **red** / 일반 backoff는 **amber** 테마 분리, **"지금 바로 재시도"** primary 버튼 강조 + "기다리지 않고 바로 재시도할 수 있습니다" subtitle. `resumeQueue()` 경로로 즉시 재개.
+
+커밋: `086688b`, `1545665`, `d8d18c8`
+
+### 5차: 잡다한 정리
+- **`version.json` 거짓 dirty**: `sync-nova-rules.sh`가 매 실행마다 syncedAt만 갱신해서 git-dirty 상태 유발. `novaVersion/novaCommit` 비교 후 실제 변경 시만 재작성. 커밋: `a35d91c`
+
+## Pulsar Dogfooding 결과 (2026-04-10 진행 중)
+**목표 `1ca941bf9a966848` — Ghost/Naver Analytics 실제 수집 — fixture 제거 + 라이브 데이터 연동**
+- 상태: 6 tasks decompose 완료 (P2 target_files/stack_hint 정확하게 채워짐)
+- 진행: Task 1 "Ghost Admin API Analytics 클라이언트 구현" Architect phase 실행 중 (세션 종료 시점)
+- autopilot=goal 모드, scheduler가 자율 실행 중
+- **관찰 포인트**: Evaluator가 fixture-masquerading 패턴을 잡아내는지 여부. 못 잡으면 P6 가드 추가 근거 확보.
+
+## Key Observation — Pulsar 이전 세션의 실패 원인 (장기)
+어제 14:22에 Pulsar Analytics 실행이 rate-limit 3회 연속으로 **queue 완전 정지** → 오늘 아침까지 16시간 방치. 원인 체인:
+1. Scheduler의 rate-limit stop이 영구(manual resume required) — **수정됨**
+2. 서버 재시작이 여러 번 있었지만 재시작 직후 또 rate-limit에 걸려 같은 stop 경로 — **15분 cooldown으로 해소**
+3. 사용자가 "autopilot이 멈춰있다"는 상태를 대시보드에서 명확히 볼 수 없음 — **overlay UX 개선됨**
+4. 사용자가 "기다리지 않고 즉시 재시도 가능"임을 알 수 없음 — **"지금 바로 재시도" primary 버튼 + 카운트다운**
 
 ## Last Activity
-- 사용자 제보: pulsar에 blocked 태스크 2개. 진단 결과 qa-reviewer가 검증 완료했으나 `.claude/worktrees`, `.nova-worktrees` ignored-file 에러로 permanent blocked. 970e262의 과보호 로직이 복구 가능한 케이스까지 잡음. DB 패치로 즉시 복구 후 **Autopilot은 복구 가능한 에러를 자동으로 해결해야 한다**는 방향으로 git-error 3분류 시스템 + commitTaskResult explicit-paths 재구현 + reviewer/qa defensive sweep 커밋. | 2026-04-09
+Pulsar dogfooding으로 가드 5단 체계 실전 검증. 여러 단계의 cascade 버그 (decomposer truncation → recovery 무력화 → race lock → rate-limit 영구 정지 → UX invisibility)를 전부 수리. 세션 종료 시점에 Pulsar Analytics 목표의 첫 task가 Architect phase 실행 중 (자율). 사용자가 "기다리지 않고 즉시 재시도"할 수 있는 UX까지 완성되어 dogfooding의 **진짜 Orbit 경험**이 가능해짐. | 2026-04-10
 
 ## Refs
-- Plan: docs/plans/phase2-production-ready.md
-- Last Verification: tsc PASS + build PASS + classifyGitError 8/8 + commitTaskResult 통합 테스트 PASS
-- Commits: a824b89 → 214ee3b → 05600c9 → 353ec22 → ac3ebba → 201806c → d36fa92 → d428437 → 6a6a436 → 9088656 → c845dc3 → 970e262 → dbf4f1d → (이번 커밋)
+- **Pulsar Analytics goal**: `1ca941bf9a966848` (autopilot=goal, decompose 6 tasks, Task 1 in progress)
+- Last Verification: 71/71 unit tests + tsc (server+dashboard) + vitest + Playwright live verification (Pulsar 8 pages + dev-bypass dashboard)
+- Session commits: `058f61b` → `a35d91c` → `22d68e0` → `b6caa90` → `c3d9951` → `627b780` → `188031a` → `086688b` → `1545665` → `d8d18c8`
