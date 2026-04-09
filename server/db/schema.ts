@@ -363,6 +363,19 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE agents ADD COLUMN current_activity TEXT");
   }
 
+  // target_files + stack_hint on tasks — scope anchoring (Pulsar scope-drift fix)
+  // When set, the Generator prompt includes "Primary target: <paths>" and
+  // the Evaluator checks that the diff actually touches those paths.
+  const taskColsLate = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  if (!taskColsLate.some((c) => c.name === "target_files")) {
+    // JSON array of file paths the task should modify. Example: ["web/src/app/page.tsx"]
+    db.exec("ALTER TABLE tasks ADD COLUMN target_files TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!taskColsLate.some((c) => c.name === "stack_hint")) {
+    // Short free-text constraint. Example: "Next.js 16 App Router, Tailwind 4"
+    db.exec("ALTER TABLE tasks ADD COLUMN stack_hint TEXT NOT NULL DEFAULT ''");
+  }
+
 }
 
 export function generateId(): string {

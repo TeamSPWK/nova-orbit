@@ -47,7 +47,7 @@ export function createScheduler(
   const engine = createOrchestrationEngine(db, sessionManager, broadcast);
   // Share the same quality gate so parent-task verification works from both
   // engine (direct execution) and scheduler (delegation completion paths).
-  const qualityGate = createQualityGate(db, sessionManager);
+  const qualityGate = createQualityGate(db, sessionManager, broadcast);
   const delegationEngine = createDelegationEngine(db, sessionManager, broadcast, qualityGate);
   let generateGoalSpec: ((goalId: string) => Promise<any>) | null = null;
 

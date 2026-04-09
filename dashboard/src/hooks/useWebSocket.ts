@@ -2,6 +2,16 @@ import { useEffect, useRef } from "react";
 import { useStore } from "../stores/useStore";
 import { getApiKey } from "../lib/api";
 
+/** Send a message through the active WebSocket connection. */
+export function wsSend(data: Record<string, unknown>): void {
+  const ws = _wsInstance;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
+let _wsInstance: WebSocket | null = null;
+
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -27,6 +37,7 @@ export function useWebSocket() {
       const wsUrl = `${wsHost}/ws?token=${token}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+      _wsInstance = ws;
 
       ws.onopen = () => {
         reconnectAttempts = 0; // Reset on successful connection
@@ -161,6 +172,7 @@ export function useWebSocket() {
       destroyed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
+      _wsInstance = null;
     };
   }, []);
 }

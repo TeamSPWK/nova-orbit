@@ -12,6 +12,7 @@ import type { VerificationScope } from "../../../shared/types.js";
 import { appendMemory } from "../agent/memory.js";
 import { createNovaRulesEngine } from "../nova-rules/index.js";
 import { autoDetectScope } from "../quality-gate/evaluator.js";
+import { detectAgentRunFailure } from "../../utils/errors.js";
 
 const log = createLogger("orchestration");
 
@@ -26,6 +27,8 @@ interface TaskRow {
   parent_task_id: string | null;
   status: string;
   verification_id: string | null;
+  target_files: string | null;  // JSON array of paths (P2: scope anchoring)
+  stack_hint: string | null;    // Short stack constraint (P2: scope anchoring)
 }
 interface ProjectRow {
   id: string;
@@ -74,7 +77,7 @@ export function createOrchestrationEngine(
   sessionManager: SessionManager,
   broadcast: (event: string, data: unknown) => void,
 ) {
-  const qualityGate = createQualityGate(db, sessionManager);
+  const qualityGate = createQualityGate(db, sessionManager, broadcast);
   const delegationEngine = createDelegationEngine(db, sessionManager, broadcast, qualityGate);
 
   return {
@@ -262,11 +265,37 @@ export function createOrchestrationEngine(
         const novaRules = createNovaRulesEngine();
         const autoApplyRules = novaRules.getAutoApplyRules();
 
+        // Parse scope-anchoring fields (P2: Pulsar scope-drift fix)
+        const targetFiles: string[] = (() => {
+          try {
+            const parsed = JSON.parse(task.target_files ?? "[]");
+            return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
+          } catch {
+            return [];
+          }
+        })();
+        const stackHint = (task.stack_hint ?? "").trim();
+
+        const scopeAnchor = targetFiles.length > 0 || stackHint
+          ? `
+## Primary Target — Stay Within Scope
+${targetFiles.length > 0 ? `**Modify ONLY these files** (create them if they don't exist yet):
+${targetFiles.map((f) => `- \`${f}\``).join("\n")}
+
+If you find yourself about to create a file outside this list, STOP and ask:
+"Does the task really require a new file elsewhere, or am I drifting?"` : ""}
+${stackHint ? `\n**Stack constraint:** ${stackHint}
+
+Match the conventions of the nearest existing code in the same stack. Do NOT
+introduce a different framework / language / build tool to solve this task.` : ""}
+`
+          : "";
+
         const implementationPrompt = `
 # Task: ${task.title}
 
 ${task.description}
-${architectContext ? `\n## Architecture Design\n${architectContext}\n` : ""}
+${scopeAnchor}${architectContext ? `\n## Architecture Design\n${architectContext}\n` : ""}
 ## Nova Auto-Apply Rules
 ${autoApplyRules || "Follow clean code conventions and existing patterns."}
 
@@ -293,6 +322,39 @@ When complete, provide a summary of changes made.
 
         const implResult = await session.send(implementationPrompt);
         const implParsed = parseStreamJson(implResult.stdout);
+
+        // Hard gate: detect silent failures where the CLI crashed, the stream
+        // emitted errors, or an API error signature leaked into assistant text.
+        // Without this the task gets marked done with garbage like
+        // "API Error: Unable to connect to API (ECONNRESET)" as its summary.
+        const implFailure = detectAgentRunFailure(implResult, implParsed);
+        if (implFailure) {
+          log.error(`Implementation failed [${implFailure.code}]: ${implFailure.message}`, {
+            taskId,
+            taskTitle: task.title,
+            detail: implFailure.detail,
+          });
+          broadcast("system:error", {
+            agentId: task.assignee_id,
+            agentName,
+            taskId,
+            error: implFailure.toJSON(),
+          });
+          // Persist token usage if any output was produced before the failure
+          if (implParsed.usage) {
+            db.prepare(
+              "UPDATE sessions SET token_usage = token_usage + ? WHERE agent_id = ? AND status = 'active'",
+            ).run(
+              implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens,
+              task.assignee_id,
+            );
+          }
+          sessionManager.killSession(task.assignee_id);
+          // Re-throw so executeTask's catch transitions the task to blocked and
+          // the scheduler's retry/reassign budget takes over. This is the ONLY
+          // path that prevents silent API failures from being marked done.
+          throw implFailure;
+        }
 
         // Update session token usage BEFORE killSession (which sets status='killed')
         if (implParsed.usage) {
@@ -446,7 +508,27 @@ Fix ONLY these issues. Do not modify other code.
             broadcast("system:error", { agentId: task.assignee_id, agentName, taskId, error });
           });
           try {
-            await fixSession.send(fixPrompt);
+            const fixResult = await fixSession.send(fixPrompt);
+            const fixParsed = parseStreamJson(fixResult.stdout);
+            // Same silent-failure gate as the implementation phase — a
+            // failed fix attempt must not silently count as a successful fix.
+            const fixFailure = detectAgentRunFailure(fixResult, fixParsed);
+            if (fixFailure) {
+              log.error(`Auto-fix failed [${fixFailure.code}]: ${fixFailure.message}`, {
+                taskId,
+                taskTitle: task.title,
+                detail: fixFailure.detail,
+              });
+              broadcast("system:error", {
+                agentId: task.assignee_id,
+                agentName,
+                taskId,
+                error: fixFailure.toJSON(),
+              });
+              // Don't throw — let the re-verification decide the task's fate.
+              // A failed fix call still leaves the code in its previous state,
+              // which the evaluator will still catch.
+            }
           } finally {
             sessionManager.killSession(task.assignee_id);
           }
@@ -652,11 +734,25 @@ ${criteriaList}
         } catch { /* ignore parse errors, use basic prompt */ }
       }
 
+      // Project tech stack context — helps the decomposer fill stack_hint and
+      // pick plausible target_files. Without this the decomposer has no idea
+      // whether the project uses Next.js vs vanilla JS vs Django etc.
+      let projectStackHint = "";
+      try {
+        const stackRaw = (project as any)?.tech_stack;
+        if (stackRaw) {
+          const stack = JSON.parse(stackRaw);
+          const langs = (stack.languages ?? []).slice(0, 3).join(", ");
+          const fws = (stack.frameworks ?? []).slice(0, 3).join(", ");
+          projectStackHint = `\n**Project stack**: ${[langs, fws].filter(Boolean).join(" / ") || "unknown"}`;
+        }
+      } catch { /* ignore */ }
+
       const decomposePrompt = `
 # Goal Decomposition
 
 Break down this goal into concrete, actionable tasks:
-${goal.title ? `**${goal.title}**\n` : ""}"${goal.description}"
+${goal.title ? `**${goal.title}**\n` : ""}"${goal.description}"${projectStackHint}
 ${specContext}
 Available team members: ${roleList || "coder"}
 
@@ -669,6 +765,22 @@ Rules:
 - Set "order": sequential number (1, 2, 3...) reflecting execution order — tasks with dependencies on others must have a higher number
 - Verification/review/QA tasks should always have the highest order number (run last)${goalSpec ? "\n- Reference the structured spec above to ensure complete coverage of all features and acceptance criteria" : ""}
 
+## Scope Anchoring (REQUIRED for code-producing tasks)
+For every task that will modify or create source files, you MUST include:
+- \`target_files\`: array of file paths the agent should touch (examples:
+  \`["web/src/app/page.tsx"]\`, \`["api/routes/dashboard.py", "api/server.py"]\`).
+  Use the **project stack** above to pick plausible paths. If you genuinely
+  cannot guess (e.g., exploratory spike, no existing code to follow), return
+  an empty array \`[]\`.
+- \`stack_hint\`: one short sentence naming the framework/language
+  constraint (examples: "Next.js 16 App Router + Tailwind 4",
+  "FastAPI router module", "pnpm workspace: web/"). Empty string if no
+  constraint.
+
+**Why this matters**: without these fields agents have caused real regressions
+by implementing Next.js pages as vanilla JS in the wrong directory. The
+Evaluator uses these fields to reject scope mismatches.
+
 Respond in this EXACT JSON format:
 \`\`\`json
 {
@@ -678,7 +790,9 @@ Respond in this EXACT JSON format:
       "description": "Detailed description with acceptance criteria",
       "role": "${availableAgents[0]?.role ?? "coder"}",
       "priority": "high",
-      "order": 1
+      "order": 1,
+      "target_files": ["relative/path/to/file.ext"],
+      "stack_hint": "Next.js 16 App Router"
     }
   ]
 }
@@ -759,12 +873,23 @@ Respond in this EXACT JSON format:
           const agent = findAgent(t.role ?? "coder");
           const priority = VALID_PRIORITIES.has(t.priority) ? t.priority : "medium";
           const sortOrder = typeof t.order === "number" ? t.order : i + 1;
+          // P2: scope anchoring — capture target_files + stack_hint from the
+          // decomposer so both the Generator prompt and Evaluator check can
+          // enforce where code belongs.
+          const targetFiles = Array.isArray(t.target_files)
+            ? t.target_files.filter((f: unknown) => typeof f === "string" && f.length > 0 && f.length < 260).slice(0, 20)
+            : [];
+          const stackHint = typeof t.stack_hint === "string" ? t.stack_hint.slice(0, 200) : "";
           // Sprint 5: tasks created from decomposition start as pending_approval
           // so the user can review the plan before execution begins
           db.prepare(`
-            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status, priority, sort_order)
-            VALUES (?, ?, ?, ?, ?, 'pending_approval', ?, ?)
-          `).run(goal.id, goal.project_id, title, description, agent?.id ?? null, priority, sortOrder);
+            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status, priority, sort_order, target_files, stack_hint)
+            VALUES (?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?)
+          `).run(
+            goal.id, goal.project_id, title, description, agent?.id ?? null,
+            priority, sortOrder,
+            JSON.stringify(targetFiles), stackHint,
+          );
           created++;
         }
 

@@ -116,7 +116,7 @@ export function createTaskRoutes(ctx: AppContext): Router {
 
   // Update task
   router.patch("/:id", (req, res) => {
-    const { title, description, assignee_id, status, verification_id } = req.body;
+    const { title, description, assignee_id, status, verification_id, target_files, stack_hint } = req.body;
     const existing = db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Task not found" });
 
@@ -140,8 +140,22 @@ export function createTaskRoutes(ctx: AppContext): Router {
     if (description != null && typeof description !== "string") {
       return res.status(400).json({ error: "description must be a string" });
     }
+    // P2: scope anchor validation
+    if (target_files !== undefined) {
+      if (!Array.isArray(target_files) || target_files.some((f) => typeof f !== "string" || f.length === 0 || f.length > 260)) {
+        return res.status(400).json({ error: "target_files must be an array of non-empty path strings (max 260 chars each)" });
+      }
+      if (target_files.length > 20) {
+        return res.status(400).json({ error: "target_files may contain at most 20 entries" });
+      }
+    }
+    if (stack_hint !== undefined && (typeof stack_hint !== "string" || stack_hint.length > 200)) {
+      return res.status(400).json({ error: "stack_hint must be a string (max 200 chars)" });
+    }
     const boundedTitle = typeof title === "string" ? title.slice(0, MAX_TITLE_LEN) : null;
     const boundedDesc = typeof description === "string" ? description.slice(0, MAX_DESC_LEN) : null;
+    const targetFilesJson = target_files !== undefined ? JSON.stringify(target_files) : null;
+    const stackHintValue = stack_hint !== undefined ? stack_hint : null;
 
     try {
       // assignee_id needs special handling: explicit null means "unassign",
@@ -164,6 +178,8 @@ export function createTaskRoutes(ctx: AppContext): Router {
             ${assigneeClause}
             status = COALESCE(?, status),
             verification_id = COALESCE(?, verification_id),
+            target_files = COALESCE(?, target_files),
+            stack_hint = COALESCE(?, stack_hint),
             updated_at = datetime('now')
           WHERE id = ?
         `).run(
@@ -172,6 +188,8 @@ export function createTaskRoutes(ctx: AppContext): Router {
           ...assigneeParams,
           status ?? null,
           verification_id ?? null,
+          targetFilesJson,
+          stackHintValue,
           req.params.id,
         );
         return db.prepare("SELECT * FROM tasks WHERE id = ?").get(req.params.id);

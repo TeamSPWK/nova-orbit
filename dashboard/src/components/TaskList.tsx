@@ -37,7 +37,7 @@ interface TaskItem {
 
 interface TaskListProps {
   tasks: TaskItem[];
-  agents: Array<{ id: string; name: string }>;
+  agents: Array<{ id: string; name: string; role?: string; current_task_id?: string | null }>;
   projectId?: string;
   onUpdate?: () => void;
   autopilotMode?: string; // 'off' | 'goal' | 'full'
@@ -275,6 +275,24 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
             </span>
           )}
         </div>
+
+        {/* Active reviewer for in_review tasks — surfaces the Generator-Evaluator
+            separation so users see *which* agent is currently reviewing. */}
+        {(() => {
+          if (task.status !== "in_review") return null;
+          const reviewer = agents.find(
+            (a) => a.current_task_id === task.id && a.id !== task.assignee_id,
+          );
+          if (!reviewer) return null;
+          return (
+            <span
+              className="text-[10px] text-purple-700 dark:text-purple-300 px-1.5 py-0.5 bg-purple-50 dark:bg-purple-900/30 rounded border border-purple-200 dark:border-purple-800 shrink-0 ml-3"
+              title={t("reviewingBy", { name: reviewer.name })}
+            >
+              {t("reviewingPrefix")} {reviewer.name}
+            </span>
+          );
+        })()}
 
         <div className="flex items-center gap-1.5 shrink-0 ml-3">
           {/* Agent assignment */}

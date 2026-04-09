@@ -29,6 +29,8 @@ interface Task {
   project_id?: string;
   assignee_id: string | null;
   verification_id: string | null;
+  target_files?: string | null; // JSON array string
+  stack_hint?: string | null;
 }
 
 interface Agent {
@@ -169,6 +171,39 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
               </div>
             )}
           </div>
+
+          {/* Scope anchor — target files + stack hint (P2) */}
+          {(() => {
+            let targets: string[] = [];
+            try { targets = JSON.parse(task.target_files || "[]"); } catch { /* ignore */ }
+            const hint = (task.stack_hint || "").trim();
+            if (targets.length === 0 && !hint) return null;
+            return (
+              <div className="border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg p-3">
+                <h4 className="text-[10px] uppercase tracking-wider text-blue-700 dark:text-blue-400 font-semibold mb-2">
+                  {t("scopeAnchorTitle")}
+                </h4>
+                {targets.length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1">{t("scopeTargetFiles")}</p>
+                    <ul className="space-y-0.5">
+                      {targets.map((f, i) => (
+                        <li key={i} className="text-xs font-mono text-gray-700 dark:text-gray-300">
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {hint && (
+                  <div>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1">{t("scopeStackHint")}</p>
+                    <p className="text-xs text-gray-700 dark:text-gray-300">{hint}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Status + Agent row */}
           <div className="flex items-center gap-3 flex-wrap">

@@ -18,7 +18,7 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
   const sessionManager = createSessionManager(db);
   const engine = createOrchestrationEngine(db, sessionManager, broadcast);
   const scheduler = createScheduler(db, sessionManager, broadcast);
-  const qualityGate = createQualityGate(db, sessionManager);
+  const qualityGate = createQualityGate(db, sessionManager, broadcast);
 
   // Expose sessionManager on ctx so other routes (e.g. agent delete) can kill sessions
   ctx.sessionManager = sessionManager;

@@ -108,6 +108,10 @@ export interface Task {
   parentTaskId: string | null;
   status: TaskStatus;
   verificationId: string | null;
+  /** File paths the agent is expected to modify (scope anchor). */
+  targetFiles: string[];
+  /** Short stack/framework constraint, e.g. "Next.js 16 App Router". */
+  stackHint: string;
   createdAt: string;
   updatedAt: string;
 }

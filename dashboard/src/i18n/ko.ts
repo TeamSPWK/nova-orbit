@@ -234,6 +234,15 @@ const ko = {
   terminalClear: "지우기",
   terminalWaiting: "출력 대기 중...",
 
+  // Task review chip
+  reviewingPrefix: "검토:",
+  reviewingBy: "{{name}}가 검토 중",
+
+  // Scope anchor (P2)
+  scopeAnchorTitle: "작업 범위 고정",
+  scopeTargetFiles: "수정 대상 파일",
+  scopeStackHint: "스택 제약",
+
   // Prompt dialogs
   promptProjectName: "프로젝트 이름",
   promptProjectNameHint: "프로젝트 이름을 입력하세요...",

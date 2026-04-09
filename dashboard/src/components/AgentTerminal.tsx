@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { wsSend } from "../hooks/useWebSocket";
 
 interface AgentOutputEvent extends CustomEvent {
   detail: { agentId: string; output: string };
@@ -44,6 +45,14 @@ function parseStreamLine(raw: string): string | null {
 export function AgentTerminal({ agentId }: AgentTerminalProps) {
   const { t } = useTranslation();
   const [lines, setLines] = useState<string[]>([]);
+
+  // Subscribe to agent output via WebSocket
+  useEffect(() => {
+    wsSend({ type: "subscribe:agent", agentId });
+    return () => {
+      wsSend({ type: "unsubscribe:agent", agentId });
+    };
+  }, [agentId]);
 
   useEffect(() => {
     const handler = (e: Event) => {

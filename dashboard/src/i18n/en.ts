@@ -234,6 +234,15 @@ const en = {
   terminalClear: "Clear",
   terminalWaiting: "Waiting for output...",
 
+  // Task review chip
+  reviewingPrefix: "Reviewing:",
+  reviewingBy: "{{name}} is reviewing",
+
+  // Scope anchor (P2)
+  scopeAnchorTitle: "Scope Anchor",
+  scopeTargetFiles: "Target files",
+  scopeStackHint: "Stack constraint",
+
   // Prompt dialogs
   promptProjectName: "Project Name",
   promptProjectNameHint: "Enter project name...",

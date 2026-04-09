@@ -1,4 +1,5 @@
 import type { Database } from "better-sqlite3";
+import { spawnSync } from "node:child_process";
 import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createLogger } from "../../utils/logger.js";
@@ -36,7 +37,11 @@ const DEFAULT_CONFIG: QualityGateConfig = {
  * - soft-block: Continuing possible but runtime failure risk
  * - hard-block: Data loss/security/irreversible — STOP immediately
  */
-export function createQualityGate(db: Database, sessionManager: SessionManager) {
+export function createQualityGate(
+  db: Database,
+  sessionManager: SessionManager,
+  broadcast: (event: string, data: unknown) => void = () => {},
+) {
   return {
     /**
      * Verify a completed task using an independent Evaluator session.
@@ -55,8 +60,14 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
 
       log.info(`Starting verification for task "${task.title}" [scope: ${opts.scope}]`);
 
+      // Collect a git diff snapshot of what the Generator actually changed.
+      // This closes the "scope misread" gap from the Pulsar incident: the
+      // evaluator previously had no way to notice when an agent created a
+      // vanilla-JS `dashboard/` directory instead of editing `web/src/app/page.tsx`.
+      const diffSummary = collectDiffSummary(config.workdir || project.workdir);
+
       // Build evaluation prompt
-      const evaluationPrompt = buildEvaluationPrompt(task, project, opts.scope);
+      const evaluationPrompt = buildEvaluationPrompt(task, project, opts.scope, diffSummary);
 
       // Spawn independent Evaluator session (NOT the Generator session)
       // This is the core Generator-Evaluator separation.
@@ -95,6 +106,21 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
           evalWorkdir,
           evaluatorId,
         );
+
+        // Surface the review activity on the evaluator agent so the UI can
+        // show "누가 무엇을 검토 중인지". Without this, the evaluator agent
+        // just turns "working" in the org chart with no task context.
+        const reviewActivity = `review:${(task.title ?? "").slice(0, 80)}`;
+        db.prepare(
+          "UPDATE agents SET current_task_id = ?, current_activity = ? WHERE id = ?",
+        ).run(taskId, reviewActivity, evaluatorAgent.id);
+        broadcast("agent:status", {
+          id: evaluatorAgent.id,
+          name: evaluatorAgent.name,
+          status: "working",
+          taskId,
+          activity: reviewActivity,
+        });
 
         const runResult = await session.send(evaluationPrompt);
         const parsed = parseStreamJson(runResult.stdout);
@@ -149,8 +175,15 @@ export function createQualityGate(db: Database, sessionManager: SessionManager) 
         log.error("Verification failed", err);
         throw err;
       } finally {
-        // Cleanup evaluator session to prevent leak
+        // Cleanup evaluator session to prevent leak.
+        // killSession resets the agent row to idle (when no sibling sessions
+        // remain) — emit a status broadcast so the UI clears the review chip.
         sessionManager.killSession(evaluatorId);
+        broadcast("agent:status", {
+          id: evaluatorAgent.id,
+          name: evaluatorAgent.name,
+          status: "idle",
+        });
       }
     },
   };
@@ -165,6 +198,10 @@ export function autoDetectScope(
   changedFileCount?: number,
 ): VerificationScope {
   const text = `${task.title} ${task.description}`.toLowerCase();
+
+  // Execution-verification tasks ALWAYS use full scope — they need Layer 3
+  // to trigger the "you must actually run commands" rule.
+  if (isExecutionVerificationTask(task.title, task.description)) return "full";
 
   // High-risk patterns always escalate (Nova §1: auth/DB/payment → one level up)
   const highRisk = [
@@ -181,14 +218,271 @@ export function autoDetectScope(
   return "lite";
 }
 
-function buildEvaluationPrompt(task: any, project: any, scope: VerificationScope): string {
+/**
+ * Snapshot of what the Generator actually changed in the workdir. Extracted
+ * from git so the Evaluator can compare against the task's stated scope and
+ * catch "wrong directory" / "wrong stack" type errors that pure file reads
+ * would miss.
+ */
+interface DiffSummary {
+  /** `git diff --stat` output (file list + line counts), or null on error */
+  stat: string | null;
+  /** Short names of changed files (up to 30), for quick scope check */
+  files: string[];
+  /** Number of files changed (total, not truncated) */
+  fileCount: number;
+  /** Untracked files present in the workdir (up to 10) */
+  untracked: string[];
+  /** Base ref used (HEAD~1 when available, otherwise HEAD) */
+  baseRef: string;
+  /** Error message if git calls failed (workdir not a repo, etc.) */
+  error?: string;
+}
+
+function collectDiffSummary(workdir: string | undefined): DiffSummary {
+  const empty: DiffSummary = { stat: null, files: [], fileCount: 0, untracked: [], baseRef: "HEAD" };
+  if (!workdir) return { ...empty, error: "No workdir provided" };
+
+  const run = (args: string[]): { stdout: string; ok: boolean } => {
+    try {
+      const res = spawnSync("git", args, {
+        cwd: workdir,
+        stdio: "pipe",
+        timeout: 5_000,
+        encoding: "utf-8",
+      });
+      return { stdout: (res.stdout ?? "").trim(), ok: res.status === 0 };
+    } catch {
+      return { stdout: "", ok: false };
+    }
+  };
+
+  // Detect if this is even a git repo
+  const isRepo = run(["rev-parse", "--is-inside-work-tree"]);
+  if (!isRepo.ok || isRepo.stdout !== "true") {
+    return { ...empty, error: "Workdir is not a git repository" };
+  }
+
+  // Does HEAD~1 exist? (fresh repos / worktrees may only have 1 commit)
+  const hasParent = run(["rev-parse", "--verify", "HEAD~1"]);
+  const baseRef = hasParent.ok ? "HEAD~1" : "HEAD";
+
+  // Unified stat — includes both staged + committed changes on the current branch
+  const statCmd = hasParent.ok
+    ? ["diff", "--stat", "HEAD~1..HEAD"]
+    : ["show", "--stat", "HEAD"];
+  const stat = run(statCmd);
+
+  const namesCmd = hasParent.ok
+    ? ["diff", "--name-only", "HEAD~1..HEAD"]
+    : ["show", "--name-only", "--format=", "HEAD"];
+  const names = run(namesCmd);
+  const allFiles = names.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+
+  const untracked = run(["ls-files", "--others", "--exclude-standard"]);
+  const untrackedFiles = untracked.stdout.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 10);
+
+  return {
+    stat: stat.ok ? stat.stdout.slice(0, 2000) : null, // hard cap to keep prompts small
+    files: allFiles.slice(0, 30),
+    fileCount: allFiles.length,
+    untracked: untrackedFiles,
+    baseRef,
+  };
+}
+
+/**
+ * Detect whether a task's stated purpose is "verify that something runs".
+ * These tasks MUST NOT pass on file-reading alone — the Evaluator has to
+ * actually execute build/dev commands and check process output.
+ *
+ * Pulsar regression: "프론트엔드 12개 페이지 렌더링 검증" and "전체 로컬
+ * 실행 통합 검증 (QA)" were marked done without any shell execution. The
+ * Evaluator (an LLM) hallucinated "렌더링 됨" without ever running code.
+ */
+/**
+ * Substring patterns that trigger execution-verification mode regardless of
+ * where in title/description they appear. The patterns are intentionally
+ * conservative — better to miss a borderline task than to force expensive
+ * Layer 3 execution on an unrelated task.
+ */
+const EXECUTION_VERIFY_PATTERNS: ReadonlyArray<RegExp> = [
+  // Korean
+  /렌더링 검증/,
+  /기동 검증/,
+  /실행 검증/,
+  /로컬 실행/,
+  /빌드 검증/,
+  /통합 검증/,
+  /통합 테스트/,
+  /구동 확인/,
+  /스모크 테스트/,
+  // English
+  /\brendering\b.*(check|verify|verification)/i,
+  /\bbuild\b.*(check|verify|verification)/i,
+  /\bstartup\b.*(check|verify)/i,
+  /\bruntime\b.*(check|verify|test)/i,
+  /\bintegration\b.*(test|verify)/i,
+  /\bsmoke test\b/i,
+  /\be2e\b/i,
+  /\bend[-.\s]to[-.\s]end\b/i,
+  /verify.*runs locally/i,
+];
+
+/**
+ * Per-field patterns that only count when the field (usually the title)
+ * terminates with the pattern. Prevents false positives like a description
+ * casually mentioning "QA" mid-sentence.
+ */
+const EXECUTION_VERIFY_TERMINAL_PATTERNS: ReadonlyArray<RegExp> = [
+  /QA\)?$/,  // ends with "QA" or "QA)" — the Pulsar "…통합 검증 (QA)" case
+];
+
+export function isExecutionVerificationTask(title: string, description: string): boolean {
+  const combined = `${title ?? ""}\n${description ?? ""}`;
+  if (EXECUTION_VERIFY_PATTERNS.some((p) => p.test(combined))) return true;
+
+  // Terminal patterns: check trimmed title AND trimmed description
+  // individually so "Final QA" matches (title ends with QA) but a long
+  // description containing the word "QA" in the middle does not.
+  const trimmedTitle = (title ?? "").trim();
+  const trimmedDesc = (description ?? "").trim();
+  for (const pattern of EXECUTION_VERIFY_TERMINAL_PATTERNS) {
+    if (pattern.test(trimmedTitle)) return true;
+    if (pattern.test(trimmedDesc)) return true;
+  }
+  return false;
+}
+
+function formatDiffSection(diff: DiffSummary): string {
+  if (diff.error) {
+    return `## Git Diff
+_Not available: ${diff.error}_
+
+You must verify by reading files directly. Ask: "Is the task's target
+location actually modified? Did the agent touch the right directory?"`;
+  }
+
+  if (diff.fileCount === 0 && diff.untracked.length === 0) {
+    return `## Git Diff
+**WARNING: No files changed** compared to ${diff.baseRef}. If the task was
+supposed to produce code changes, this is a red flag — return \`fail\` with
+a clear "no changes produced" issue.`;
+  }
+
+  const fileList = diff.files.map((f) => `- ${f}`).join("\n");
+  const moreFiles = diff.fileCount > diff.files.length
+    ? `\n... and ${diff.fileCount - diff.files.length} more file(s)`
+    : "";
+  const untrackedSection = diff.untracked.length > 0
+    ? `\n### Untracked (new, uncommitted) files\n${diff.untracked.map((f) => `- ${f}`).join("\n")}`
+    : "";
+
+  return `## Git Diff (vs ${diff.baseRef}) — ${diff.fileCount} file(s) changed
+
+### Changed files
+${fileList}${moreFiles}
+${untrackedSection}
+
+### Diff stat
+\`\`\`
+${diff.stat ?? "(stat unavailable)"}
+\`\`\`
+
+**SCOPE CHECK — this is a REQUIRED part of your verification:**
+1. Do the changed paths match where the task said to implement it?
+2. If the task mentions a specific framework or directory, are changes in
+   the right place? (Example failure: task says "implement Next.js dashboard
+   page" but changes are in \`dashboard/*.js\` vanilla JS instead of
+   \`web/src/app/page.tsx\`.)
+3. If files you'd expect to be modified are NOT in the list above, flag it
+   as a \`fail\` with a "scope mismatch" issue.`;
+}
+
+function buildEvaluationPrompt(
+  task: any,
+  project: any,
+  scope: VerificationScope,
+  diff: DiffSummary,
+): string {
   const novaRules = createNovaRulesEngine();
   const verificationProtocol = novaRules.getVerificationProtocol(scope);
+
+  // Parse scope anchoring fields (P2). These are the explicit "where should
+  // this code live" hints from task decomposition — if they exist, treat
+  // mismatches as hard fails.
+  const targetFiles: string[] = (() => {
+    try {
+      const parsed = JSON.parse(task.target_files ?? "[]");
+      return Array.isArray(parsed) ? parsed.filter((s: unknown) => typeof s === "string") : [];
+    } catch {
+      return [];
+    }
+  })();
+  const stackHint = (task.stack_hint ?? "").trim();
+
+  // P3: Execution verification enforcement — if the task title/description
+  // says "렌더링 검증", "로컬 실행", "smoke test" etc., the Evaluator must
+  // NOT pass on file-reading alone. It has to actually run commands.
+  const needsExecution = isExecutionVerificationTask(task.title, task.description ?? "");
+  const executionGate = needsExecution
+    ? `\n## Execution Verification — MANDATORY for this task\n
+This task is explicitly an execution-verification task. File-reading alone
+is NOT sufficient. You MUST actually run commands in the workdir and report
+concrete evidence. Do ALL of the following:
+
+1. **Detect the runtime**: check \`package.json\`, \`pyproject.toml\`,
+   \`Dockerfile\`, \`docker-compose.yml\`, \`Makefile\` for the canonical
+   start/test commands.
+2. **Attempt a build or type-check**: run the project's build or typecheck
+   command (e.g., \`pnpm build\`, \`npm run type-check\`,
+   \`python -m pytest\`, \`cargo check\`). Report the exit code and the
+   last ~20 lines of output.
+3. **Attempt runtime startup** (if the task is about running something):
+   start the dev server in a background-safe way (e.g., with a 15-second
+   timeout), then \`curl\` the expected URL. Report the HTTP status and the
+   first 500 bytes of the response body.
+4. **If you cannot execute** (sandbox forbids it, no command runner, etc.):
+   DO NOT return \`pass\`. Return \`conditional\` and add a \`knownGaps\`
+   entry naming exactly which command you needed to run but couldn't.
+
+**Hallucinating success is the worst possible outcome here.** The previous
+Pulsar regression happened precisely because evaluators wrote "렌더링 정상"
+without ever touching a shell. Do not repeat that.
+
+When you DO run commands, include the command and a short transcript in
+your issues[] notes so the reviewer can audit the verification trail.\n`
+    : "";
+
+  let scopeAnchorSection = "";
+  if (targetFiles.length > 0 || stackHint) {
+    const targetBlock = targetFiles.length > 0
+      ? `**Expected target files** (the task says these should be modified):
+${targetFiles.map((f) => `- \`${f}\``).join("\n")}
+
+**REQUIRED CHECK**: cross-reference this list with the Git Diff above. If
+ANY expected file is missing from the diff, OR if the diff contains files in
+a completely different tree (e.g., expected \`web/src/app/page.tsx\` but
+diff shows \`dashboard/app.js\`), return \`fail\` with a clear
+"scope mismatch" issue message.`
+      : "";
+    const stackBlock = stackHint
+      ? `**Stack constraint**: ${stackHint}
+
+If the changed files don't match this stack (e.g., task says Next.js but
+changes are vanilla HTML/CSS/JS), return \`fail\`.`
+      : "";
+
+    scopeAnchorSection = `\n## Scope Anchor — strict check\n${targetBlock}\n\n${stackBlock}\n`;
+  }
 
   return `# Code Review — Quality Verification (Nova Protocol)
 
 Review the code changes for task: "${task.title}"
 ${task.description ? `\nTask description: ${task.description}` : ""}
+
+${formatDiffSection(diff)}
+${scopeAnchorSection}${executionGate}
 
 ## Verification Scope: ${scope.toUpperCase()}
 
@@ -207,9 +501,13 @@ Code existing is not the same as code working.
 5. **Edge Cases** — Boundary values (0, negative, empty, max) safe?
 
 ## Verdict Rules:
-- **PASS**: All layers for this scope completed, no critical/high issues
+- **PASS**: All layers for this scope completed, no critical/high issues, AND scope check passed
 - **CONDITIONAL**: Code looks correct but Layer 3 (execution) could not be verified → MUST list Known Gaps
-- **FAIL**: Critical or high severity issue found, OR functionality broken, OR security/data-loss risk
+- **FAIL**: ANY of the following →
+  - Critical or high severity issue found
+  - Functionality broken or security/data-loss risk
+  - **Scope mismatch — the agent changed the wrong files or created code in the wrong directory/stack**
+  - **No files changed when the task required code changes** (check the diff section above)
 
 ${scope === "full" ? `
 ## CRITICAL: Layer 3 Execution Rule
