@@ -493,8 +493,13 @@ export function ProjectHome() {
     nextRetryAt: string | null;
     retryNumber: number;
     maxRetries: number;
+    reason?: string;        // "rate_limit" | "rate_limit_cooldown"
+    backoffMs?: number;
   } | null>(null);
   const [queueStoppedByRateLimit, setQueueStoppedByRateLimit] = useState(false);
+  // Countdown re-render tick — nextRetryAt is absolute, but we need the
+  // visible label to decrement without reloading the whole page.
+  const [countdownTick, setCountdownTick] = useState(0);
 
   // Autopilot state
   const [autopilotMode, setAutopilotMode] = useState<"off" | "goal" | "full">("off");
@@ -622,6 +627,8 @@ export function ProjectHome() {
         nextRetryAt: detail.nextRetryAt,
         retryNumber: detail.retryNumber,
         maxRetries: detail.maxRetries,
+        reason: detail.reason,
+        backoffMs: detail.backoffMs,
       });
     };
     const onResumed = () => {
@@ -666,6 +673,16 @@ export function ProjectHome() {
       window.removeEventListener("nova:autopilot-full-status", onFullStatus);
     };
   }, [currentProjectId]);
+
+  // Live countdown while queue is paused for rate-limit cooldown — ticks
+  // once per second so the "HH:MM 자동 재개 · N분 남음" label updates
+  // without requiring the user to reload. The interval is cheap (pure
+  // state tick) and only runs while the pause banner is visible.
+  useEffect(() => {
+    if (!queuePaused || !queuePausedInfo?.nextRetryAt) return;
+    const id = setInterval(() => setCountdownTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [queuePaused, queuePausedInfo?.nextRetryAt]);
 
   // Listen for system:error events — show as toast
   useEffect(() => {
@@ -1808,30 +1825,71 @@ export function ProjectHome() {
                 )}
                 <div className="relative">
                   {/* Rate limit paused overlay */}
-                  {queuePaused && queuePausedInfo && (
-                    <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
-                      <div className="flex flex-col items-center gap-3 px-6 py-5 bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 rounded-xl shadow-lg max-w-xs text-center">
-                        <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/60 flex items-center justify-center">
-                          <svg className="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="6" y="4" width="4" height="16" rx="1" />
-                            <rect x="14" y="4" width="4" height="16" rx="1" />
-                          </svg>
+                  {queuePaused && queuePausedInfo && (() => {
+                    // Derive countdown from absolute nextRetryAt. Read the
+                    // tick so React re-runs this block every second.
+                    void countdownTick;
+                    const now = Date.now();
+                    const retryAt = queuePausedInfo.nextRetryAt
+                      ? new Date(queuePausedInfo.nextRetryAt).getTime()
+                      : null;
+                    const msLeft = retryAt ? Math.max(0, retryAt - now) : null;
+                    const minutesLeft = msLeft != null ? Math.floor(msLeft / 60000) : null;
+                    const secondsLeft = msLeft != null ? Math.floor((msLeft % 60000) / 1000) : null;
+                    const retryAtLabel = retryAt
+                      ? new Date(retryAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                      : null;
+                    const isCooldown = queuePausedInfo.reason === "rate_limit_cooldown";
+                    // Long cooldown (15min) gets red theme so the user can
+                    // tell it apart from short 1-2 minute backoffs at a glance.
+                    const theme = isCooldown
+                      ? { bg: "bg-red-50 dark:bg-red-950/80", border: "border-red-300 dark:border-red-700", text: "text-red-800 dark:text-red-200", subtext: "text-red-600 dark:text-red-400", iconBg: "bg-red-100 dark:bg-red-900/60", iconColor: "text-red-500", btnBg: "bg-red-500 hover:bg-red-600", iconCircle: "bg-red-200 dark:bg-red-900" }
+                      : { bg: "bg-amber-50 dark:bg-amber-950/80", border: "border-amber-300 dark:border-amber-700", text: "text-amber-800 dark:text-amber-200", subtext: "text-amber-600 dark:text-amber-400", iconBg: "bg-amber-100 dark:bg-amber-900/60", iconColor: "text-amber-500", btnBg: "bg-amber-500 hover:bg-amber-600", iconCircle: "bg-amber-200 dark:bg-amber-900" };
+
+                    return (
+                      <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
+                        <div className={`flex flex-col items-center gap-3 px-6 py-5 ${theme.bg} border ${theme.border} rounded-xl shadow-lg max-w-sm text-center`}>
+                          <div className={`w-10 h-10 rounded-full ${theme.iconBg} flex items-center justify-center`}>
+                            <svg className={`w-5 h-5 ${theme.iconColor}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10" />
+                              <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className={`text-sm font-semibold ${theme.text}`}>
+                              {isCooldown ? t("rateLimitCooldownTitle") : t("rateLimitPausedTitle")}
+                            </p>
+                            <p className={`text-xs ${theme.subtext}`}>
+                              {t("rateLimitPausedDesc", { retry: queuePausedInfo.retryNumber, max: queuePausedInfo.maxRetries })}
+                            </p>
+                            {retryAtLabel && msLeft != null && (
+                              <div className={`mt-2 pt-2 border-t ${theme.border}`}>
+                                <p className={`text-[11px] ${theme.subtext}`}>
+                                  {t("rateLimitAutoResumeAt", { time: retryAtLabel })}
+                                </p>
+                                <p className={`text-base font-mono font-semibold ${theme.text} tabular-nums mt-0.5`}>
+                                  {minutesLeft! > 0
+                                    ? `${minutesLeft}:${String(secondsLeft).padStart(2, "0")}`
+                                    : `${secondsLeft}${t("secondsSuffix")}`}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-2 w-full pt-1">
+                            <button
+                              onClick={handleResumeQueue}
+                              className={`text-sm px-5 py-2 ${theme.btnBg} text-white rounded-lg font-semibold transition-colors shadow-sm`}
+                            >
+                              {t("resumeNowEmphasized")}
+                            </button>
+                            <p className={`text-[10px] ${theme.subtext}`}>
+                              {t("rateLimitDontWait")}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">{t("rateLimitPausedTitle")}</p>
-                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                            {t("rateLimitPausedDesc", { retry: queuePausedInfo.retryNumber, max: queuePausedInfo.maxRetries })}
-                          </p>
-                        </div>
-                        <button
-                          onClick={handleResumeQueue}
-                          className="text-xs px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
-                        >
-                          {t("resumeNow")}
-                        </button>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                   {/* Queue stopped by rate limit overlay */}
                   {queueStoppedByRateLimit && !queueRunning && (
                     <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
