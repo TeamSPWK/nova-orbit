@@ -31,12 +31,27 @@ fi
 
 COMMIT=$(cd "$NOVA_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-cat > "$TARGET/version.json" <<EOF
+# Only rewrite version.json when the Nova release or commit actually changed.
+# Previously this rewrote every sync, making syncedAt alone flip the file to
+# git-dirty on every `npm run dev` — polluting status/commits with no real
+# content change.
+VERSION_FILE="$TARGET/version.json"
+EXISTING_VERSION=""
+EXISTING_COMMIT=""
+if [ -f "$VERSION_FILE" ]; then
+  EXISTING_VERSION=$(grep -o '"novaVersion"[^,}]*' "$VERSION_FILE" | sed 's/.*"\([^"]*\)"$/\1/' || true)
+  EXISTING_COMMIT=$(grep -o '"novaCommit"[^,}]*' "$VERSION_FILE" | sed 's/.*"\([^"]*\)"$/\1/' || true)
+fi
+
+if [ "$EXISTING_VERSION" = "$NOVA_VERSION" ] && [ "$EXISTING_COMMIT" = "$COMMIT" ]; then
+  echo "✓ Nova rules already at v$NOVA_VERSION ($COMMIT) — version.json unchanged"
+else
+  cat > "$VERSION_FILE" <<EOF
 {
   "novaVersion": "$NOVA_VERSION",
   "novaCommit": "$COMMIT",
   "syncedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
-
-echo "✓ Nova rules synced (v$NOVA_VERSION, commit: $COMMIT)"
+  echo "✓ Nova rules synced (v$NOVA_VERSION, commit: $COMMIT)"
+fi
