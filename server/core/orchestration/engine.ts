@@ -781,6 +781,38 @@ For every task that will modify or create source files, you MUST include:
 by implementing Next.js pages as vanilla JS in the wrong directory. The
 Evaluator uses these fields to reject scope mismatches.
 
+## Entry-Point Completeness (REQUIRED for gated / infra / auth goals)
+If this goal introduces OR modifies any of the following, the task list
+MUST include an explicit **"Bootstrap / Entry Point"** task (order: last
+before QA) that leaves the feature end-to-end usable by a fresh user:
+
+- **Authentication / authorisation / tenancy** — who can log in, first admin
+- **Database schema / migrations** — how is the DB initialised empty?
+- **Protected APIs** — how does the first client obtain a token/key?
+- **Gated UI flows** — how does the user reach the page without a login loop?
+- **External integrations requiring credentials** — where do creds come from?
+- **Seed data / reference data** — how is an empty install populated?
+
+The Bootstrap task MUST cover at least ONE of these, chosen by what actually
+unblocks a solo dev cloning the repo for the first time:
+  (a) Seed script producing a working default account / API key / tenant
+  (b) Dev-mode bypass flag (env + loopback gate) documented in .env.example
+  (c) Login / sign-up / first-run UI reachable from the default route
+  (d) CLI command (\`npm run seed\`, \`make bootstrap\`, etc.) that wires everything
+
+Without this task the goal will be "implemented" but unusable — exactly the
+failure mode behind the Pulsar auth regression where users.yaml shipped empty
+and there was no /login page, leaving the dashboard permanently at 401.
+
+Past incident: a "멀티테넌트 접근 제어 + API 인증" goal was marked 100%
+complete, but the generated product had no seeded accounts, no API keys,
+no login UI and no dev bypass. The dashboard home hit 401 on every poll and
+was effectively unreachable. This rule exists so that never happens again.
+
+When the goal is PURELY visual / pure refactor / documentation and adds no
+new gated surface, you may omit the Bootstrap task — but say so explicitly in
+the first task's description ("no bootstrap task: non-gated refactor").
+
 Respond in this EXACT JSON format:
 \`\`\`json
 {

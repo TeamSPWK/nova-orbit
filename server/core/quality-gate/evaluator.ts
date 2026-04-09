@@ -338,6 +338,52 @@ const EXECUTION_VERIFY_TERMINAL_PATTERNS: ReadonlyArray<RegExp> = [
   /QA\)?$/,  // ends with "QA" or "QA)" — the Pulsar "…통합 검증 (QA)" case
 ];
 
+/**
+ * Substring patterns that signal a task introduces or modifies a gated /
+ * protected / infra surface. Tasks matching these must pass the Empty State
+ * Usability check — "can a fresh user/dev actually reach this feature from
+ * an empty install?"
+ *
+ * Motivating regression: a "멀티테넌트 접근 제어 + API 인증" task shipped
+ * a complete auth system with users.yaml / api_keys.yaml empty and no
+ * /login UI, leaving the dashboard permanently at 401. The previous
+ * evaluator never asked "how does the first user get in?".
+ */
+const GATED_SURFACE_PATTERNS: ReadonlyArray<RegExp> = [
+  // Korean
+  /인증/,
+  /로그인/,
+  /로그아웃/,
+  /회원가입/,
+  /권한/,
+  /접근 제어/,
+  /테넌트|테넌시|멀티테넌/,
+  /마이그레이션/,
+  /스키마/,
+  /온보딩/,
+  /시드/,
+  // English
+  /\bauth(?:entication|orization)?\b/i,
+  /\blogin\b/i,
+  /\bsignup\b/i,
+  /\bsign-?in\b/i,
+  /\brbac\b/i,
+  /\bpermission/i,
+  /\btenant/i,
+  /\bmigration/i,
+  /\bschema\b/i,
+  /\bonboarding\b/i,
+  /\bseed\b/i,
+  /\bjwt\b/i,
+  /\bapi[- ]?key/i,
+  /\btoken/i,
+];
+
+export function isGatedSurfaceTask(title: string, description: string): boolean {
+  const text = `${title ?? ""}\n${description ?? ""}`;
+  return GATED_SURFACE_PATTERNS.some((p) => p.test(text));
+}
+
 export function isExecutionVerificationTask(title: string, description: string): boolean {
   const combined = `${title ?? ""}\n${description ?? ""}`;
   if (EXECUTION_VERIFY_PATTERNS.some((p) => p.test(combined))) return true;
@@ -454,6 +500,55 @@ When you DO run commands, include the command and a short transcript in
 your issues[] notes so the reviewer can audit the verification trail.\n`
     : "";
 
+  // P4: Empty State Usability — for tasks introducing gated surfaces
+  // (auth, tenants, migrations, etc.), force the evaluator to ask "how does
+  // the first user actually reach this?" Without this check, a complete
+  // auth system can ship with empty users.yaml and no /login page and
+  // still be marked done (Pulsar regression).
+  const isGatedSurface = isGatedSurfaceTask(task.title, task.description ?? "");
+  const entryPointGate = isGatedSurface
+    ? `\n## Entry Point Completeness — MANDATORY for gated features\n
+This task touches an authentication / authorisation / tenancy / migration
+surface. Code existing is not the same as code being reachable. Ask
+yourself EACH of these questions and answer them in your issues[] notes:
+
+1. **Empty state**: In a fresh clone of this repo — empty database, no
+   users, no API keys, no env file beyond \`.env.example\` — can a solo
+   developer reach the protected feature in under 5 minutes?
+
+2. **First account**: Who is the first user? Is there at least ONE of —
+   (a) seed data / fixture creating a default admin account, OR
+   (b) a self-service signup endpoint + UI wired to the default route, OR
+   (c) a documented dev-bypass flag gated on env + loopback, OR
+   (d) a CLI bootstrap command (\`make seed\`, \`npm run bootstrap\`, etc.)
+
+3. **First credential**: If the feature requires API keys / JWT tokens,
+   how does the first client obtain one without already being authenticated?
+   "Call POST /auth/token" is NOT an answer unless you can also say WHERE
+   the caller's credentials came from.
+
+4. **Docs / discoverability**: Is the bootstrap path written down somewhere
+   a new developer will actually find it (README, .env.example comments,
+   scripts/, not just the PR description)?
+
+5. **Verify against the diff**: Do the changed files actually include the
+   bootstrap path you identified above? Or is it only the protected code
+   with no matching entry point?
+
+**Verdict rules for this section:**
+- If the answer to #1 is "no" OR #2 has no option satisfied: return \`fail\`
+  with a "missing entry point" issue naming which bootstrap mechanism is
+  missing and where it should live. This is not a nice-to-have — it is
+  the difference between "implemented" and "usable".
+- If the feature is clearly an internal library / backend-only module with
+  no end-user surface, note that explicitly in your notes and proceed.
+
+Past incident: Pulsar shipped a complete JWT + API-Key + RBAC system with
+empty \`data/auth/users.yaml\`, empty \`data/auth/api_keys.yaml\`, no
+\`/login\` page, and no dev bypass. Every page load hit 401. The task was
+marked done because the code existed. Do not repeat that failure mode.\n`
+    : "";
+
   let scopeAnchorSection = "";
   if (targetFiles.length > 0 || stackHint) {
     const targetBlock = targetFiles.length > 0
@@ -482,7 +577,7 @@ Review the code changes for task: "${task.title}"
 ${task.description ? `\nTask description: ${task.description}` : ""}
 
 ${formatDiffSection(diff)}
-${scopeAnchorSection}${executionGate}
+${scopeAnchorSection}${entryPointGate}${executionGate}
 
 ## Verification Scope: ${scope.toUpperCase()}
 
@@ -508,6 +603,7 @@ Code existing is not the same as code working.
   - Functionality broken or security/data-loss risk
   - **Scope mismatch — the agent changed the wrong files or created code in the wrong directory/stack**
   - **No files changed when the task required code changes** (check the diff section above)
+  - **Gated feature with no entry point — protected code shipped without seed, bypass, signup, or bootstrap** (see Entry Point Completeness section above)
 
 ${scope === "full" ? `
 ## CRITICAL: Layer 3 Execution Rule
