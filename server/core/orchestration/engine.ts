@@ -781,6 +781,33 @@ For every task that will modify or create source files, you MUST include:
 by implementing Next.js pages as vanilla JS in the wrong directory. The
 Evaluator uses these fields to reject scope mismatches.
 
+## API Contract Anchoring (REQUIRED for fullstack goals)
+When a goal introduces or modifies BOTH a backend API AND the UI that
+consumes it, you MUST add the exact response schema (JSON shape with
+field names and types) to the **first** task description that touches
+either side. Every subsequent task that consumes the same endpoint
+MUST quote the same schema in its description.
+
+Why: a prior regression (Pulsar 2026-04-09) had the backend agent emit
+\`{items, total_products, healthy_count}\` while the frontend agent
+independently built a UI around \`{products, overall_level, uptime_pct}\`.
+Neither agent saw the other's schema. Both tasks passed their own code
+review, then the dashboard crashed on every page load.
+
+Concrete rules:
+- For every fullstack task, pick ONE authoritative source of truth
+  (usually the Pydantic / zod / TypeScript model) and cite the exact
+  JSON shape in the description.
+- Do NOT split "backend API" and "frontend widget" into two tasks unless
+  the backend task description contains the response schema that the
+  frontend task description will later quote verbatim.
+- Flag enum values explicitly. \`status: "draft" | "published"\` is NOT
+  the same as \`status: "pending" | "approved" | "rejected"\`.
+- Ghost endpoint prevention: NEVER put a fetch URL in a frontend task
+  without a matching backend task that registers the exact same route
+  and method. If the backend piece is out of scope for this goal, the
+  frontend task must fall back to a read-only empty-state placeholder.
+
 ## Entry-Point Completeness (REQUIRED for gated / infra / auth goals)
 If this goal introduces OR modifies any of the following, the task list
 MUST include an explicit **"Bootstrap / Entry Point"** task (order: last

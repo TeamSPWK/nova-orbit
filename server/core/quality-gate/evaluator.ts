@@ -384,6 +384,37 @@ export function isGatedSurfaceTask(title: string, description: string): boolean 
   return GATED_SURFACE_PATTERNS.some((p) => p.test(text));
 }
 
+/**
+ * Substring patterns that signal a task crosses the frontend / backend
+ * boundary — adding or modifying an API endpoint AND a UI component that
+ * consumes it. These tasks are high-risk for **API contract mismatch**:
+ * the backend agent and frontend agent can drift into independent schemas
+ * and the dashboard crashes at runtime even though both halves pass their
+ * own code review (Pulsar audit 2026-04-09 — SLA widget crash, content
+ * list 'variant' crash, 5 ghost reliability endpoints).
+ */
+const FULLSTACK_CONTRACT_PATTERNS: ReadonlyArray<RegExp> = [
+  // Korean
+  /API\s*(확장|추가|구현)/i,
+  /엔드포인트/,
+  /프론트엔드.*백엔드|백엔드.*프론트엔드/,
+  /대시보드.*API|API.*대시보드/,
+  /UI.*API|API.*UI/,
+  // English
+  /\b(add|implement|extend|new)\b.*\b(endpoint|api route|handler)\b/i,
+  /\b(frontend|ui|dashboard)\b.*\b(backend|api)\b/i,
+  /\b(backend|api)\b.*\b(frontend|ui|dashboard)\b/i,
+  /\bschema\b.*\b(api|response|request)\b/i,
+];
+
+export function isFullStackContractTask(
+  title: string,
+  description: string,
+): boolean {
+  const text = `${title ?? ""}\n${description ?? ""}`;
+  return FULLSTACK_CONTRACT_PATTERNS.some((p) => p.test(text));
+}
+
 export function isExecutionVerificationTask(title: string, description: string): boolean {
   const combined = `${title ?? ""}\n${description ?? ""}`;
   if (EXECUTION_VERIFY_PATTERNS.some((p) => p.test(combined))) return true;
@@ -549,6 +580,71 @@ empty \`data/auth/users.yaml\`, empty \`data/auth/api_keys.yaml\`, no
 marked done because the code existed. Do not repeat that failure mode.\n`
     : "";
 
+  // P5: API Contract Mismatch detection — for tasks that cross the
+  // frontend-backend boundary, force the evaluator to compare the
+  // request/response schemas on BOTH sides. Multiple Pulsar pages
+  // crashed at runtime because the backend agent and frontend agent
+  // independently designed incompatible shapes for the same API.
+  const isFullstackContract = isFullStackContractTask(
+    task.title,
+    task.description ?? "",
+  );
+  const contractGate = isFullstackContract
+    ? `\n## API Contract Match — MANDATORY for fullstack tasks\n
+This task crosses the frontend-backend boundary (introduces or modifies
+an API endpoint AND a UI component that consumes it). You MUST verify
+that BOTH sides speak the same schema. Incompatible schemas are the
+single most common source of runtime crashes on a "completed" feature.
+
+Do ALL of the following in your review:
+
+1. **Locate the backend handler**: find the route definition file and
+   the response model (Pydantic / marshmallow / zod / etc.). Read the
+   actual returned fields and their types. Quote them verbatim in your
+   notes.
+
+2. **Locate the frontend consumer**: find the fetch call (api.ts,
+   hooks/*, components/*) and the TypeScript type it casts the response
+   to. Quote the expected fields.
+
+3. **Diff the two schemas field by field**:
+   - Same field names? (case sensitive — \`product_slug\` vs \`productSlug\`)
+   - Same top-level wrapper? (\`{items: [...]}\` vs \`{products: [...]}\` vs bare array)
+   - Same nullability? (optional on one side, required on the other is a crash)
+   - Same enum values? (backend emits \`draft\`, frontend switches on \`pending\`)
+   - Same units / date formats?
+
+4. **Ghost endpoint check**: for every fetch URL the frontend issues,
+   confirm the backend actually registers that exact path and method.
+   A call to \`GET /api/v1/dlq/items\` is a ghost if no router defines it.
+
+5. **Error path check**: if the fetch rejects (404, 500, schema error),
+   does the UI crash or display a sensible fallback? Look for direct
+   property access on possibly-undefined state (\`.length\`, \`.map()\`,
+   \`.variant\` without a guard).
+
+**Verdict rules for this section:**
+- Any field name / wrapper / enum / nullability divergence → \`fail\`
+  with a "contract mismatch" issue citing BOTH sides verbatim.
+- Any ghost endpoint → \`fail\` with a "ghost endpoint" issue naming the
+  missing route.
+- Any unguarded access path that would crash on empty / undefined data
+  → \`fail\` with a "runtime crash risk" issue.
+
+Past incidents (Pulsar audit 2026-04-09):
+- SLA widget: backend returned \`{items, total_products, healthy_count}\`,
+  frontend expected \`{products, overall_level}\` → \`statuses.length\`
+  crashed the whole /analytics page.
+- Content review table: backend \`status: "draft"\`, frontend map had
+  only \`pending / approved / rejected\` → \`status.variant\` undefined
+  crash on the whole /content page.
+- Reliability page: 5 endpoints (\`/dlq/items\`, \`/health/services\`,
+  \`/health/retry-stats\`, \`/health/services/stream\`) completely absent
+  from the backend router — 5 404s per page load.
+
+All three were marked "100% complete" at task time. Do not repeat.\n`
+    : "";
+
   let scopeAnchorSection = "";
   if (targetFiles.length > 0 || stackHint) {
     const targetBlock = targetFiles.length > 0
@@ -577,7 +673,7 @@ Review the code changes for task: "${task.title}"
 ${task.description ? `\nTask description: ${task.description}` : ""}
 
 ${formatDiffSection(diff)}
-${scopeAnchorSection}${entryPointGate}${executionGate}
+${scopeAnchorSection}${entryPointGate}${contractGate}${executionGate}
 
 ## Verification Scope: ${scope.toUpperCase()}
 
@@ -604,6 +700,9 @@ Code existing is not the same as code working.
   - **Scope mismatch — the agent changed the wrong files or created code in the wrong directory/stack**
   - **No files changed when the task required code changes** (check the diff section above)
   - **Gated feature with no entry point — protected code shipped without seed, bypass, signup, or bootstrap** (see Entry Point Completeness section above)
+  - **API contract mismatch — frontend type / fetch wrapper / enum does not match backend response schema** (see API Contract Match section)
+  - **Ghost endpoint — frontend fetches a URL that no backend router actually registers** (see API Contract Match section)
+  - **Runtime crash risk — unguarded property access on possibly-undefined state that would crash on empty data**
 
 ${scope === "full" ? `
 ## CRITICAL: Layer 3 Execution Rule
