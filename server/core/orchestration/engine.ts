@@ -256,6 +256,30 @@ export function createOrchestrationEngine(
 
         if (ctoAgent) {
           log.info(`Architect phase for "${task.title}" (complexity: ${complexity})`);
+          // Surface the architect activity on the CTO agent card so the
+          // dashboard shows "architect: <task title>" instead of a silent
+          // working blob with no current_activity. This mirrors what we
+          // did for decompose and for the Evaluator — every multi-minute
+          // phase that spawns an agent should identify itself.
+          const architectActivity = `architect:${(task.title ?? "").slice(0, 80)}`;
+          db.prepare(
+            "UPDATE agents SET current_task_id = ?, current_activity = ? WHERE id = ?",
+          ).run(taskId, architectActivity, ctoAgent.id);
+          broadcast("agent:status", {
+            id: ctoAgent.id,
+            status: "working",
+            taskId,
+            activity: architectActivity,
+          });
+          db.prepare(
+            "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'architect_started', ?)",
+          ).run(
+            task.project_id,
+            ctoAgent.id,
+            `아키텍처 설계 시작 (${complexity}): "${(task.title ?? "").slice(0, 80)}"`,
+          );
+          broadcast("project:updated", { projectId: task.project_id });
+
           const novaRules = createNovaRulesEngine();
           const architectPrompt = buildArchitectPrompt(task, novaRules);
           try {
@@ -268,6 +292,17 @@ export function createOrchestrationEngine(
             log.warn(`Architect phase failed, proceeding without design: ${archErr.message}`);
           } finally {
             sessionManager.killSession(ctoAgent.id);
+            // Clear architect activity — killSession resets status but the
+            // current_activity string "architect:..." can linger if another
+            // code path had already set it. Explicit WHERE guard avoids
+            // stomping on activity set by later phases.
+            db.prepare(
+              "UPDATE agents SET current_activity = NULL WHERE id = ? AND current_activity LIKE 'architect:%'",
+            ).run(ctoAgent.id);
+            broadcast("agent:status", {
+              id: ctoAgent.id,
+              status: "idle",
+            });
             // Defensive sweep: the architect is told NOT to create files but
             // historically has still done so (Nova incident: architect wrote
             // auth-infrastructure.md to project root → every subsequent task's

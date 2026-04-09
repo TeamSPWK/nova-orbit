@@ -21,6 +21,11 @@ export const POLL_INTERVAL_MS = parseInt(process.env.NOVA_POLL_INTERVAL_MS ?? "1
 export const BACKOFF_BASE_MS = parseInt(process.env.NOVA_BACKOFF_BASE_MS ?? "60000", 10);
 export const BACKOFF_MAX_MS = parseInt(process.env.NOVA_BACKOFF_MAX_MS ?? "300000", 10);
 export const MAX_CONSECUTIVE_RATE_LIMITS = parseInt(process.env.NOVA_MAX_RATE_LIMITS ?? "3", 10);
+/** Long cooldown after hitting MAX_CONSECUTIVE_RATE_LIMITS. Previously the
+ *  queue fully stopped here and a human had to resume manually. Now it
+ *  sleeps for this duration and retries once, so overnight / long-running
+ *  autopilot sessions self-heal as soon as the API budget replenishes. */
+export const RATE_LIMIT_COOLDOWN_MS = parseInt(process.env.NOVA_RATE_LIMIT_COOLDOWN_MS ?? "900000", 10); // 15 min
 export const DEFAULT_MAX_CONCURRENCY = parseInt(process.env.NOVA_MAX_CONCURRENCY ?? "3", 10);
 
 // --- Agent execution ---

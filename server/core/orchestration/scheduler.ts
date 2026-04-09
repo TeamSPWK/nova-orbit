@@ -7,6 +7,7 @@ import { createLogger } from "../../utils/logger.js";
 import {
   POLL_INTERVAL_MS, BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   MAX_CONSECUTIVE_RATE_LIMITS, DEFAULT_MAX_CONCURRENCY,
+  RATE_LIMIT_COOLDOWN_MS,
   MAX_TASK_RETRIES, MAX_REASSIGNS, BLOCKED_RETRY_DELAY_MS,
   TASK_TIMEOUT_MS,
 } from "../../utils/constants.js";
@@ -736,14 +737,59 @@ export function createScheduler(
     state.paused = true;
 
     if (state.consecutiveRateLimits >= MAX_CONSECUTIVE_RATE_LIMITS) {
-      log.error(`Queue stopped: ${state.consecutiveRateLimits} consecutive rate limits for project ${projectId}`);
-      stopQueueInternal(projectId);
-      broadcast("queue:stopped", {
+      // Previously: stopQueueInternal() — completely stopped the queue and
+      // required a human to click "run queue" again. That meant long-running
+      // autopilot sessions silently died overnight the first time the Claude
+      // Pro budget hit its window limit.
+      //
+      // New behaviour: enter a long cooldown (default 15 min), reset the
+      // rate-limit counter when it expires, and auto-resume the queue.
+      // The queue itself stays "alive" from the user's perspective — the
+      // UI can surface "cooling down, resumes at HH:MM" without requiring
+      // intervention.
+      const retryAt = new Date(Date.now() + RATE_LIMIT_COOLDOWN_MS);
+      state.nextRetryAt = retryAt;
+      log.error(
+        `Queue cooling down: ${state.consecutiveRateLimits} consecutive rate limits — long backoff ${RATE_LIMIT_COOLDOWN_MS / 60000}min for project ${projectId}`,
+      );
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)",
+      ).run(
         projectId,
-        reason: "rate_limit_exceeded",
-        consecutiveFailures: state.consecutiveRateLimits,
-        message: `Rate limit ${state.consecutiveRateLimits}회 연속 발생 — 큐가 정지되었습니다.`,
+        `Rate limit ${state.consecutiveRateLimits}회 연속 — ${Math.round(RATE_LIMIT_COOLDOWN_MS / 60000)}분 쿨다운 후 자동 재시도`,
+      );
+      broadcast("queue:paused", {
+        projectId,
+        reason: "rate_limit_cooldown",
+        retryNumber: state.consecutiveRateLimits,
+        maxRetries: MAX_CONSECUTIVE_RATE_LIMITS,
+        nextRetryAt: retryAt.toISOString(),
+        backoffMs: RATE_LIMIT_COOLDOWN_MS,
+        message: `Rate limit ${state.consecutiveRateLimits}회 — ${Math.round(RATE_LIMIT_COOLDOWN_MS / 60000)}분 후 자동 재시도`,
       });
+
+      // Cancel any short-backoff resume timer that may still be pending
+      if (state.resumeTimer) clearTimeout(state.resumeTimer);
+      state.resumeTimer = setTimeout(() => {
+        state.paused = false;
+        state.nextRetryAt = null;
+        state.consecutiveRateLimits = 0; // full reset after cooldown
+        log.info(`Queue resumed after rate-limit cooldown for project ${projectId}`);
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)",
+        ).run(projectId, `쿨다운 종료 — 큐 자동 재개`);
+        broadcast("queue:resumed", { projectId });
+        if (timers.has(projectId)) {
+          poll(projectId);
+        } else {
+          // Queue was fully stopped somewhere else (e.g. shutdown). Start
+          // it again inline — same logic as the exported startQueue.
+          log.info(`Rate-limit cooldown over but timers cleared, restarting queue for ${projectId}`);
+          busyAgents.set(projectId, new Set());
+          pauseState.delete(projectId);
+          timers.set(projectId, setTimeout(() => poll(projectId), 0));
+        }
+      }, RATE_LIMIT_COOLDOWN_MS);
       return;
     }
 
