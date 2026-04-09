@@ -62,6 +62,97 @@ const DEFAULT_CONFIG: OrchestrationConfig = {
 };
 
 /**
+ * Recover task objects from a decomposer JSON response that was truncated
+ * mid-output (the common failure mode when the model hits max_tokens).
+ *
+ * Strategy:
+ *   1. Locate `"tasks"` key and the opening `[` of its array.
+ *   2. Walk character-by-character with a string-aware brace counter.
+ *   3. Every time the brace depth returns to 0 we emit the slice as one
+ *      candidate task object and try to JSON.parse it.
+ *   4. Trailing unterminated objects are silently skipped.
+ *
+ * Unlike the previous regex-based recovery this is agnostic to which
+ * fields the task object contains — safe across future schema additions.
+ */
+export function recoverTasksFromPartialJson(raw: string): any[] {
+  if (!raw) return [];
+  // Find the "tasks": [ start. Accept any whitespace.
+  const tasksKeyIdx = raw.search(/"tasks"\s*:\s*\[/);
+  if (tasksKeyIdx === -1) return [];
+  const arrayStart = raw.indexOf("[", tasksKeyIdx);
+  if (arrayStart === -1) return [];
+
+  const tasks: any[] = [];
+  let i = arrayStart + 1;
+  const len = raw.length;
+
+  while (i < len) {
+    // Skip whitespace and commas between objects
+    while (i < len && /[\s,]/.test(raw[i] ?? "")) i++;
+    if (i >= len) break;
+    // Array end
+    if (raw[i] === "]") break;
+    // Each task must start with an object literal
+    if (raw[i] !== "{") {
+      i++;
+      continue;
+    }
+
+    // Walk the object balancing braces, respecting string literals.
+    const objStart = i;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+
+    for (; i < len; i++) {
+      const ch = raw[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (inString) {
+        if (ch === "\\") {
+          escape = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") {
+        depth++;
+        continue;
+      }
+      if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          // Complete object — try to parse
+          const slice = raw.slice(objStart, i + 1);
+          try {
+            const parsed = JSON.parse(slice);
+            if (parsed && typeof parsed === "object") tasks.push(parsed);
+          } catch {
+            // Skip malformed object, keep scanning
+          }
+          i++; // move past the closing brace
+          break;
+        }
+      }
+    }
+
+    // If we fell out of the inner loop with depth > 0 the object was
+    // truncated — nothing more to recover.
+    if (depth !== 0) break;
+  }
+
+  return tasks;
+}
+
+/**
  * Orchestration Engine — Goal → Task decomposition → Agent execution → Verification
  *
  * Pipeline (ported from Nova Orchestrator):
@@ -72,6 +163,21 @@ const DEFAULT_CONFIG: OrchestrationConfig = {
  * 5. If FAIL + autoFix: spawn fix agent → re-verify (max 1 retry)
  * 6. Report results
  */
+/**
+ * In-flight decompose lock.
+ *
+ * Two code paths used to call `decomposeGoal` for the same goal at the
+ * same time — the scheduler's autopilot loop AND the orchestration API
+ * route (or `rescuePendingGoals`). Both called `sessionManager.spawnAgent`
+ * with the same `decompose-{goalId}` session key, and the second spawn
+ * cleanup()'d the first one's Claude CLI with SIGTERM (exit 143), leaving
+ * both callers with an empty stdout and the goal stuck at 0 tasks.
+ *
+ * A goal-level lock is sufficient because decompose is idempotent: the
+ * second caller only needs to see that work is in progress and bail out.
+ */
+const inflightDecompose = new Set<string>();
+
 export function createOrchestrationEngine(
   db: Database,
   sessionManager: SessionManager,
@@ -671,8 +777,18 @@ Fix ONLY these issues. Do not modify other code.
      * Returns the number of tasks created (used by autopilot to trigger queue).
      */
     async decomposeGoal(goalId: string): Promise<{ taskCount: number; projectId: string }> {
+      // Goal-level race guard — see inflightDecompose comment above.
+      if (inflightDecompose.has(goalId)) {
+        log.warn(`decomposeGoal skipped: another run already in progress for goal ${goalId}`);
+        throw new Error(`Decompose already in progress for goal ${goalId}`);
+      }
+      inflightDecompose.add(goalId);
+
       const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as GoalRow | undefined;
-      if (!goal) throw new Error(`Goal ${goalId} not found`);
+      if (!goal) {
+        inflightDecompose.delete(goalId);
+        throw new Error(`Goal ${goalId} not found`);
+      }
 
       const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as ProjectRow | undefined;
 
@@ -697,6 +813,28 @@ Fix ONLY these issues. Do not modify other code.
       } catch (err: any) {
         throw new Error(`Failed to spawn agent for decomposition: ${err.message}`);
       }
+
+      // Make the decompose visible on the agent and in the activity log so
+      // the user sees "작업 분할 중..." on the goal card instead of a mute
+      // zero-task state. Without this the only signal is "1 agent working"
+      // on the sidebar, which does not identify the goal. (Pulsar audit.)
+      const decomposeActivity = `decompose:${(goal.title || goal.description || "").slice(0, 80)}`;
+      db.prepare(
+        "UPDATE agents SET current_task_id = NULL, current_activity = ? WHERE id = ?",
+      ).run(decomposeActivity, agent.id);
+      broadcast("agent:status", {
+        id: agent.id,
+        status: "working",
+        activity: decomposeActivity,
+      });
+      db.prepare(
+        "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'decompose_started', ?)",
+      ).run(
+        goal.project_id,
+        agent.id,
+        `작업 분할 시작: "${(goal.title || goal.description || "").slice(0, 120)}"`,
+      );
+      broadcast("project:updated", { projectId: goal.project_id });
 
       // Gather available roles for the prompt
       const availableAgents = db.prepare(
@@ -765,80 +903,26 @@ Rules:
 - Set "order": sequential number (1, 2, 3...) reflecting execution order — tasks with dependencies on others must have a higher number
 - Verification/review/QA tasks should always have the highest order number (run last)${goalSpec ? "\n- Reference the structured spec above to ensure complete coverage of all features and acceptance criteria" : ""}
 
-## Scope Anchoring (REQUIRED for code-producing tasks)
-For every task that will modify or create source files, you MUST include:
-- \`target_files\`: array of file paths the agent should touch (examples:
-  \`["web/src/app/page.tsx"]\`, \`["api/routes/dashboard.py", "api/server.py"]\`).
-  Use the **project stack** above to pick plausible paths. If you genuinely
-  cannot guess (e.g., exploratory spike, no existing code to follow), return
-  an empty array \`[]\`.
-- \`stack_hint\`: one short sentence naming the framework/language
-  constraint (examples: "Next.js 16 App Router + Tailwind 4",
-  "FastAPI router module", "pnpm workspace: web/"). Empty string if no
-  constraint.
+## Required fields per task
+- \`target_files\`: array of file paths this task will touch (e.g.
+  \`["web/src/app/page.tsx"]\`). Use the project stack above. Empty \`[]\`
+  only if you genuinely cannot guess. Evaluator rejects diff/scope drift.
+- \`stack_hint\`: short framework constraint (e.g. "Next.js 16 App Router",
+  "FastAPI router"). Empty string if none. Prevents wrong-stack impls.
 
-**Why this matters**: without these fields agents have caused real regressions
-by implementing Next.js pages as vanilla JS in the wrong directory. The
-Evaluator uses these fields to reject scope mismatches.
+## Fullstack contract rule (if goal touches backend API AND UI)
+The first task that touches the API MUST cite the exact response shape
+(field names + types) in its description. Every later task that reads
+that endpoint MUST quote the same shape verbatim. Never place a frontend
+fetch URL without a matching backend task for the same route+method.
+Flag enum values explicitly. — Prevents contract mismatch crashes.
 
-## API Contract Anchoring (REQUIRED for fullstack goals)
-When a goal introduces or modifies BOTH a backend API AND the UI that
-consumes it, you MUST add the exact response schema (JSON shape with
-field names and types) to the **first** task description that touches
-either side. Every subsequent task that consumes the same endpoint
-MUST quote the same schema in its description.
-
-Why: a prior regression (Pulsar 2026-04-09) had the backend agent emit
-\`{items, total_products, healthy_count}\` while the frontend agent
-independently built a UI around \`{products, overall_level, uptime_pct}\`.
-Neither agent saw the other's schema. Both tasks passed their own code
-review, then the dashboard crashed on every page load.
-
-Concrete rules:
-- For every fullstack task, pick ONE authoritative source of truth
-  (usually the Pydantic / zod / TypeScript model) and cite the exact
-  JSON shape in the description.
-- Do NOT split "backend API" and "frontend widget" into two tasks unless
-  the backend task description contains the response schema that the
-  frontend task description will later quote verbatim.
-- Flag enum values explicitly. \`status: "draft" | "published"\` is NOT
-  the same as \`status: "pending" | "approved" | "rejected"\`.
-- Ghost endpoint prevention: NEVER put a fetch URL in a frontend task
-  without a matching backend task that registers the exact same route
-  and method. If the backend piece is out of scope for this goal, the
-  frontend task must fall back to a read-only empty-state placeholder.
-
-## Entry-Point Completeness (REQUIRED for gated / infra / auth goals)
-If this goal introduces OR modifies any of the following, the task list
-MUST include an explicit **"Bootstrap / Entry Point"** task (order: last
-before QA) that leaves the feature end-to-end usable by a fresh user:
-
-- **Authentication / authorisation / tenancy** — who can log in, first admin
-- **Database schema / migrations** — how is the DB initialised empty?
-- **Protected APIs** — how does the first client obtain a token/key?
-- **Gated UI flows** — how does the user reach the page without a login loop?
-- **External integrations requiring credentials** — where do creds come from?
-- **Seed data / reference data** — how is an empty install populated?
-
-The Bootstrap task MUST cover at least ONE of these, chosen by what actually
-unblocks a solo dev cloning the repo for the first time:
-  (a) Seed script producing a working default account / API key / tenant
-  (b) Dev-mode bypass flag (env + loopback gate) documented in .env.example
-  (c) Login / sign-up / first-run UI reachable from the default route
-  (d) CLI command (\`npm run seed\`, \`make bootstrap\`, etc.) that wires everything
-
-Without this task the goal will be "implemented" but unusable — exactly the
-failure mode behind the Pulsar auth regression where users.yaml shipped empty
-and there was no /login page, leaving the dashboard permanently at 401.
-
-Past incident: a "멀티테넌트 접근 제어 + API 인증" goal was marked 100%
-complete, but the generated product had no seeded accounts, no API keys,
-no login UI and no dev bypass. The dashboard home hit 401 on every poll and
-was effectively unreachable. This rule exists so that never happens again.
-
-When the goal is PURELY visual / pure refactor / documentation and adds no
-new gated surface, you may omit the Bootstrap task — but say so explicitly in
-the first task's description ("no bootstrap task: non-gated refactor").
+## Bootstrap rule (if goal touches auth / tenants / migrations / seed / gated UI)
+Add ONE final "Bootstrap / Entry Point" task that makes the feature
+reachable from an empty install via any of: seed script, dev-mode bypass
+(env + loopback), login/signup UI, or CLI bootstrap command. Without this
+the goal is implemented but unusable. If goal is pure refactor/visual,
+write "no bootstrap: non-gated" in the first task's description.
 
 Respond in this EXACT JSON format:
 \`\`\`json
@@ -882,14 +966,21 @@ Respond in this EXACT JSON format:
         try {
           decomposed = JSON.parse(jsonMatch[1]);
         } catch (parseErr: any) {
-          // Truncated JSON recovery: extract complete task objects from partial JSON
-          log.warn(`JSON parse failed (${parseErr.message}), attempting truncated recovery`);
-          const partialTasks: any[] = [];
-          const taskPattern = /\{\s*"title"\s*:\s*"[^"]+"\s*,\s*"description"\s*:\s*"[^"]*"\s*,\s*"role"\s*:\s*"[^"]*"\s*,\s*"priority"\s*:\s*"[^"]*"\s*,\s*"order"\s*:\s*\d+\s*\}/g;
-          let match;
-          while ((match = taskPattern.exec(jsonMatch[1])) !== null) {
-            try { partialTasks.push(JSON.parse(match[0])); } catch { /* skip malformed */ }
-          }
+          // Truncated JSON recovery — balanced-brace parser.
+          //
+          // The previous regex-based recovery assumed a fixed task object
+          // shape ending at `"order": <num> }` which broke the moment the
+          // decomposer started emitting additional fields like
+          // `target_files` / `stack_hint` (added in P2). A task object
+          // with arrays and extra fields was no longer matchable.
+          //
+          // New strategy: scan the raw JSON for the start of the tasks
+          // array and then walk character-by-character, tracking string
+          // escapes and nested brace depth, to extract every complete
+          // top-level object inside that array. Any trailing unterminated
+          // object is simply skipped.
+          log.warn(`JSON parse failed (${parseErr.message}), attempting balanced-brace recovery`);
+          const partialTasks = recoverTasksFromPartialJson(jsonMatch[1] ?? "");
           if (partialTasks.length === 0) throw parseErr;
           log.info(`Recovered ${partialTasks.length} tasks from truncated JSON`);
           decomposed = { tasks: partialTasks };
@@ -953,14 +1044,35 @@ Respond in this EXACT JSON format:
         }
 
         log.info(`Created ${created} tasks from goal decomposition`);
+        db.prepare(
+          "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'decompose_completed', ?)",
+        ).run(
+          goal.project_id,
+          agent.id,
+          `작업 분할 완료: ${created}개 태스크 생성 — "${(goal.title || goal.description || "").slice(0, 80)}"`,
+        );
         broadcast("project:updated", { projectId: goal.project_id });
         return { taskCount: created, projectId: goal.project_id };
-      } catch (err) {
+      } catch (err: any) {
         log.error("Failed to parse task decomposition", err);
+        db.prepare(
+          "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'decompose_failed', ?)",
+        ).run(
+          goal.project_id,
+          agent.id,
+          `작업 분할 실패: ${String(err?.message ?? err).slice(0, 140)}`,
+        );
+        broadcast("project:updated", { projectId: goal.project_id });
         throw err;
       } finally {
-        // Cleanup decompose session to free the agent
+        // Cleanup decompose session to free the agent + clear the
+        // "decompose:..." activity so the idle broadcast in killSession
+        // correctly reflects the agent is no longer working.
         sessionManager.killSession(decomposeSessionKey);
+        db.prepare(
+          "UPDATE agents SET current_activity = NULL WHERE id = ? AND current_activity LIKE 'decompose:%'",
+        ).run(agent.id);
+        inflightDecompose.delete(goalId);
       }
     },
 

@@ -165,7 +165,127 @@ export function createProjectRoutes(ctx: AppContext): Router {
         }
       }
     }
+
+    // Autopilot off → goal/full: rescue pending goals that were created
+    // while autopilot was disabled. Without this, a goal created via API
+    // or UI in manual mode is stuck at 0 tasks even after the user flips
+    // autopilot on, because the goal-creation path only triggers decompose
+    // if autopilot was already enabled at insert time. (Observed during
+    // Pulsar audit 2026-04-09.)
+    const switchedOn =
+      autopilot && autopilot !== "off" && existing.autopilot === "off";
+    if (switchedOn) {
+      rescuePendingGoals(req.params.id);
+    }
   });
+
+  /**
+   * Kick spec generation + decompose for any goal in this project that has
+   * progress=0 AND no tasks yet. Runs async; errors are logged and surfaced
+   * as activity rows so the dashboard can show them.
+   */
+  function rescuePendingGoals(projectId: string): void {
+    const pending = db.prepare(`
+      SELECT g.id, g.title, gs.id AS spec_id,
+             COALESCE(json_extract(gs.prd_summary, '$._status'), '') AS spec_status
+      FROM goals g
+      LEFT JOIN goal_specs gs ON gs.goal_id = g.id
+      WHERE g.project_id = ?
+        AND g.progress = 0
+        AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = g.id)
+    `).all(projectId) as Array<{
+      id: string;
+      title: string;
+      spec_id: string | null;
+      spec_status: string;
+    }>;
+
+    if (pending.length === 0) return;
+
+    log.info(
+      `Autopilot enabled: rescuing ${pending.length} pending goal(s) for project ${projectId}`,
+    );
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_rescue', ?)",
+    ).run(
+      projectId,
+      `Autopilot 전환 감지 — 대기 중인 목표 ${pending.length}개에 대해 기획서/작업 분할 재개`,
+    );
+    broadcast("project:updated", { projectId });
+
+    for (const g of pending) {
+      // Case 1: spec missing or failed → generate spec, then decompose
+      const needSpec = !g.spec_id || g.spec_status === "failed";
+      // Case 2: spec still generating → leave alone, it will trigger
+      // decompose itself when the in-flight generation completes
+      const stillGenerating = g.spec_status === "generating";
+
+      if (stillGenerating) {
+        log.info(`Rescue skipping goal ${g.id} — spec still generating`);
+        continue;
+      }
+
+      if (needSpec) {
+        if (!ctx.generateGoalSpec) {
+          log.warn(`Rescue cannot run: generateGoalSpec not wired yet for goal ${g.id}`);
+          continue;
+        }
+        // Placeholder spec row so UI reflects progress
+        db.prepare(
+          `INSERT OR REPLACE INTO goal_specs
+             (goal_id, prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations, generated_by)
+           VALUES (?, '{"_status":"generating"}', '[]', '[]', '[]', '[]', 'ai')`,
+        ).run(g.id);
+        broadcast("project:updated", { projectId });
+
+        ctx.generateGoalSpec(g.id)
+          .then(() => {
+            log.info(`Rescue: spec generated for goal ${g.id}, triggering decompose`);
+            broadcast("project:updated", { projectId });
+            if (ctx.orchestrationEngine) {
+              ctx.orchestrationEngine.decomposeGoal(g.id).catch((err: any) => {
+                log.error(`Rescue decompose failed for goal ${g.id}`, err);
+                db.prepare(
+                  "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)",
+                ).run(
+                  projectId,
+                  `작업 분할 실패 (${g.title}): ${String(err?.message ?? err).slice(0, 160)}`,
+                );
+                broadcast("project:updated", { projectId });
+              });
+            }
+          })
+          .catch((err: any) => {
+            log.error(`Rescue spec generation failed for goal ${g.id}`, err);
+            const errorMsg = String(err?.message ?? err).slice(0, 200).replace(/"/g, "'");
+            db.prepare(
+              "UPDATE goal_specs SET prd_summary = ?, updated_at = datetime('now') WHERE goal_id = ?",
+            ).run(
+              JSON.stringify({ _status: "failed", _error: errorMsg }),
+              g.id,
+            );
+            broadcast("project:updated", { projectId });
+          });
+      } else {
+        // Case 3: spec already complete → go straight to decompose
+        if (!ctx.orchestrationEngine) {
+          log.warn(`Rescue cannot run: orchestrationEngine not wired yet for goal ${g.id}`);
+          continue;
+        }
+        log.info(`Rescue: spec already exists for goal ${g.id}, triggering decompose directly`);
+        ctx.orchestrationEngine.decomposeGoal(g.id).catch((err: any) => {
+          log.error(`Rescue decompose failed for goal ${g.id}`, err);
+          db.prepare(
+            "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)",
+          ).run(
+            projectId,
+            `작업 분할 실패 (${g.title}): ${String(err?.message ?? err).slice(0, 160)}`,
+          );
+          broadcast("project:updated", { projectId });
+        });
+      }
+    }
+  }
 
   // ─── Agent branch management ───────────────────────────
 

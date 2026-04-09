@@ -1460,7 +1460,19 @@ export function ProjectHome() {
                     const TASK_PREVIEW = 3;
                     const visibleActiveTasks = activeTasks.slice(0, TASK_PREVIEW);
                     const hiddenTaskCount = activeTasks.length - visibleActiveTasks.length;
-                    const isDecomposing = decomposingGoalId === goal.id;
+                    // Detect decompose-in-flight from EITHER source:
+                    //   (a) local button click (decomposingGoalId), or
+                    //   (b) any agent whose current_activity starts with
+                    //       "decompose:" and matches this goal's title
+                    //       (triggered by API, autopilot rescue, other tabs).
+                    const goalActivityKey = (goal.title || goal.description || "").slice(0, 80);
+                    const agentDecomposingThis = agents.some(
+                      (a) =>
+                        typeof a.current_activity === "string" &&
+                        a.current_activity.startsWith("decompose:") &&
+                        a.current_activity.slice("decompose:".length) === goalActivityKey,
+                    );
+                    const isDecomposing = decomposingGoalId === goal.id || agentDecomposingThis;
                     const isGeneratingSpec = generatingSpecGoalIds.has(goal.id);
                     const displayTitle = goal.title || goal.description;
                     const hasDescription = goal.description && goal.title && goal.description !== goal.title;
