@@ -13,6 +13,16 @@ interface ClaudeStatus {
   error?: string;
 }
 
+interface OrbitStatus {
+  activeSessions: number;
+  activeAgents: number;
+  totalTokens: number;
+  totalCost: number;
+  todayTokens: number;
+  todayCost: number;
+  todaySessions: number;
+}
+
 interface NovaRulesVersion {
   synced: boolean;
   novaVersion: string | null;
@@ -60,17 +70,18 @@ function Gauge({ percent, segments = 7 }: { percent: number; segments?: number }
 export function StatusBar() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<ClaudeStatus | null>(null);
+  const [orbit, setOrbit] = useState<OrbitStatus | null>(null);
   const [novaRules, setNovaRules] = useState<NovaRulesVersion | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/claude-status", {
-        headers: { Authorization: `Bearer ${getApiKey() ?? ""}` },
-      });
-      if (res.ok) {
-        setStatus(await res.json());
-      }
+      const [claudeRes, orbitRes] = await Promise.all([
+        fetch("/api/claude-status", { headers: { Authorization: `Bearer ${getApiKey() ?? ""}` } }),
+        fetch("/api/orbit-status", { headers: { Authorization: `Bearer ${getApiKey() ?? ""}` } }),
+      ]);
+      if (claudeRes.ok) setStatus(await claudeRes.json());
+      if (orbitRes.ok) setOrbit(await orbitRes.json());
     } catch {
       // silent — server may not have statusline
     }
@@ -121,53 +132,47 @@ export function StatusBar() {
     };
   }, [fetchStatus]);
 
-  if (!status || status.error || !status.raw) {
-    return (
-      <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-400" />
-        <span>{t("claudeStatusUnavailable")}</span>
-      </div>
-    );
-  }
+  const hasClaudeStatus = status && !status.error && status.raw;
 
   return (
     <div className="flex items-center gap-2.5 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
-      <span className="text-gray-500 dark:text-gray-400 font-sans font-medium text-[10px] truncate max-w-[120px]">
-        {status.model ?? "Claude"}
-      </span>
-
-      {(status.inputTokensK != null || status.outputTokensK != null) && (
+      {/* Nova Orbit agent stats — always available */}
+      {orbit && (
         <>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span className="tabular-nums">
-            {"\u2191"}{status.inputTokensK ?? 0}K {"\u2193"}{status.outputTokensK ?? 0}K
-          </span>
+          {orbit.activeAgents > 0 && (
+            <span className="flex items-center gap-1" title={t("orbitActiveAgents")}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-green-600 dark:text-green-400">{orbit.activeAgents}</span>
+            </span>
+          )}
+          {orbit.todayCost > 0 && (
+            <>
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <span className="text-amber-500 dark:text-amber-400 tabular-nums" title={t("orbitTodayCost", { total: orbit.totalCost.toFixed(2) })}>
+                {t("today")} ${orbit.todayCost.toFixed(2)}
+              </span>
+            </>
+          )}
+          {orbit.todayTokens > 0 && (
+            <>
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <span className="tabular-nums" title={t("orbitTotalTokens", { total: Math.round(orbit.totalTokens / 1000) })}>
+                {Math.round(orbit.todayTokens / 1000)}K
+              </span>
+            </>
+          )}
         </>
       )}
 
-      {status.costUsd != null && (
+      {/* Terminal Claude session — optional */}
+      {hasClaudeStatus && status!.ratePercent != null && (
         <>
           <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span className="text-amber-500 dark:text-amber-400 tabular-nums">
-            ${status.costUsd.toFixed(2)}
-          </span>
-        </>
-      )}
-
-      {status.ratePercent != null && (
-        <>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span className="flex items-center gap-1" title="터미널 Claude Code 세션의 5시간 사용량 한도 (Nova 에이전트 세션과 별개)">
+          <span className="flex items-center gap-1" title={t("terminalRateLimit")}>
             <span className="text-gray-500 dark:text-gray-500 text-[9px]">5h</span>
-            <Gauge percent={status.ratePercent} segments={5} />
+            <Gauge percent={status!.ratePercent!} segments={5} />
           </span>
         </>
-      )}
-
-      {status.updatedAt && (
-        <span className="text-gray-500 dark:text-gray-600 text-[9px]" title={`Last updated: ${status.updatedAt}`}>
-          {"\u2022"}
-        </span>
       )}
 
       {novaRules?.synced && (

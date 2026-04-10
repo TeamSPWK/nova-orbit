@@ -575,9 +575,10 @@ When complete, provide a summary of changes made.
           // Persist token usage if any output was produced before the failure
           if (implParsed.usage) {
             db.prepare(
-              "UPDATE sessions SET token_usage = token_usage + ? WHERE agent_id = ? AND status = 'active'",
+              "UPDATE sessions SET token_usage = token_usage + ?, cost_usd = cost_usd + ? WHERE agent_id = ? AND status = 'active'",
             ).run(
               implParsed.usage.inputTokens + implParsed.usage.outputTokens + implParsed.usage.cacheCreationTokens,
+              implParsed.usage.totalCostUsd ?? 0,
               task.assignee_id,
             );
           }

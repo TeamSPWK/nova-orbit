@@ -270,6 +270,41 @@ export async function startServer(config: ServerConfig): Promise<void> {
     }
   });
 
+  // Nova Orbit own session stats — independent of terminal Claude session
+  app.get("/api/orbit-status", (_req, res) => {
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const stats = db.prepare(`
+      SELECT
+        COUNT(CASE WHEN s.status = 'active' THEN 1 END) as activeSessions,
+        COALESCE(SUM(s.token_usage), 0) as totalTokens,
+        COALESCE(SUM(s.cost_usd), 0) as totalCost
+      FROM sessions s
+    `).get() as { activeSessions: number; totalTokens: number; totalCost: number };
+
+    const todayStats = db.prepare(`
+      SELECT
+        COALESCE(SUM(s.token_usage), 0) as todayTokens,
+        COALESCE(SUM(s.cost_usd), 0) as todayCost,
+        COUNT(*) as todaySessions
+      FROM sessions s
+      WHERE s.started_at >= ?
+    `).get(today) as { todayTokens: number; todayCost: number; todaySessions: number };
+
+    const activeAgents = db.prepare(
+      "SELECT COUNT(*) as count FROM agents WHERE status = 'working'",
+    ).get() as { count: number };
+
+    res.json({
+      activeSessions: stats.activeSessions,
+      activeAgents: activeAgents.count,
+      totalTokens: stats.totalTokens,
+      totalCost: stats.totalCost,
+      todayTokens: todayStats.todayTokens,
+      todayCost: todayStats.todayCost,
+      todaySessions: todayStats.todaySessions,
+    });
+  });
+
   // Serve dashboard (production build)
   // In dev: ../dashboard/dist, in built: ../dashboard (copied by build:dashboard)
   const serverDir = import.meta.dirname ?? __dirname;
