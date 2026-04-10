@@ -740,16 +740,16 @@ export function createScheduler(
           );
           broadcast("project:updated", { projectId });
           await engine.decomposeGoal(goalId);
+
+          // Step 3: Auto-approve (only after successful decompose — never for pre-existing tasks)
+          const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+          if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+            db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(goalId);
+          }
+          broadcast("project:updated", { projectId });
         } else {
           log.info(`processNextGoal: goal ${goalId} already has ${existingTasks} task(s), skipping decompose`);
         }
-
-        // Step 3: Auto-approve
-        const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
-        if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
-          db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(goalId);
-        }
-        broadcast("project:updated", { projectId });
 
         // Resume queue — will pick up new tasks for THIS goal only
         if (!timers.has(projectId)) {
