@@ -157,6 +157,17 @@ export const api = {
         body: JSON.stringify({ projectId }),
       }),
   },
+  sessions: {
+    list: (params?: { status?: string; projectId?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.status) q.set("status", params.status);
+      if (params?.projectId) q.set("projectId", params.projectId);
+      return request<any[]>(`/sessions?${q.toString()}`);
+    },
+    stats: () => request<any>("/sessions/stats"),
+    kill: (id: string) => request<any>(`/sessions/${id}`, { method: "DELETE" }),
+    cleanup: () => request<{ success: boolean; cleaned: number; checked: number }>("/sessions/cleanup", { method: "POST" }),
+  },
   activities: {
     list: (projectId: string) => request<any[]>(`/activities?projectId=${projectId}`),
   },

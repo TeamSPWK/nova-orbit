@@ -12,6 +12,7 @@ const en = {
   tabAgents: "Agents",
   tabKanban: "Kanban",
   tabVerification: "Verification Log",
+  tabSessions: "Sessions",
   tabSettings: "Settings",
 
   // OrgChart
@@ -685,6 +686,27 @@ const en = {
   specPriorityMust: "Must",
   specPriorityShould: "Should",
   specPriorityCould: "Could",
+
+  // Sessions
+  sessionActive: "Active",
+  sessionOrphan: "Orphan",
+  sessionTotal: "Total",
+  sessionTotalTokens: "Total tokens",
+  sessionFilterActive: "Active",
+  sessionFilterKilled: "Ended",
+  sessionFilterAll: "All",
+  sessionNoActive: "No active sessions",
+  sessionNoResults: "No sessions found",
+  sessionColAgent: "Agent",
+  sessionColProject: "Project",
+  sessionColStatus: "Status",
+  sessionColStarted: "Started",
+  sessionColDuration: "Duration",
+  sessionColTokens: "Tokens",
+  sessionKill: "Kill",
+  sessionKillConfirm: "Kill session for {{agent}} ({{project}})?",
+  sessionCleanup: "Clean {{count}} orphan sessions",
+  sessionCleaning: "Cleaning...",
 } as const;
 
 export default en;

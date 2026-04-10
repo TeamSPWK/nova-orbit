@@ -1,0 +1,266 @@
+import { useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { api } from "../lib/api";
+import { ConfirmDialog } from "./ConfirmDialog";
+
+interface Session {
+  id: string;
+  agent_id: string;
+  pid: number | null;
+  started_at: string;
+  ended_at: string | null;
+  status: string;
+  token_usage: number;
+  cost_usd: number;
+  agent_name: string;
+  agent_role: string;
+  agent_status: string;
+  current_activity: string | null;
+  project_id: string;
+  project_name: string;
+}
+
+interface Stats {
+  total: number;
+  active: number;
+  completed: number;
+  killed: number;
+  failed: number;
+  total_tokens: number;
+  total_cost: number;
+  orphan: number;
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  active: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  completed: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  killed: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
+  failed: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
+};
+
+export function SessionList({ projectId }: { projectId?: string }) {
+  const { t } = useTranslation();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [filter, setFilter] = useState<string>("active");
+  const [loading, setLoading] = useState(true);
+  const [killTarget, setKillTarget] = useState<Session | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [sessionList, sessionStats] = await Promise.all([
+        api.sessions.list({ status: filter || undefined, projectId }),
+        api.sessions.stats(),
+      ]);
+      setSessions(sessionList);
+      setStats(sessionStats);
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [filter, projectId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh every 10s for active sessions
+  useEffect(() => {
+    if (filter !== "active") return;
+    const timer = setInterval(load, 10000);
+    return () => clearInterval(timer);
+  }, [filter, load]);
+
+  const handleKill = async (session: Session) => {
+    try {
+      await api.sessions.kill(session.id);
+      setKillTarget(null);
+      load();
+    } catch { /* ignore */ }
+  };
+
+  const handleCleanup = async () => {
+    setCleaning(true);
+    try {
+      const result = await api.sessions.cleanup();
+      if (result.cleaned > 0) {
+        load();
+      }
+    } catch { /* ignore */ }
+    setCleaning(false);
+  };
+
+  const formatTime = (iso: string) => {
+    try {
+      return new Date(iso + "Z").toLocaleString("ko-KR", {
+        month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+      });
+    } catch { return iso; }
+  };
+
+  const formatDuration = (start: string, end: string | null) => {
+    try {
+      const s = new Date(start + "Z").getTime();
+      const e = end ? new Date(end + "Z").getTime() : Date.now();
+      const sec = Math.round((e - s) / 1000);
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+      return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+    } catch { return "-"; }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 text-gray-400">
+        <svg className="animate-spin w-5 h-5 mr-2" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+        {t("loading")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Stats Summary */}
+      {stats && (
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-6 text-xs">
+            <span className="text-green-600 dark:text-green-400 font-medium">
+              {t("sessionActive")}: {stats.active}
+            </span>
+            {stats.orphan > 0 && (
+              <span className="text-red-500 font-medium">
+                {t("sessionOrphan")}: {stats.orphan}
+              </span>
+            )}
+            <span className="text-gray-400">
+              {t("sessionTotal")}: {stats.total}
+            </span>
+            <span className="text-gray-400">
+              {t("sessionTotalTokens")}: {(stats.total_tokens / 1000).toFixed(0)}K
+            </span>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            {stats.orphan > 0 && (
+              <button
+                onClick={handleCleanup}
+                disabled={cleaning}
+                className="text-xs px-3 py-1 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 transition-colors"
+              >
+                {cleaning ? t("sessionCleaning") : t("sessionCleanup", { count: stats.orphan })}
+              </button>
+            )}
+            <button
+              onClick={load}
+              className="text-xs px-2 py-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              title={t("refresh")}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+        {[
+          { id: "active", label: t("sessionFilterActive") },
+          { id: "killed", label: t("sessionFilterKilled") },
+          { id: "", label: t("sessionFilterAll") },
+        ].map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setFilter(f.id)}
+            className={`text-xs px-3 py-1.5 transition-colors ${
+              filter === f.id
+                ? "text-gray-900 dark:text-gray-100 border-b-2 border-gray-900 dark:border-gray-100 font-medium"
+                : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Session Table */}
+      {sessions.length === 0 ? (
+        <div className="py-8 text-center text-xs text-gray-400">
+          {filter === "active" ? t("sessionNoActive") : t("sessionNoResults")}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-700">
+                <th className="py-2 pr-3 font-medium">{t("sessionColAgent")}</th>
+                {!projectId && <th className="py-2 pr-3 font-medium">{t("sessionColProject")}</th>}
+                <th className="py-2 pr-3 font-medium">{t("sessionColStatus")}</th>
+                <th className="py-2 pr-3 font-medium">{t("sessionColStarted")}</th>
+                <th className="py-2 pr-3 font-medium">{t("sessionColDuration")}</th>
+                <th className="py-2 pr-3 font-medium">{t("sessionColTokens")}</th>
+                <th className="py-2 pr-3 font-medium">PID</th>
+                <th className="py-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr
+                  key={s.id}
+                  className="border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                >
+                  <td className="py-2 pr-3">
+                    <div className="font-medium text-gray-700 dark:text-gray-300">{s.agent_name}</div>
+                    <div className="text-[10px] text-gray-400">{s.agent_role}</div>
+                  </td>
+                  {!projectId && (
+                    <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">
+                      {s.project_name}
+                    </td>
+                  )}
+                  <td className="py-2 pr-3">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_BADGE[s.status] ?? STATUS_BADGE.killed}`}>
+                      {s.status}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">
+                    {formatTime(s.started_at)}
+                  </td>
+                  <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">
+                    {formatDuration(s.started_at, s.ended_at)}
+                  </td>
+                  <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">
+                    {s.token_usage > 0 ? `${(s.token_usage / 1000).toFixed(1)}K` : "-"}
+                  </td>
+                  <td className="py-2 pr-3 font-mono text-gray-400 text-[10px]">
+                    {s.pid ?? "-"}
+                  </td>
+                  <td className="py-2">
+                    {s.status === "active" && (
+                      <button
+                        onClick={() => setKillTarget(s)}
+                        className="text-[10px] px-2 py-0.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                      >
+                        {t("sessionKill")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Kill confirmation */}
+      {killTarget && (
+        <ConfirmDialog
+          message={t("sessionKillConfirm", { agent: killTarget.agent_name, project: killTarget.project_name })}
+          onConfirm={() => handleKill(killTarget)}
+          onCancel={() => setKillTarget(null)}
+        />
+      )}
+    </div>
+  );
+}

@@ -12,6 +12,7 @@ const ko = {
   tabAgents: "에이전트",
   tabKanban: "칸반",
   tabVerification: "검증 로그",
+  tabSessions: "세션",
   tabSettings: "설정",
 
   // OrgChart
@@ -686,6 +687,27 @@ const ko = {
   specPriorityMust: "필수",
   specPriorityShould: "권장",
   specPriorityCould: "선택",
+
+  // Sessions
+  sessionActive: "활성 세션",
+  sessionOrphan: "고아 세션",
+  sessionTotal: "전체",
+  sessionTotalTokens: "총 토큰",
+  sessionFilterActive: "활성",
+  sessionFilterKilled: "종료됨",
+  sessionFilterAll: "전체",
+  sessionNoActive: "활성 세션이 없습니다",
+  sessionNoResults: "세션이 없습니다",
+  sessionColAgent: "에이전트",
+  sessionColProject: "프로젝트",
+  sessionColStatus: "상태",
+  sessionColStarted: "시작",
+  sessionColDuration: "소요 시간",
+  sessionColTokens: "토큰",
+  sessionKill: "종료",
+  sessionKillConfirm: "{{agent}} ({{project}}) 세션을 종료하시겠습니까?",
+  sessionCleanup: "고아 세션 {{count}}개 정리",
+  sessionCleaning: "정리 중...",
 } as const;
 
 export default ko;

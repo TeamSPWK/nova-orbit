@@ -12,6 +12,7 @@ import { ActivityFeed } from "./ActivityFeed";
 import { AddAgentDialog } from "./AddAgentDialog";
 import { KanbanBoard } from "./KanbanBoard";
 import { ProjectSettings } from "./ProjectSettings";
+import { SessionList } from "./SessionList";
 import { InputDialog } from "./InputDialog";
 import { useToast } from "../stores/useToast";
 import { WelcomeGuide } from "./WelcomeGuide";
@@ -20,7 +21,7 @@ import { AutopilotModal } from "./AutopilotModal";
 import GoalSpecPanel from "./GoalSpecPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
+type Tab = "overview" | "agents" | "kanban" | "verification" | "sessions" | "settings";
 
 // ─── AddGoalDialog ───────────────────────────────────
 type Suggestion = { title: string; description: string; priority: string; reason: string };
@@ -756,7 +757,7 @@ export function ProjectHome() {
   useEffect(() => {
     const onGoTab = (e: Event) => {
       const { tab } = (e as CustomEvent<{ tab: string }>).detail;
-      if (tab === "kanban" || tab === "verification" || tab === "settings" || tab === "overview" || tab === "agents") {
+      if (tab === "kanban" || tab === "verification" || tab === "sessions" || tab === "settings" || tab === "overview" || tab === "agents") {
         setTab(tab as Tab);
       }
     };
@@ -1374,12 +1375,13 @@ export function ProjectHome() {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-gray-700 items-center">
-          {(["overview", "agents", "kanban", "verification", "settings"] as Tab[]).map((tabId) => {
+          {(["overview", "agents", "kanban", "verification", "sessions", "settings"] as Tab[]).map((tabId) => {
             const tabLabel: Record<Tab, string> = {
               overview: t("tabOverview"),
               agents: t("tabAgents"),
               kanban: t("tabKanban"),
               verification: t("tabVerification"),
+              sessions: t("tabSessions"),
               settings: t("tabSettings"),
             };
             return (
@@ -1407,6 +1409,8 @@ export function ProjectHome() {
 
         {tab === "settings" ? (
           <ProjectSettings projectId={currentProjectId!} />
+        ) : tab === "sessions" ? (
+          <SessionList projectId={currentProjectId!} />
         ) : tab === "overview" ? (
           <div className="flex gap-6">
             {/* Main column — scrollable, takes remaining width */}

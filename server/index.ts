@@ -15,6 +15,7 @@ import { createGoalRoutes } from "./api/routes/goals.js";
 import { createOrchestrationRoutes } from "./api/routes/orchestration.js";
 import { createActivityRoutes } from "./api/routes/activities.js";
 import { createFsRoutes } from "./api/routes/fs.js";
+import { createSessionRoutes } from "./api/routes/sessions.js";
 import { createWSHandler } from "./api/websocket.js";
 import { createDevServerManager, type DevServerManager } from "./core/project/dev-server.js";
 import { loadOrCreateApiKey, authMiddleware } from "./api/middleware/auth.js";
@@ -160,6 +161,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
   app.use("/api/orchestration", createOrchestrationRoutes(ctx));
   app.use("/api/activities", createActivityRoutes(ctx));
   app.use("/api/fs", createFsRoutes());
+  app.use("/api/sessions", createSessionRoutes(ctx));
 
   // Health check
   app.get("/api/health", (_req, res) => {
