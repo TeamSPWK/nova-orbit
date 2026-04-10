@@ -48,8 +48,16 @@ export function recoverOnStartup(db: Database): RecoveryResult {
     }
   }
 
-  // pid=NULL인 stale active 세션도 정리
-  db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE status = 'active' AND pid IS NULL").run();
+  // ALL stale active sessions — not just pid=NULL.
+  // On restart, every "active" session is orphaned by definition: the server
+  // process that owned them is gone. The pid-based kill above handles sessions
+  // whose process is genuinely still running; everything else is a ghost.
+  const staleActive = db.prepare(
+    "UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE status = 'active'",
+  ).run();
+  if (staleActive.changes > 0) {
+    log.info(`Cleaned ${staleActive.changes} stale active session(s) on startup`);
+  }
 
   // 3. 에이전트 상태 초기화: working → idle, current_task_id 해제
   db.prepare("UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE status = 'working'").run();
