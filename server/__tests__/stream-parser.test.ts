@@ -143,3 +143,100 @@ describe('parseStreamJson — robustness', () => {
     expect(result.toolUses[0].name).toBe('bash');
   });
 });
+
+describe('parseStreamJson — rate_limit_event', () => {
+  // Claude Code emits rate_limit_event as a state-change notification with 3
+  // possible statuses. Only "rejected" is fatal — the others must be treated
+  // as informational and MUST NOT fail the task.
+  //
+  // Tests include an assistant text line to avoid the unrelated "no text
+  // extracted" fallback warning (that's a separate concern).
+
+  const assistantLine = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'done' }] },
+  });
+
+  it('does NOT treat "allowed" status as an error', () => {
+    const lines = [
+      assistantLine,
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed',
+          rate_limit_type: 'five_hour',
+          utilization: 0.36,
+          resets_at: 1733000000,
+        },
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(lines);
+    expect(result.errors).toHaveLength(0);
+    expect(result.rateLimit?.status).toBe('allowed');
+    expect(result.rateLimit?.utilization).toBe(0.36);
+  });
+
+  it('does NOT treat "allowed_warning" (approaching limit) as an error', () => {
+    // Real-world case: user at 82% of 5h window, Claude Code warns but still
+    // allows requests. Older code incorrectly failed the task here.
+    const lines = [
+      assistantLine,
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed_warning',
+          rate_limit_type: 'five_hour',
+          utilization: 0.82,
+        },
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(lines);
+    expect(result.errors).toHaveLength(0);
+    expect(result.rateLimit?.status).toBe('allowed_warning');
+  });
+
+  it('DOES treat "rejected" status as an error', () => {
+    const lines = [
+      assistantLine,
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'rejected',
+          rate_limit_type: 'seven_day',
+          utilization: 1.02,
+          resets_at: 1733000000,
+        },
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(lines);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/Rate limit hit/);
+    expect(result.rateLimit?.status).toBe('rejected');
+  });
+
+  it('handles camelCase rateLimitInfo from CLI', () => {
+    // CLI emits camelCase; SDKs normalize to snake_case. Parser must accept both.
+    const lines = [
+      assistantLine,
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rateLimitInfo: {
+          status: 'allowed_warning',
+          rateLimitType: 'five_hour',
+          utilization: 0.65,
+          resetsAt: 1733000000,
+          isUsingOverage: false,
+        },
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(lines);
+    expect(result.errors).toHaveLength(0);
+    expect(result.rateLimit?.status).toBe('allowed_warning');
+    expect(result.rateLimit?.rateLimitType).toBe('five_hour');
+    expect(result.rateLimit?.utilization).toBe(0.65);
+  });
+});

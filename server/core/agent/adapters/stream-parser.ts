@@ -18,6 +18,18 @@ export interface UsageInfo {
   numTurns: number;
 }
 
+export interface RateLimitInfo {
+  /** "allowed" (normal) | "allowed_warning" (approaching) | "rejected" (hard block) */
+  status: "allowed" | "allowed_warning" | "rejected" | string;
+  /** Unix timestamp when the window resets */
+  resetsAt: number | null;
+  /** Which window: "seven_day", "five_hour", etc. */
+  rateLimitType: string | null;
+  /** 0.0 ~ 1.0+ (can exceed 1 with overage) */
+  utilization: number | null;
+  isUsingOverage: boolean;
+}
+
 export interface ParsedStreamOutput {
   /** Extracted text from assistant messages */
   text: string;
@@ -31,6 +43,8 @@ export interface ParsedStreamOutput {
   errors: string[];
   /** Token usage and cost (from result event) */
   usage: UsageInfo | null;
+  /** Most recent rate_limit_event info (informational — does NOT imply failure) */
+  rateLimit: RateLimitInfo | null;
 }
 
 export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
@@ -41,6 +55,7 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
     toolUses: [],
     errors: [],
     usage: null,
+    rateLimit: null,
   };
 
   if (!rawOutput || rawOutput.trim() === "") {
@@ -135,9 +150,40 @@ export function parseStreamJson(rawOutput: string): ParsedStreamOutput {
         result.errors.push(parsed.message ?? parsed.error ?? "Unknown error");
       }
 
-      // Track rate limit events
-      if (parsed.type === "rate_limit_event" || eventType === "rate_limit_event") {
-        result.errors.push(`Rate limit hit: ${parsed.message ?? "API usage limit reached. Please wait before retrying."}`);
+      // Track rate limit events.
+      //
+      // Claude Code emits `rate_limit_event` as a STATE-CHANGE notification,
+      // not a 429. The `rate_limit_info.status` distinguishes:
+      //   - "allowed"         → normal, informational only
+      //   - "allowed_warning" → approaching limit, still allowed to proceed
+      //   - "rejected"        → HARD block, requests will fail
+      //
+      // Only "rejected" is fatal. Soft warnings must NOT fail the task — the
+      // older code pushed every event to errors[] which caused STREAM_ERROR
+      // at ~36% utilization (user has plenty of capacity).
+      //
+      // The CLI emits camelCase (`rateLimitInfo`); SDKs normalize to snake_case.
+      // Handle both.
+      if (eventType === "rate_limit_event") {
+        const info = parsed.rate_limit_info ?? parsed.rateLimitInfo ?? {};
+        const status = info.status ?? "unknown";
+        result.rateLimit = {
+          status,
+          resetsAt: info.resets_at ?? info.resetsAt ?? null,
+          rateLimitType: info.rate_limit_type ?? info.rateLimitType ?? null,
+          utilization: typeof (info.utilization) === "number" ? info.utilization : null,
+          isUsingOverage: Boolean(info.is_using_overage ?? info.isUsingOverage ?? false),
+        };
+        if (status === "rejected") {
+          const windowLabel = result.rateLimit.rateLimitType ?? "unknown";
+          const resetsAt = result.rateLimit.resetsAt
+            ? new Date(result.rateLimit.resetsAt * 1000).toISOString()
+            : "unknown";
+          result.errors.push(
+            `Rate limit hit: ${windowLabel} window rejected (resets at ${resetsAt})`,
+          );
+        }
+        // allowed / allowed_warning → informational, do not fail
       }
     } catch {
       jsonFailed++;
