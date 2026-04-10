@@ -101,11 +101,16 @@ export function createSessionManager(db: Database): SessionManager {
         .prepare("INSERT INTO sessions (agent_id, status) VALUES (?, 'active') RETURNING id")
         .get(agentId) as { id: string };
 
+      // Capture PID immediately after spawn (before "working" event)
+      session.on("pid", (pid: number) => {
+        db.prepare("UPDATE sessions SET pid = ? WHERE id = ?").run(pid, sessionRow.id);
+      });
+
       // Listen for status changes
       session.on("status", (status: string) => {
         if (status === "working" && session.process?.pid) {
-          // Capture real PID once the process is confirmed running
-          db.prepare("UPDATE sessions SET pid = ? WHERE id = ?").run(session.process.pid, sessionRow.id);
+          // Fallback PID capture (in case "pid" event was missed)
+          db.prepare("UPDATE sessions SET pid = COALESCE(pid, ?) WHERE id = ?").run(session.process.pid, sessionRow.id);
         }
         if (status === "working") {
           db.prepare("UPDATE agents SET status = 'working' WHERE id = ?").run(agentId);

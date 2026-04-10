@@ -134,6 +134,13 @@ export function createClaudeCodeAdapter() {
 
             session.process = proc;
 
+            // Emit PID immediately after spawn so session.ts can record it.
+            // The earlier "working" event fires before spawn(), so
+            // session.process?.pid is null at that point.
+            if (proc.pid) {
+              session.emit("pid", proc.pid);
+            }
+
             // Two-layer timeout:
             // 1. Hard timeout: absolute max wall-clock time (prevents truly stuck processes)
             // 2. Idle timeout: no output for TIMEOUT_MS (catches broken pipes, crashed processes)
