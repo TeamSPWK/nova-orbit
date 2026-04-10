@@ -219,7 +219,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
       // 진행 중이던 task를 todo로 되돌려 다음 수동 실행 시 깨끗한 상태에서
       // 시작. 비파괴(retry_count 유지)로 둠.
       db.prepare(
-        "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE project_id = ? AND status IN ('in_progress', 'in_review')",
+        "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE project_id = ? AND status IN ('in_progress', 'in_review', 'pending_approval')",
       ).run(req.params.id);
       // Working 상태 ghost agent + session 정리.
       db.prepare(

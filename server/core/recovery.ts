@@ -38,9 +38,10 @@ export function recoverOnStartup(db: Database): RecoveryResult {
         // 이미 종료된 프로세스 — DB 정리만
         db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE id = ?").run(s.id);
       } else if (err.code === "EPERM") {
-        // 권한 부족 — 프로세스가 살아있지만 kill 불가
-        log.warn(`Cannot kill orphan pid=${s.pid} (EPERM) — process owned by another user. Session left as active.`);
-        // DB를 active로 유지 — 다음 시작 시 재시도
+        // 권한 부족 — 프로세스가 살아있지만 kill 불가. 무한 재시도 방지를 위해
+        // killed로 마킹 (프로세스는 OS가 관리).
+        log.warn(`Cannot kill orphan pid=${s.pid} (EPERM) — marking session as killed to prevent retry loop`);
+        db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE id = ?").run(s.id);
       } else {
         log.error(`Unexpected error killing pid=${s.pid}: ${err.message}`);
         db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE id = ?").run(s.id);
@@ -82,13 +83,13 @@ export function recoverOnStartup(db: Database): RecoveryResult {
 
   // 4. 잔존 worktree + agent branch 정리 (프로젝트별)
   let cleanedWorktrees = 0;
-  try {
-    const projects = db.prepare("SELECT workdir FROM projects WHERE status = 'active' AND workdir != ''").all() as { workdir: string }[];
-    for (const p of projects) {
+  const projects = db.prepare("SELECT workdir FROM projects WHERE status = 'active' AND workdir != ''").all() as { workdir: string }[];
+  for (const p of projects) {
+    try {
       cleanedWorktrees += cleanupStaleWorktrees(p.workdir);
+    } catch (err: any) {
+      log.warn(`Worktree cleanup failed for ${p.workdir}: ${err.message}`);
     }
-  } catch (err: any) {
-    log.warn(`Worktree cleanup failed: ${err.message}`);
   }
 
   if (recoveredTasks > 0 || killedProcesses > 0 || cleanedWorktrees > 0) {

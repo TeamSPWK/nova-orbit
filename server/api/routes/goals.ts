@@ -181,6 +181,9 @@ export function createGoalRoutes(ctx: AppContext): Router {
     for (const assigneeId of deleteInfo.assigneeIds) {
       try { ctx.sessionManager?.killSession(assigneeId); } catch { /* ignore */ }
     }
+    // Also kill any spec-generation or decompose session for this goal
+    try { ctx.sessionManager?.killSession(`spec-${goalId}`); } catch { /* ignore */ }
+    try { ctx.sessionManager?.killSession(`decompose-${goalId}`); } catch { /* ignore */ }
     broadcast("project:updated", { projectId: deleteInfo.projectId });
     res.json({ success: true });
   });

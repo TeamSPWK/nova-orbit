@@ -65,10 +65,12 @@ export function createVerificationRoutes(ctx: AppContext): Router {
     db.prepare("UPDATE tasks SET verification_id = ?, updated_at = datetime('now') WHERE id = ?")
       .run(verification.id, task_id);
 
-    // If hard-block, set task to blocked
+    // If hard-block, set task to blocked + broadcast task status change
     if (severity === "hard-block") {
       db.prepare("UPDATE tasks SET status = 'blocked', updated_at = datetime('now') WHERE id = ?")
         .run(task_id);
+      const blockedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(task_id) as any;
+      if (blockedTask) broadcast("task:updated", blockedTask);
     }
 
     // Log activity
