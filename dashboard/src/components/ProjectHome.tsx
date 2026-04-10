@@ -1709,7 +1709,15 @@ export function ProjectHome() {
                               return null;
                             })()}
                             {!tasks.some((tk) => tk.goal_id === goal.id) && (
-                              autopilotMode !== "off" ? (
+                              isDecomposing ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 whitespace-nowrap flex items-center gap-1 cursor-wait">
+                                  <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                  </svg>
+                                  {t("decomposing")}
+                                </span>
+                              ) : autopilotMode !== "off" ? (
                                 (() => {
                                   const isThisGoalActive = fullAutopilotStatus?.goalId === goal.id && !["completed", "error"].includes(fullAutopilotStatus.phase);
                                   const isAnyActive = fullAutopilotStatus && !["completed", "error"].includes(fullAutopilotStatus.phase);
@@ -1731,7 +1739,7 @@ export function ProjectHome() {
                                   return (
                                     <button
                                       onClick={() => handleDecomposeGoal(goal.id)}
-                                      disabled={decomposingGoalId !== null}
+                                      disabled={isDecomposing || decomposingGoalId !== null}
                                       className="text-[10px] px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/50 whitespace-nowrap"
                                     >
                                       {t("decompose")}
