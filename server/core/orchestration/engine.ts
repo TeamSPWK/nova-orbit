@@ -208,6 +208,22 @@ export function createOrchestrationEngine(
         throw new Error("Task has no assigned agent");
       }
 
+      // Atomic guard: prevent duplicate execution of the same task.
+      // Two code paths can race here — scheduler.executeOne AND the
+      // manual /tasks/:id/execute API route. Without this, both spawn
+      // a session for the same agent → the second spawn kills the first
+      // → exit 143 (SIGTERM). CAS-style: only the caller that flips
+      // the status from todo→in_progress proceeds.
+      const cas = db.prepare(
+        "UPDATE tasks SET status = 'in_progress', started_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status IN ('todo', 'pending_approval')",
+      ).run(taskId);
+      if (cas.changes === 0) {
+        // Another caller already claimed this task
+        const current = db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
+        throw new Error(`Task already ${current?.status ?? "unknown"} — skipping duplicate execution`);
+      }
+      broadcast("task:updated", { taskId, status: "in_progress" });
+
       const agent = db.prepare("SELECT name, role, needs_worktree FROM agents WHERE id = ?").get(task.assignee_id) as { name: string; role: string; needs_worktree: number } | undefined;
       const agentName = agent?.name ?? "";
       const needsWorktree = agent?.needs_worktree ?? 1; // 기본값: 워크트리 생성
@@ -403,8 +419,7 @@ export function createOrchestrationEngine(
         ? opts.verificationScope
         : autoDetectScope(task, undefined);
 
-      // Phase 1: Set task to in_progress
-      transitionTask(db, broadcast, task, "in_progress");
+      // Phase 1: in_progress transition already done by atomic CAS guard above
 
       // Worktree isolation (Sprint 4): git repo가 있으면 격리된 worktree에서 실행
       // needs_worktree=0인 에이전트(reviewer, qa, 또는 사용자 설정)는 프로젝트 루트에서 실행
@@ -840,6 +855,13 @@ Fix ONLY these issues. Do not modify other code.
         };
       } catch (err: any) {
         log.error(`Task execution failed: ${task.title}`, err);
+
+        // Duplicate execution guard — CAS failed, another caller already claimed it.
+        // Do NOT transition or retry — the other execution is handling it.
+        if (err.message?.includes("skipping duplicate execution")) {
+          log.info(`Duplicate execution suppressed for "${task.title}"`);
+          throw err; // Re-throw so caller knows, but no state mutation
+        }
 
         const errMsg = err.message?.toLowerCase() ?? "";
         const isRateLimit = errMsg.includes("rate limit") || errMsg.includes("429") || errMsg.includes("too many requests");
