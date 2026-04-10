@@ -23,33 +23,47 @@ import { ConfirmDialog } from "./ConfirmDialog";
 type Tab = "overview" | "agents" | "kanban" | "verification" | "settings";
 
 // ─── AddGoalDialog ───────────────────────────────────
+type Suggestion = { title: string; description: string; priority: string; reason: string };
+
 function AddGoalDialog({
-  projectId,
   onCreateDirect,
   onCreateWithSpec,
   onCancel,
+  suggestions,
+  suggestLoading,
+  suggestError,
+  suggestErrorDetail,
+  onStartSuggest,
+  onDismissSuggestions,
 }: {
-  projectId: string;
   onCreateDirect: (title: string, description: string) => void;
   onCreateWithSpec: (title: string, description: string) => void;
   onCancel: () => void;
+  suggestions: Suggestion[];
+  suggestLoading: boolean;
+  suggestError: string;
+  suggestErrorDetail: string;
+  onStartSuggest: () => void;
+  onDismissSuggestions: () => void;
 }) {
   const { t } = useTranslation();
-  const [mode, setMode] = useState<"input" | "suggest">("input");
+  // Auto-select mode based on whether we have suggestion results
+  const hasSuggestState = suggestLoading || suggestError || suggestions.length > 0;
+  const [mode, setMode] = useState<"input" | "suggest">(hasSuggestState ? "suggest" : "input");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // AI suggestion state
-  const [suggestions, setSuggestions] = useState<Array<{ title: string; description: string; priority: string; reason: string }>>([]);
-  const [suggestLoading, setSuggestLoading] = useState(false);
-  const [suggestError, setSuggestError] = useState("");
-  const [suggestErrorDetail, setSuggestErrorDetail] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [withSpec, setWithSpec] = useState(true);
 
   useEffect(() => { if (mode === "input") inputRef.current?.focus(); }, [mode]);
+
+  // Sync mode when suggestion state changes (e.g., results arrive while dialog open)
+  useEffect(() => {
+    if (suggestions.length > 0 || suggestError) setMode("suggest");
+  }, [suggestions, suggestError]);
 
   const handleSubmit = (submitMode: "direct" | "spec") => {
     if (!title.trim() || submitting) return;
@@ -61,26 +75,9 @@ function AddGoalDialog({
     }
   };
 
-  const handleSuggest = async () => {
+  const handleSuggest = () => {
     setMode("suggest");
-    setSuggestLoading(true);
-    setSuggestError("");
-    setSuggestErrorDetail("");
-    setSuggestions([]);
-    setSelected(new Set());
-    try {
-      const result = await api.goals.suggest(projectId);
-      if (result.length === 0) {
-        setSuggestError(t("addGoalAiSuggestEmpty"));
-      } else {
-        setSuggestions(result);
-      }
-    } catch (err: any) {
-      setSuggestError(err.message || t("addGoalAiSuggestError"));
-      setSuggestErrorDetail(err.detail || "");
-    } finally {
-      setSuggestLoading(false);
-    }
+    onStartSuggest();
   };
 
   const toggleSelect = (idx: number) => {
@@ -302,13 +299,40 @@ function AddGoalDialog({
               </button>
             </>
           ) : null}
-          <button
-            onClick={mode === "suggest" && !suggestLoading ? () => setMode("input") : onCancel}
-            disabled={submitting}
-            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
-          >
-            {mode === "suggest" && !suggestLoading ? "← " + t("addGoalCreateDirect") : t("cancel")}
-          </button>
+          {mode === "suggest" && suggestLoading ? (
+            /* Loading: close dialog but keep background fetch running */
+            <button
+              onClick={onCancel}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
+            >
+              {t("addGoalAiSuggestMinimize")}
+            </button>
+          ) : mode === "suggest" && (suggestions.length > 0 || suggestError) ? (
+            /* Results: "직접 입력" + "모두 무시" */
+            <div className="flex items-center justify-center gap-4">
+              <button
+                onClick={() => setMode("input")}
+                disabled={submitting}
+                className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
+              >
+                {"← " + t("addGoalCreateDirect")}
+              </button>
+              <button
+                onClick={() => { onDismissSuggestions(); onCancel(); }}
+                className="text-xs text-red-400 hover:text-red-500 py-1"
+              >
+                {t("addGoalAiSuggestDismiss")}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onCancel}
+              disabled={submitting}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1"
+            >
+              {t("cancel")}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -517,6 +541,40 @@ export function ProjectHome() {
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
+
+  // AI Goal Suggestion — lifted from AddGoalDialog for background persistence
+  type Suggestion = { title: string; description: string; priority: string; reason: string };
+  const [aiSuggestions, setAiSuggestions] = useState<Suggestion[]>([]);
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
+  const [aiSuggestError, setAiSuggestError] = useState("");
+  const [aiSuggestErrorDetail, setAiSuggestErrorDetail] = useState("");
+
+  const startAiSuggest = useCallback(async () => {
+    if (!currentProjectId || aiSuggestLoading) return;
+    setAiSuggestLoading(true);
+    setAiSuggestError("");
+    setAiSuggestErrorDetail("");
+    setAiSuggestions([]);
+    try {
+      const result = await api.goals.suggest(currentProjectId);
+      if (result.length === 0) {
+        setAiSuggestError(t("addGoalAiSuggestEmpty"));
+      } else {
+        setAiSuggestions(result);
+      }
+    } catch (err: any) {
+      setAiSuggestError(err.message || t("addGoalAiSuggestError"));
+      setAiSuggestErrorDetail(err.detail || "");
+    } finally {
+      setAiSuggestLoading(false);
+    }
+  }, [currentProjectId, aiSuggestLoading, t]);
+
+  const dismissAiSuggestions = useCallback(() => {
+    setAiSuggestions([]);
+    setAiSuggestError("");
+    setAiSuggestErrorDetail("");
+  }, []);
   // toast state removed — using global useToast store
   const [decomposingGoalId, setDecomposingGoalId] = useState<string | null>(null);
   const [reDecomposeGoalId, setReDecomposeGoalId] = useState<string | null>(null);
@@ -1113,10 +1171,15 @@ export function ProjectHome() {
     <div className="flex-1 overflow-y-auto">
       {showDialog === "addGoal" && currentProjectId && (
         <AddGoalDialog
-          projectId={currentProjectId}
           onCreateDirect={handleAddGoalDirect}
           onCreateWithSpec={handleAddGoalWithSpec}
           onCancel={() => setShowDialog(null)}
+          suggestions={aiSuggestions}
+          suggestLoading={aiSuggestLoading}
+          suggestError={aiSuggestError}
+          suggestErrorDetail={aiSuggestErrorDetail}
+          onStartSuggest={startAiSuggest}
+          onDismissSuggestions={dismissAiSuggestions}
         />
       )}
       {editGoalId && currentProjectId && (() => {
@@ -1450,6 +1513,40 @@ export function ProjectHome() {
                     {t("addGoal")}
                   </button>
                 </div>
+                {/* AI Suggestion Banner — shown when loading or results ready */}
+                {aiSuggestLoading && showDialog !== "addGoal" && (
+                  <button
+                    onClick={() => setShowDialog("addGoal")}
+                    className="w-full mb-3 px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center gap-3 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors"
+                  >
+                    <svg className="animate-spin w-4 h-4 text-indigo-500 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                      {t("addGoalAiSuggestLoading")}
+                    </span>
+                  </button>
+                )}
+                {!aiSuggestLoading && aiSuggestions.length > 0 && showDialog !== "addGoal" && (
+                  <button
+                    onClick={() => setShowDialog("addGoal")}
+                    className="w-full mb-3 px-4 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center justify-between hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                      </svg>
+                      <span className="text-xs text-green-700 dark:text-green-400 font-medium">
+                        {t("addGoalAiSuggestReady", { count: aiSuggestions.length })}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-green-500 dark:text-green-400">
+                      {t("addGoalAiSuggestReviewAction")}
+                    </span>
+                  </button>
+                )}
+
                 {goals.length === 0 && (
                   <div className="py-8 px-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center">
                     <div className="text-3xl mb-2 opacity-40">🎯</div>
