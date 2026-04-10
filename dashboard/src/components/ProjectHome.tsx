@@ -1718,11 +1718,13 @@ export function ProjectHome() {
                             })()}
                             {!tasks.some((tk) => tk.goal_id === goal.id) && (
                               isGeneratingSpec ? (
-                                <span
-                                  title={t("decomposeDisabledSpecGen")}
-                                  className="text-[10px] px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-300 dark:text-purple-600 whitespace-nowrap cursor-not-allowed opacity-50"
-                                >
-                                  {t("decompose")}
+                                <span className="relative group">
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-300 dark:text-purple-600 whitespace-nowrap cursor-not-allowed opacity-50">
+                                    {t("decompose")}
+                                  </span>
+                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 text-[10px] rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                                    {t("decomposeDisabledSpecGen")}
+                                  </span>
                                 </span>
                               ) : isDecomposing ? (
                                 <span className="text-[10px] px-2 py-0.5 rounded bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 whitespace-nowrap flex items-center gap-1 cursor-wait">
@@ -1787,12 +1789,23 @@ export function ProjectHome() {
                                 </button>
                               )
                             )}
+                            {isGeneratingSpec || isDecomposing ? (
+                              <span className="relative group">
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed whitespace-nowrap">
+                                  {t("addTask")}
+                                </span>
+                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 text-[10px] rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                                  {isGeneratingSpec ? t("decomposeDisabledSpecGen") : t("decomposing")}
+                                </span>
+                              </span>
+                            ) : (
                             <button
                               onClick={() => handleAddTask(goal.id)}
                               className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap"
                             >
                               {t("addTask")}
                             </button>
+                            )}
                           </div>
                         </div>
                         <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3 overflow-hidden">
