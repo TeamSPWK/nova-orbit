@@ -214,9 +214,10 @@ export function createGoalRoutes(ctx: AppContext): Router {
       : "";
 
     // Existing goals for context
-    const existingGoals = db.prepare("SELECT title, description, status FROM goals WHERE project_id = ?").all(project_id) as any[];
+    const existingGoals = db.prepare("SELECT title, description, progress FROM goals WHERE project_id = ?").all(project_id) as any[];
+    const goalStatusLabel = (p: number) => (p >= 100 ? "done" : p > 0 ? "in-progress" : "todo");
     const existingContext = existingGoals.length > 0
-      ? `\n\nExisting goals (avoid duplicates):\n${existingGoals.map((g: any) => `- [${g.status}] ${g.title}: ${g.description || ""}`).join("\n")}`
+      ? `\n\nExisting goals (avoid duplicates):\n${existingGoals.map((g: any) => `- [${goalStatusLabel(g.progress ?? 0)}] ${g.title}: ${g.description || ""}`).join("\n")}`
       : "";
 
     // Load project docs for context
