@@ -84,6 +84,13 @@ export function createClaudeCodeAdapter() {
        * This avoids shell escaping issues with long/complex prompts.
        */
       session.send = async (message: string): Promise<RunResult> => {
+        // Rate-limit retry budget (anti-infinite-loop).
+        // Previously `return runAttempt(null)` recursed on every rate-limit,
+        // so a sustained quota miss would wedge the session in a 60s-wait →
+        // retry → 60s-wait cycle for hours. Cap the retries so the caller
+        // eventually sees a failed result and can transition the task.
+        let rateLimitRetries = 0;
+        const MAX_RATE_LIMIT_RETRIES = 1;
         const runAttempt = (resumeId: string | null): Promise<RunResult> => {
           return new Promise((resolve, reject) => {
             session.status = "working";
@@ -307,14 +314,29 @@ export function createClaudeCodeAdapter() {
           return runAttempt(null);
         }
 
-        // Rate limit detection — wait and retry once
+        // Rate limit detection — wait and retry at most MAX_RATE_LIMIT_RETRIES
+        // times. After the budget is exhausted we surface the failed result
+        // to the caller (engine → scheduler) which owns the queue-level
+        // backoff via handleRateLimit.
         if (result.exitCode !== 0 && isRateLimitError(result.stderr)) {
           const waitMs = RATE_LIMIT_WAIT_MS;
-          log.warn(`Rate limit hit, waiting ${waitMs / 1000}s before retry`);
           const novaError = makeRateLimitError(result.stderr.slice(0, 200));
           session.emit("rate-limit", { waitMs, stderr: result.stderr.slice(0, 200) });
           session.emit("nova:error", novaError.toJSON());
-          session.emit("output", `\n[Rate limit reached. Waiting ${waitMs / 1000}s before retry...]\n`);
+          if (rateLimitRetries >= MAX_RATE_LIMIT_RETRIES) {
+            log.warn(
+              `Rate limit hit after ${rateLimitRetries} retries — surfacing to caller`,
+              { stderr: result.stderr.slice(0, 300) },
+            );
+            session.emit(
+              "output",
+              `\n[Rate limit retry budget exhausted (${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES}). Returning to scheduler.]\n`,
+            );
+            return result;
+          }
+          rateLimitRetries++;
+          log.warn(`Rate limit hit, waiting ${waitMs / 1000}s before retry (${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES})`);
+          session.emit("output", `\n[Rate limit reached. Waiting ${waitMs / 1000}s before retry ${rateLimitRetries}/${MAX_RATE_LIMIT_RETRIES}...]\n`);
           await new Promise((r) => setTimeout(r, waitMs));
           session.lastSessionId = null;
           return runAttempt(null);
@@ -491,16 +513,23 @@ function isUnknownSessionError(stderr: string): boolean {
 
 /**
  * Check if error indicates a rate limit (Claude Pro usage exhausted).
- * Common patterns: "out of extra usage", "rate limit", "too many requests", "429"
+ * Strict patterns only — previously `capacity` and bare `quota` matched
+ * generic cloud errors (e.g. "insufficient disk capacity") and locked the
+ * queue in a 15min cooldown over non-rate-limit noise.
  */
 function isRateLimitError(stderr: string): boolean {
   const lower = stderr.toLowerCase();
   return (
-    lower.includes("out of") && lower.includes("usage") ||
+    (lower.includes("out of") && lower.includes("usage")) ||
     lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("rate-limit") ||
     lower.includes("too many requests") ||
-    lower.includes("429") ||
-    lower.includes("quota") ||
-    lower.includes("capacity")
+    lower.includes("status 429") ||
+    lower.includes("http 429") ||
+    lower.includes("error 429") ||
+    lower.includes("usage limit") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("api_usage_exceeded")
   );
 }

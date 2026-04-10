@@ -2,7 +2,7 @@ import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { resolve, dirname } from "node:path";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createDatabase, migrate } from "./db/schema.js";
@@ -49,6 +49,43 @@ export async function startServer(config: ServerConfig): Promise<void> {
   // Ensure data directory exists
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dataDir, { recursive: true });
+
+  // PID lock — prevent multiple concurrent server instances from fighting
+  // over the same SQLite file and scheduler polling loop. Observed incident
+  // (2026-04-10): 3 stale tsx watch concurrently sessions coexisted for
+  // hours, one holding port 7200 while the others tried repeatedly. Stale
+  // pid files (dead pid) are overwritten automatically.
+  const pidPath = resolve(dataDir, "server.pid");
+  if (existsSync(pidPath)) {
+    try {
+      const existingPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+      if (Number.isFinite(existingPid) && existingPid !== process.pid) {
+        let alive = false;
+        try {
+          process.kill(existingPid, 0);
+          alive = true;
+        } catch {
+          alive = false;
+        }
+        if (alive) {
+          console.error(
+            `\n[nova-orbit] 다른 서버 인스턴스가 이미 실행 중입니다 (pid ${existingPid}).`,
+          );
+          console.error(`  Lock file: ${pidPath}`);
+          console.error(`  기존 프로세스를 종료하거나, 응답 없으면 수동으로 lock 파일을 삭제하세요.`);
+          process.exit(1);
+        }
+        console.warn(`[nova-orbit] stale pid lock (${existingPid} not alive), overwriting`);
+      }
+    } catch {
+      // unreadable pid file — treat as stale
+    }
+  }
+  try {
+    writeFileSync(pidPath, String(process.pid), "utf-8");
+  } catch (err: any) {
+    console.warn(`[nova-orbit] Could not write pid lock: ${err?.message ?? err}`);
+  }
 
   // Initialize database
   const dbPath = resolve(dataDir, "nova-orbit.db");
@@ -297,6 +334,14 @@ export async function startServer(config: ServerConfig): Promise<void> {
     // 5. DB 정리: active 세션 → killed, DB 닫기
     db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE status = 'active'").run();
     db.close();
+
+    // 6. PID lock 해제 — 내 pid인 경우에만 (stale lock overwrite 방지)
+    try {
+      if (existsSync(pidPath)) {
+        const owned = readFileSync(pidPath, "utf-8").trim();
+        if (owned === String(process.pid)) unlinkSync(pidPath);
+      }
+    } catch { /* best-effort */ }
 
     process.exit(0);
   };

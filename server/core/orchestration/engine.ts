@@ -284,12 +284,75 @@ export function createOrchestrationEngine(
           const architectPrompt = buildArchitectPrompt(task, novaRules);
           try {
             const archSession = sessionManager.spawnAgent(ctoAgent.id, workdir);
+            // Mirror the listeners we attach to the impl session so that
+            // architect-phase rate-limits and stream errors also surface to
+            // the dashboard (previously they only showed up as an extra
+            // architect_started retry with no explanation).
+            archSession.on("rate-limit", (info: { waitMs: number; stderr: string }) => {
+              broadcast("system:rate-limit", {
+                agentId: ctoAgent.id,
+                agentName: "architect",
+                taskId,
+                waitMs: info.waitMs,
+                message: info.stderr,
+              });
+              try {
+                db.prepare(
+                  "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'rate_limit_hit', ?)",
+                ).run(
+                  task.project_id,
+                  ctoAgent.id,
+                  `[architect] Rate limit 감지 (${Math.round(info.waitMs / 1000)}s wait): ${(info.stderr ?? "").slice(0, 300)}`,
+                );
+              } catch { /* best-effort */ }
+            });
+            archSession.on("nova:error", (error: unknown) => {
+              broadcast("system:error", { agentId: ctoAgent.id, agentName: "architect", taskId, error });
+            });
             const archResult = await archSession.send(architectPrompt);
             const archParsed = parseStreamJson(archResult.stdout);
-            architectContext = archParsed.text ?? "";
-            log.info(`Architect design complete for "${task.title}" (${architectContext.length} chars)`);
+            // Silent failure detection — same gate used for impl phase. An
+            // architect session that returns exit≠0 or emits only stream
+            // errors (including "Empty stdout") has been looking "proceed
+            // without design" in logs while silently burning rate-limit
+            // budget in repeated retries. Surface it as an activity so the
+            // dashboard shows WHY each architect attempt failed.
+            const archFailure = detectAgentRunFailure(archResult, archParsed);
+            if (archFailure) {
+              log.warn(
+                `Architect phase silent failure [${archFailure.code}]: ${archFailure.message}`,
+                { taskId, detail: archFailure.detail },
+              );
+              db.prepare(
+                "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'architect_failed', ?)",
+              ).run(
+                task.project_id,
+                ctoAgent.id,
+                `아키텍처 설계 실패 [${archFailure.code}]: ${archFailure.message.slice(0, 200)}${
+                  archFailure.detail ? ` — ${archFailure.detail.slice(0, 200)}` : ""
+                }`,
+              );
+              architectContext = "";
+            } else {
+              architectContext = archParsed.text ?? "";
+              log.info(`Architect design complete for "${task.title}" (${architectContext.length} chars)`);
+              db.prepare(
+                "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'architect_completed', ?)",
+              ).run(
+                task.project_id,
+                ctoAgent.id,
+                `아키텍처 설계 완료 (${architectContext.length}자): "${(task.title ?? "").slice(0, 80)}"`,
+              );
+            }
           } catch (archErr: any) {
             log.warn(`Architect phase failed, proceeding without design: ${archErr.message}`);
+            db.prepare(
+              "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'architect_failed', ?)",
+            ).run(
+              task.project_id,
+              ctoAgent.id,
+              `아키텍처 설계 예외: ${(archErr?.message ?? String(archErr)).slice(0, 300)}`,
+            );
           } finally {
             sessionManager.killSession(ctoAgent.id);
             // Clear architect activity — killSession resets status but the
@@ -385,6 +448,18 @@ export function createOrchestrationEngine(
           waitMs: info.waitMs,
           message: info.stderr,
         });
+        // Persist the raw stderr snippet so post-mortem can distinguish a
+        // real 429 from noise (stderr gets truncated to 200 chars upstream,
+        // which is enough for the quota-exhausted signature).
+        try {
+          db.prepare(
+            "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'rate_limit_hit', ?)",
+          ).run(
+            task.project_id,
+            task.assignee_id,
+            `[impl] Rate limit 감지 (${Math.round(info.waitMs / 1000)}s wait): ${(info.stderr ?? "").slice(0, 300)}`,
+          );
+        } catch { /* best-effort */ }
       });
 
       // Sprint 5: broadcast structured errors for Trust UX

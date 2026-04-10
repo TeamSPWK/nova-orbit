@@ -1,9 +1,9 @@
 # Nova State
 
 ## Current
-- **Goal**: Pulsar dogfooding로 발견한 갭 10종 연속 수리 — 가드 5단 체계 완성 (P0~P5) + decomposer 안정성 + rate-limit self-heal
-- **Phase**: done — Pulsar Analytics 목표가 Orbit에서 자율 실행 중 (수동 개입 없이)
-- **Blocker**: none
+- **Goal**: Pulsar dogfooding 중 터진 architect-phase 무한 루프 + rate-limit false positive 수리
+- **Phase**: done — 루프 차단, rate-limit 감지 엄격화, 단일 인스턴스 PID lock, architect 실패 DB 로깅
+- **Blocker**: 실제 Claude 계정이 진짜 rate-limit 상태 (사용량 소진). 15분 쿨다운 반복 중. Autopilot 잠시 끄고 quota 회복 대기 권장.
 
 ## Tasks (최신 세션)
 | Task | Status | Verdict | Note |
@@ -23,13 +23,19 @@
 | Rate-limit 3회 → 15분 cooldown self-heal | done | PASS | 영구 정지 폐기, 자동 재개 + 카운터 리셋 |
 | Rate-limit pause overlay (카운트다운 + "지금 재시도") | done | PASS | 기다리지 않고 즉시 탈출 가능 |
 | version.json 거짓 dirty 방지 | done | PASS | sync-nova-rules.sh가 내용 변경 시만 덮어쓰기 |
+| Architect phase 무한 루프 차단 (scheduler executeOne) | done | PASS | todo 상태 throw 시 blocked로 transition → loop 종결 |
+| Adapter rate-limit 무한 재귀 제한 (1회) | done | PASS | runAttempt 재귀 폭발 방지, 결과는 scheduler 레벨 backoff로 위임 |
+| isRateLimitError false positive 차단 | done | PASS | capacity/quota 단독 매칭 제거, 엄격한 시그니처만 |
+| Architect phase silent failure DB 로깅 | done | PASS | `architect_failed` activity로 원인 가시화 (STREAM_ERROR 등) |
+| Rate-limit stderr 원문 activity 보존 | done | PASS | `rate_limit_hit` 저장 — 진짜 429 vs 잡음 구분 가능 |
+| 서버 단일 인스턴스 PID lock (.nova-orbit/server.pid) | done | PASS | 중복 concurrently 세션 방지, stale lock 자동 overwrite |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| Pulsar Analytics 목표를 Orbit에서 자율 실행 (dogfooding 검증) | 2026-04-10 | PASS | 6 tasks decompose + scheduler가 첫 task architect phase 실행 중 |
+| Scheduler loop + rate-limit false positive 수리 (5종 연속) | 2026-04-10 | PASS | (this session) — executeOne blocked transition, isRateLimitError strict, PID lock, architect failure DB logging |
+| Pulsar Analytics 목표를 Orbit에서 자율 실행 (dogfooding 검증) | 2026-04-10 | PASS | 6 tasks decompose, Task 1이 실제 rate-limit 벽에 부딪힘 |
 | 가드 5단 체계 완성 (P0~P5) + 71 회귀 테스트 | 2026-04-09~10 | PASS | 058f61b, b6caa90, 188031a |
-| Git-error 분류 + Autopilot 자동 복구 | 2026-04-09 | PASS | 54728ce |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -108,7 +114,15 @@ Pulsar dogfooding 태스크를 실전 실행하면서 드러난 연쇄 버그.
 4. 사용자가 "기다리지 않고 즉시 재시도 가능"임을 알 수 없음 — **"지금 바로 재시도" primary 버튼 + 카운트다운**
 
 ## Last Activity
-Pulsar dogfooding으로 가드 5단 체계 실전 검증. 여러 단계의 cascade 버그 (decomposer truncation → recovery 무력화 → race lock → rate-limit 영구 정지 → UX invisibility)를 전부 수리. 세션 종료 시점에 Pulsar Analytics 목표의 첫 task가 Architect phase 실행 중 (자율). 사용자가 "기다리지 않고 즉시 재시도"할 수 있는 UX까지 완성되어 dogfooding의 **진짜 Orbit 경험**이 가능해짐. | 2026-04-10
+사용자 보고: "Claude 세션 여유있는데 시스템 오류 + rate-limit pause 반복". 증거 수집 결과 **실제 Claude 계정 quota가 소진**된 상태에서 scheduler가 무한 루프에 빠져 15분 cooldown을 자기재귀적으로 반복하고 있었음. 근본 원인 5종 수리:
+
+1. **Scheduler executeOne 루프 버그** — catch 경로가 task를 DB에 blocked로 transition 안 함 → todo 그대로 → 다음 poll이 같은 task를 다시 pick → `architect_started` 10분당 수십 번 기록. 이제 throw 시 retry_count++ blocked로 강제 전환.
+2. **Adapter rate-limit 무한 재귀** — `runAttempt(null)`가 rate-limit마다 재귀 → 한 session.send가 영원히 wait. `MAX_RATE_LIMIT_RETRIES=1`로 제한.
+3. **isRateLimitError false positive** — `capacity`/`quota` 단독 매칭 제거. 네트워크 에러가 false positive로 cooldown 유발하는 위험 제거.
+4. **Architect phase silent failure** — 기존 `log.warn("proceed without design")`만 찍고 사용자는 원인 모름. `detectAgentRunFailure` 통과 후 `architect_failed` activity로 DB 저장 (STREAM_ERROR + detail 포함). 이 덕분에 **10:22:34 로그에서 "Rate limit hit: API usage limit reached"라는 결정적 증거** 확보.
+5. **단일 서버 인스턴스 PID lock** — `.nova-orbit/server.pid`에 등록. 중복 concurrently 세션 5분간 공존했던 상태 사후 방지 (고아 tsx watch 프로세스 23336/57291도 수동 종료).
+
+**현재 상태**: 실제 Claude 계정은 여전히 rate-limit 상태. autopilot 잠시 꺼두고 quota 회복 대기 권장. StatusBar는 사용자 본인 Claude Code 세션의 quota만 보여주고, Orbit subprocess는 반영 안 한다는 점이 혼동의 원인. | 2026-04-10
 
 ## Refs
 - **Pulsar Analytics goal**: `1ca941bf9a966848` (autopilot=goal, decompose 6 tasks, Task 1 in progress)

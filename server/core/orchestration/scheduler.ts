@@ -856,9 +856,32 @@ export function createScheduler(
       if (isRateLimit) {
         handleRateLimit(projectId);
       } else {
-        // Read actual DB state — engine may have set status to 'todo' (rate-limit) or 'blocked'
-        const actual = db.prepare("SELECT * FROM tasks WHERE id = ?").get(task.id);
-        broadcast("task:updated", actual ?? { taskId: task.id, status: "blocked", error: err.message });
+        // CRITICAL: if engine.executeTask threw BEFORE calling
+        // transitionTask(in_progress) — e.g. an architect-phase failure — the
+        // task is still `todo` in the DB. Without explicitly marking it
+        // failed here, the very next poll picks the same task, runs architect
+        // again, fails the same way, and we spin forever (the infinite
+        // architect_started loop we observed 10:18~10:21). Retry budget is
+        // owned by the blocked→retry promotion path in pickNextTasks, not by
+        // the caller, so we set blocked + bump retry_count so the loop can
+        // actually exit on its own.
+        const actual = db.prepare("SELECT * FROM tasks WHERE id = ?").get(task.id) as
+          | { status: string }
+          | undefined;
+        if (actual && (actual.status === "todo" || actual.status === "in_progress")) {
+          db.prepare(
+            "UPDATE tasks SET status = 'blocked', retry_count = retry_count + 1, updated_at = datetime('now') WHERE id = ?",
+          ).run(task.id);
+          db.prepare(
+            "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'task_blocked', ?)",
+          ).run(
+            projectId,
+            task.assignee_id,
+            `작업 실패 → blocked: "${(task.title ?? "").slice(0, 80)}" — ${(err.message ?? "").slice(0, 200)}`,
+          );
+        }
+        const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(task.id);
+        broadcast("task:updated", updated ?? { taskId: task.id, status: "blocked", error: err.message });
         log.error(`Scheduler: task "${task.title}" failed`, err);
 
         if (task.parent_task_id) {
