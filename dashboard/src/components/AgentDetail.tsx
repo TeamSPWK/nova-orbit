@@ -19,6 +19,7 @@ interface Agent {
   resolved_prompt_source?: string;
   resolved_prompt_file?: string;
   needs_worktree?: number;
+  model?: string | null;
 }
 
 interface Task {
@@ -55,6 +56,20 @@ const PROMPT_SOURCE_COLORS: Record<string, string> = {
 
 // Selectable roles for the role change dropdown (excludes legacy: coder, designer, custom)
 const SELECTABLE_ROLES = ["cto", "backend", "frontend", "ux", "qa", "reviewer", "marketer", "devops"];
+
+// Role → default model (mirrors server ROLE_DEFAULT_MODEL)
+const ROLE_DEFAULT_MODEL: Record<string, string> = {
+  cto: "opus", pm: "opus",
+  backend: "sonnet", frontend: "sonnet", devops: "sonnet",
+  qa: "sonnet", reviewer: "sonnet", ux: "sonnet",
+  marketer: "sonnet", coder: "sonnet", designer: "sonnet",
+};
+
+const MODEL_LABELS: Record<string, string> = {
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+};
 
 const ROLE_LABELS: Record<string, string> = {
   cto: "CTO",
@@ -545,6 +560,32 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
           {agent.status === "working" && (
             <AgentTerminal agentId={agent.id} />
           )}
+
+          {/* Model Selection */}
+          <section className="px-3 py-2.5 border border-gray-100 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">AI 모델</span>
+              <select
+                value={agent.model ?? ""}
+                onChange={async (e) => {
+                  const val = e.target.value || null;
+                  await api.agents.update(agent.id, { model: val });
+                  window.dispatchEvent(new CustomEvent("nova:refresh"));
+                }}
+                className="text-xs bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-2 py-1 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                <option value="">기본 ({MODEL_LABELS[ROLE_DEFAULT_MODEL[agent.role] ?? "sonnet"] ?? "Sonnet"})</option>
+                <option value="opus">Opus — 설계/기획 (고성능)</option>
+                <option value="sonnet">Sonnet — 구현/리뷰 (균형)</option>
+                <option value="haiku">Haiku — 단순 작업 (경제적)</option>
+              </select>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed">
+              {agent.model
+                ? `${MODEL_LABELS[agent.model]} 모델을 사용합니다 (직접 설정).`
+                : `역할 기본값: ${MODEL_LABELS[ROLE_DEFAULT_MODEL[agent.role] ?? "sonnet"]}. 변경하려면 위에서 선택하세요.`}
+            </p>
+          </section>
 
           {/* Worktree Toggle */}
           <section className="px-3 py-2.5 border border-gray-100 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 space-y-2">

@@ -33,6 +33,25 @@ export const TASK_TIMEOUT_MS = parseInt(process.env.NOVA_TASK_TIMEOUT_MS ?? "600
 export const RATE_LIMIT_WAIT_MS = parseInt(process.env.NOVA_RATE_LIMIT_WAIT_MS ?? "60000", 10);
 export const SIGKILL_TIMEOUT_MS = 5000;
 
+// --- Agent model defaults ---
+// Opus for planning/architecture roles, Sonnet for implementation/review.
+// null = use Claude Code CLI default (user's account setting).
+// Agents can override via the `model` column in the DB.
+export const ROLE_DEFAULT_MODEL: Record<string, string | null> = {
+  cto: "opus",
+  pm: "opus",
+  backend: "sonnet",
+  frontend: "sonnet",
+  devops: "sonnet",
+  qa: "sonnet",
+  reviewer: "sonnet",
+  ux: "sonnet",
+  marketer: "sonnet",
+  coder: "sonnet",
+  designer: "sonnet",
+  custom: null, // user decides
+};
+
 // --- Task retry ---
 export const MAX_TASK_RETRIES = parseInt(process.env.NOVA_MAX_TASK_RETRIES ?? "2", 10);
 export const MAX_REASSIGNS = parseInt(process.env.NOVA_MAX_REASSIGNS ?? "1", 10); // max agent switches per task

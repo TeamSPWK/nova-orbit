@@ -582,6 +582,22 @@ export function createScheduler(
     const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
     if (!project || (project.autopilot !== "goal" && project.autopilot !== "full")) return;
 
+    // Sequential goal processing: do NOT decompose the next goal until ALL
+    // tasks of the current in-progress goal are done or permanently blocked.
+    // Without this guard, all goals get decomposed upfront — wasting tokens
+    // on spec/decompose for goals whose scope may change based on earlier
+    // goal results.
+    const activeGoal = db.prepare(`
+      SELECT g.id FROM goals g
+      WHERE g.project_id = ?
+        AND g.progress < 100
+        AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id) > 0
+        AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status NOT IN ('done', 'blocked')) > 0
+      LIMIT 1
+    `).get(projectId) as { id: string } | undefined;
+
+    if (activeGoal) return; // wait for current goal to finish
+
     const nextGoal = db.prepare(`
       SELECT g.id FROM goals g
       WHERE g.project_id = ?

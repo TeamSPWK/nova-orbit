@@ -247,7 +247,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
 
   // Create agent
   router.post("/", (req, res) => {
-    const { project_id, name, role, system_prompt = "", session_behavior = "resume-or-new", parent_id } = req.body;
+    const { project_id, name, role, system_prompt = "", session_behavior = "resume-or-new", parent_id, model } = req.body;
 
     if (!project_id || !name || !role) {
       return res.status(400).json({ error: "project_id, name, and role are required" });
@@ -257,12 +257,16 @@ export function createAgentRoutes(ctx: AppContext): Router {
       return res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
     }
 
+    if (model != null && !["opus", "sonnet", "haiku"].includes(model)) {
+      return res.status(400).json({ error: "Invalid model. Must be one of: opus, sonnet, haiku" });
+    }
+
     try {
       const effectivePromptSource = system_prompt.trim() ? "custom" : "auto";
       const result = db.prepare(`
-        INSERT INTO agents (project_id, name, role, system_prompt, session_behavior, parent_id, prompt_source)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(project_id, name, role, system_prompt, session_behavior, parent_id ?? null, effectivePromptSource);
+        INSERT INTO agents (project_id, name, role, system_prompt, session_behavior, parent_id, prompt_source, model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(project_id, name, role, system_prompt, session_behavior, parent_id ?? null, effectivePromptSource, model ?? null);
 
       const agent = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
       broadcast("agent:status", agent);
@@ -274,7 +278,7 @@ export function createAgentRoutes(ctx: AppContext): Router {
 
   // Update agent
   router.patch("/:id", (req, res) => {
-    const { status, current_task_id, system_prompt, name, role, parent_id, prompt_source, needs_worktree } = req.body;
+    const { status, current_task_id, system_prompt, name, role, parent_id, prompt_source, needs_worktree, model } = req.body;
     const existing = db.prepare("SELECT * FROM agents WHERE id = ?").get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: "Agent not found" });
 
@@ -324,6 +328,12 @@ export function createAgentRoutes(ctx: AppContext): Router {
     if (role != null) { updates.push("role = ?"); params.push(role); }
     if (parent_id !== undefined) { updates.push("parent_id = ?"); params.push(parent_id); }
     if (needs_worktree != null) { updates.push("needs_worktree = ?"); params.push(needs_worktree ? 1 : 0); }
+    if (model !== undefined) {
+      if (model !== null && !["opus", "sonnet", "haiku"].includes(model)) {
+        return res.status(400).json({ error: "Invalid model. Must be one of: opus, sonnet, haiku (or null for role default)" });
+      }
+      updates.push("model = ?"); params.push(model);
+    }
     // 명시적 prompt_source 변경 (동기화 복원: 'auto'로 전환 등)
     if (prompt_source != null) { updates.push("prompt_source = ?"); params.push(prompt_source); }
 

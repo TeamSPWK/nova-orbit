@@ -363,6 +363,12 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE agents ADD COLUMN current_activity TEXT");
   }
 
+  // model on agents — per-agent model override (opus/sonnet/haiku/null)
+  // null = use role default from ROLE_DEFAULT_MODEL
+  if (!agentCols3.some((c) => c.name === "model")) {
+    db.exec("ALTER TABLE agents ADD COLUMN model TEXT");
+  }
+
   // target_files + stack_hint on tasks — scope anchoring (Pulsar scope-drift fix)
   // When set, the Generator prompt includes "Primary target: <paths>" and
   // the Evaluator checks that the diff actually touches those paths.

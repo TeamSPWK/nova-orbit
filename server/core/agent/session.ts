@@ -4,6 +4,7 @@ import { createClaudeCodeAdapter, type ClaudeCodeSession } from "./adapters/clau
 import { createLogger } from "../../utils/logger.js";
 import { resolvePrompt } from "./prompt-resolver.js";
 import { loadMemory } from "./memory.js";
+import { ROLE_DEFAULT_MODEL } from "../../utils/constants.js";
 
 const log = createLogger("session-manager");
 
@@ -82,6 +83,9 @@ export function createSessionManager(db: Database): SessionManager {
 
       const enrichedPrompt = resolution.prompt + contextChain + projectContext;
 
+      // Model resolution: agent-level override > role default > CLI default
+      const resolvedModel = agent.model || ROLE_DEFAULT_MODEL[agent.role] || undefined;
+
       const session = adapter.spawn({
         workdir: projectWorkdir,
         systemPrompt: enrichedPrompt,
@@ -89,6 +93,7 @@ export function createSessionManager(db: Database): SessionManager {
         resumeSessionId: lastSession?.id ?? null,
         skillsDir: agent.skills_dir || undefined,
         memoryContent: memory || undefined,
+        model: resolvedModel,
       });
 
       // Track session in DB — use RETURNING to get session row id for PID update
