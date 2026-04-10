@@ -1782,7 +1782,7 @@ export function ProjectHome() {
                                     t("decompose")
                                   )}
                                 </button>
-                              ))
+                              )
                             )}
                             <button
                               onClick={() => handleAddTask(goal.id)}
