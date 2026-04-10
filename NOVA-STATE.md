@@ -2,8 +2,8 @@
 
 ## Current
 - **Goal**: Pulsar dogfooding 중 터진 architect-phase 무한 루프 + rate-limit false positive 수리
-- **Phase**: done — 루프 차단, rate-limit 감지 엄격화, 단일 인스턴스 PID lock, architect 실패 DB 로깅
-- **Blocker**: 실제 Claude 계정이 진짜 rate-limit 상태 (사용량 소진). 15분 쿨다운 반복 중. Autopilot 잠시 끄고 quota 회복 대기 권장.
+- **Phase**: done — 루프 차단, rate-limit 감지 엄격화, 단일 인스턴스 PID lock, architect 실패 DB 로깅, **stream-parser rate_limit_event status 분기** (병렬 세션 2건 추가 수리)
+- **Blocker**: none. (이전에 "실제 quota 소진"으로 기록했던 진단은 파서 오분류가 섞여 있었을 가능성 — 아래 "Evidence Reinterpretation" 참조)
 
 ## Tasks (최신 세션)
 | Task | Status | Verdict | Note |
@@ -29,13 +29,15 @@
 | Architect phase silent failure DB 로깅 | done | PASS | `architect_failed` activity로 원인 가시화 (STREAM_ERROR 등) |
 | Rate-limit stderr 원문 activity 보존 | done | PASS | `rate_limit_hit` 저장 — 진짜 429 vs 잡음 구분 가능 |
 | 서버 단일 인스턴스 PID lock (.nova-orbit/server.pid) | done | PASS | 중복 concurrently 세션 방지, stale lock 자동 overwrite |
+| `/api/goals/suggest` 500 (존재하지 않는 `goals.status` 컬럼 참조) | done | PASS | `c19c9a3` — progress 기반 라벨 파생. a824b89부터 2일간 잠복, tsc는 SQL 문자열 미검증 |
+| `stream-parser` `rate_limit_event` status별 분기 (soft warning 오분류) | done | PASS | `2d5e6bd` — `rate_limit_info.status`(allowed/allowed_warning/rejected) 구분, rejected만 fatal. camelCase/snake_case 둘 다 파싱. +4 unit tests |
 
 ## Recently Done (max 3)
 | Task | Completed | Verdict | Ref |
 |------|-----------|---------|-----|
-| Scheduler loop + rate-limit false positive 수리 (5종 연속) | 2026-04-10 | PASS | (this session) — executeOne blocked transition, isRateLimitError strict, PID lock, architect failure DB logging |
-| Pulsar Analytics 목표를 Orbit에서 자율 실행 (dogfooding 검증) | 2026-04-10 | PASS | 6 tasks decompose, Task 1이 실제 rate-limit 벽에 부딪힘 |
-| 가드 5단 체계 완성 (P0~P5) + 71 회귀 테스트 | 2026-04-09~10 | PASS | 058f61b, b6caa90, 188031a |
+| `goals.status` 컬럼 부재 + stream-parser status 분기 (병렬 세션 2건 수리) | 2026-04-10 | PASS | `c19c9a3`, `2d5e6bd` — fast-forward merge, e817360과 보완적 2층 방어 구조 확립 |
+| Scheduler loop + rate-limit false positive 수리 (5종 연속) | 2026-04-10 | PASS | `e817360`, `172c6f7` — executeOne blocked transition, isRateLimitError strict, PID lock, architect failure DB logging |
+| Pulsar Analytics 목표를 Orbit에서 자율 실행 (dogfooding 검증) | 2026-04-10 | PASS | 6 tasks decompose, Task 1이 rate-limit 벽 (원인 재해석 필요 — 아래 참조) |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
@@ -113,18 +115,45 @@ Pulsar dogfooding 태스크를 실전 실행하면서 드러난 연쇄 버그.
 3. 사용자가 "autopilot이 멈춰있다"는 상태를 대시보드에서 명확히 볼 수 없음 — **overlay UX 개선됨**
 4. 사용자가 "기다리지 않고 즉시 재시도 가능"임을 알 수 없음 — **"지금 바로 재시도" primary 버튼 + 카운트다운**
 
+## Evidence Reinterpretation — "10:22:34 로그" 결정적 증거 재검토 (2026-04-10 병렬 세션)
+
+e817360 커밋 메시지는 `10:22:34 로그의 "Rate limit hit: API usage limit reached"`를 **실제 quota 소진의 결정적 증거**로 제시했지만, 병렬 세션의 stream-parser 조사 결과 **이 문자열은 구 파서의 하드코딩 fallback**이었음:
+
+```ts
+// stream-parser.ts:140 (구)
+result.errors.push(`Rate limit hit: ${parsed.message ?? "API usage limit reached. Please wait before retrying."}`);
+```
+
+`parsed.message ?? <fallback>` — Claude Code가 emit한 `rate_limit_event`에 `message` 필드가 없으면 **fallback 하드코딩 문자열**이 그대로 에러로 push됨. Context7 조사 결과 Claude Code CLI의 `rate_limit_event` 스키마는 `message` 필드 없이 `rate_limit_info.status` (`allowed` | `allowed_warning` | `rejected`)만 가짐. 즉 해당 이벤트는 **모두 fallback 경로**를 탔고, "API usage limit reached"는 코드가 찍은 문자열일 뿐 실제 API 응답이 아님.
+
+재해석:
+- **"allowed" / "allowed_warning"**: 정상/경고 (요청 계속 가능) — 구 파서가 fatal로 오분류 → STREAM_ERROR → scheduler 무한 루프
+- **"rejected"**: 진짜 하드 블록 — 구 파서/신 파서 모두 fatal로 처리 (행동 동일)
+- **stderr 기반 `isRateLimitError`**: 이 경로는 독립적으로 작동 (CLI-level 429). **진짜 quota 소진의 증거는 여기서 찾아야 함**
+
+**따라서 당시 세션에서 본 증상의 원인은**:
+- (A) 진짜 quota 소진 → stderr 경로로 검출 → scheduler가 handleRateLimit → 15분 cooldown **AND**
+- (B) `allowed_warning` soft 이벤트가 stdout로 흘러들어옴 → 구 파서가 fatal로 오분류 → 추가 STREAM_ERROR → executeOne 무한 루프
+
+둘 중 어느 쪽이 지배적이었는지는 당시 raw 로그(stderr 원문) 없이는 확정 불가. `rate_limit_hit` activity가 저장되기 시작한 건 e817360 이후라 과거 데이터에는 없음.
+
+**교훈**: 다음에 비슷한 증상이 나면 `SELECT message FROM activities WHERE type='rate_limit_hit' ORDER BY id DESC LIMIT 5`로 stderr 원문부터 확인. 파서 fallback 문자열(`"API usage limit reached..."`)은 **증거가 아니라 코드 문자열**임을 기억.
+
+**방어 구조 (양 세션 병합 후)**:
+- 파서 레이어(`2d5e6bd`): `rate_limit_event`를 `status`별 분기, soft 이벤트는 무시
+- 어댑터 레이어(`e817360`): `isRateLimitError` 엄격화, `MAX_RATE_LIMIT_RETRIES=1`
+- 엔진 레이어(`e817360`): architect phase에 `detectAgentRunFailure` + DB activity 로깅
+- 스케줄러 레이어(`e817360`): `throw` 시 `blocked + retry_count++` 강제 → 무한 루프 차단
+- 프로세스 레이어(`e817360`): PID lock
+
 ## Last Activity
-사용자 보고: "Claude 세션 여유있는데 시스템 오류 + rate-limit pause 반복". 증거 수집 결과 **실제 Claude 계정 quota가 소진**된 상태에서 scheduler가 무한 루프에 빠져 15분 cooldown을 자기재귀적으로 반복하고 있었음. 근본 원인 5종 수리:
+사용자 보고: "Claude 세션 여유있는데 시스템 오류 + rate-limit pause 반복". e817360 세션은 **scheduler 무한 루프 + adapter 재귀 + false positive 3종**을 5-way fix로 수리. 같은 시간대 병렬 세션(이 세션)은 독립적으로 조사해서 **stream-parser가 `rate_limit_event`의 `status` 필드를 무시하고 soft warning도 fatal로 push하던 버그**를 잡음 (`2d5e6bd`).
 
-1. **Scheduler executeOne 루프 버그** — catch 경로가 task를 DB에 blocked로 transition 안 함 → todo 그대로 → 다음 poll이 같은 task를 다시 pick → `architect_started` 10분당 수십 번 기록. 이제 throw 시 retry_count++ blocked로 강제 전환.
-2. **Adapter rate-limit 무한 재귀** — `runAttempt(null)`가 rate-limit마다 재귀 → 한 session.send가 영원히 wait. `MAX_RATE_LIMIT_RETRIES=1`로 제한.
-3. **isRateLimitError false positive** — `capacity`/`quota` 단독 매칭 제거. 네트워크 에러가 false positive로 cooldown 유발하는 위험 제거.
-4. **Architect phase silent failure** — 기존 `log.warn("proceed without design")`만 찍고 사용자는 원인 모름. `detectAgentRunFailure` 통과 후 `architect_failed` activity로 DB 저장 (STREAM_ERROR + detail 포함). 이 덕분에 **10:22:34 로그에서 "Rate limit hit: API usage limit reached"라는 결정적 증거** 확보.
-5. **단일 서버 인스턴스 PID lock** — `.nova-orbit/server.pid`에 등록. 중복 concurrently 세션 5분간 공존했던 상태 사후 방지 (고아 tsx watch 프로세스 23336/57291도 수동 종료).
+추가로 `/api/goals/suggest` 500 (존재하지 않는 `goals.status` 컬럼 참조 — a824b89부터 2일 잠복)도 동일 세션에서 수리 (`c19c9a3`).
 
-**현재 상태**: 실제 Claude 계정은 여전히 rate-limit 상태. autopilot 잠시 꺼두고 quota 회복 대기 권장. StatusBar는 사용자 본인 Claude Code 세션의 quota만 보여주고, Orbit subprocess는 반영 안 한다는 점이 혼동의 원인. | 2026-04-10
+두 세션 git pull 후 충돌 없이 fast-forward 병합 완료. 파일 겹침 0건, 의미론적으로는 파서→어댑터→엔진→스케줄러 **4층 방어 구조**로 통합됨. `rate_limit_event`의 실제 의미가 **상태 알림(state-change notification)**이지 **요청 실패(429)**가 아니라는 점을 반영해 위 Evidence Reinterpretation 섹션에 당시 진단 재해석 기록. | 2026-04-10
 
 ## Refs
 - **Pulsar Analytics goal**: `1ca941bf9a966848` (autopilot=goal, decompose 6 tasks, Task 1 in progress)
 - Last Verification: 71/71 unit tests + tsc (server+dashboard) + vitest + Playwright live verification (Pulsar 8 pages + dev-bypass dashboard)
-- Session commits: `058f61b` → `a35d91c` → `22d68e0` → `b6caa90` → `c3d9951` → `627b780` → `188031a` → `086688b` → `1545665` → `d8d18c8`
+- Session commits: `058f61b` → `a35d91c` → `22d68e0` → `b6caa90` → `c3d9951` → `627b780` → `188031a` → `086688b` → `1545665` → `d8d18c8` → `c19c9a3` → `2d5e6bd` → `e817360` → `172c6f7`
