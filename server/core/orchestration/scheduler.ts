@@ -66,6 +66,8 @@ export function createScheduler(
 
   // projectId → set of currently busy agent IDs
   const busyAgents = new Map<string, Set<string>>();
+  // Dedup repeated log warnings (e.g., "permanently blocked" on every poll)
+  const loggedProgressWarnings = new Set<string>();
 
   // projectId → rate limit state
   const pauseState = new Map<string, {
@@ -358,7 +360,12 @@ export function createScheduler(
       db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goal_id);
 
       if (stats.permanently_blocked > 0) {
-        log.warn(`Goal ${goal_id}: ${stats.permanently_blocked} tasks permanently blocked, progress based on ${effective} remaining tasks`);
+        // Log once per goal — suppress repeated warnings for unchanged state
+        const warnKey = `blocked:${goal_id}:${stats.permanently_blocked}`;
+        if (!loggedProgressWarnings.has(warnKey)) {
+          loggedProgressWarnings.add(warnKey);
+          log.warn(`Goal ${goal_id}: ${stats.permanently_blocked} tasks permanently blocked, progress based on ${effective} remaining tasks`);
+        }
       }
     }
   }
