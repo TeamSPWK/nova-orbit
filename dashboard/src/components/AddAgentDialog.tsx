@@ -26,6 +26,7 @@ interface SuggestedAgent {
   name: string;
   role: string;
   reason?: string;
+  systemPrompt?: string;
 }
 
 interface AddAgentDialogProps {
@@ -160,7 +161,7 @@ export function AddAgentDialog({
 
     try {
       // Determine which agents to create
-      const toCreate: Array<{ name: string; role: string; fromProject: boolean }> = [];
+      const toCreate: Array<{ name: string; role: string; fromProject: boolean; systemPrompt?: string }> = [];
 
       for (const sa of scannedAgents) {
         const key = `scanned:${sa.file}`;
@@ -171,7 +172,7 @@ export function AddAgentDialog({
       for (const sg of suggestedAgents) {
         const key = `suggested:${sg.role}`;
         if (all || selectedSmartAgents.has(key)) {
-          toCreate.push({ name: sg.name, role: sg.role, fromProject: false });
+          toCreate.push({ name: sg.name, role: sg.role, fromProject: false, systemPrompt: sg.systemPrompt });
         }
       }
 
@@ -191,7 +192,8 @@ export function AddAgentDialog({
           project_id: projectId,
           name: ctoData.name,
           role: ctoData.role,
-          prompt_source: "auto",
+          system_prompt: ctoData.systemPrompt ?? "",
+          prompt_source: ctoData.systemPrompt ? "preset" : "auto",
         });
         toCreate.splice(ctoIdx, 1);
       }
@@ -203,7 +205,8 @@ export function AddAgentDialog({
           project_id: projectId,
           name: agent.name,
           role: agent.role,
-          prompt_source: "auto",
+          system_prompt: agent.systemPrompt ?? "",
+          prompt_source: agent.systemPrompt ? "preset" : "auto",
           parent_id: rootAgent?.id ?? undefined,
         });
         created.push(a);
