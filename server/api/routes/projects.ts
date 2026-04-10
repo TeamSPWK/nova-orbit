@@ -177,6 +177,39 @@ export function createProjectRoutes(ctx: AppContext): Router {
     if (switchedOn) {
       rescuePendingGoals(req.params.id);
     }
+
+    // Autopilot goal/full → off: stop the queue. Previously the PATCH only
+    // updated the DB row and broadcast, leaving the scheduler poll loop
+    // running in the background. The next poll would still pick `todo`
+    // tasks, spawn architect, and the user would see "에이전트가 자꾸
+    // 작업하려고 한다" despite manual mode being on. Also clear ghost
+    // working agents whose runtime context is gone — without this they
+    // get stuck on the dashboard as "working" forever.
+    const switchedOff =
+      autopilot === "off" && existing.autopilot && existing.autopilot !== "off";
+    if (switchedOff) {
+      if (ctx.scheduler) {
+        try { ctx.scheduler.stopQueue(req.params.id); } catch { /* best-effort */ }
+      }
+      // 진행 중이던 task를 todo로 되돌려 다음 수동 실행 시 깨끗한 상태에서
+      // 시작. 비파괴(retry_count 유지)로 둠.
+      db.prepare(
+        "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE project_id = ? AND status IN ('in_progress', 'in_review')",
+      ).run(req.params.id);
+      // Working 상태 ghost agent 정리.
+      db.prepare(
+        "UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE project_id = ? AND status = 'working'",
+      ).run(req.params.id);
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_off', ?)",
+      ).run(
+        req.params.id,
+        `수동 모드로 전환 — 큐 정지, 진행 중 작업 todo로 되돌림`,
+      );
+      broadcast("queue:stopped", { projectId: req.params.id });
+      broadcast("project:updated", { projectId: req.params.id });
+      log.info(`Autopilot off: queue stopped + ghost state cleaned for ${req.params.id}`);
+    }
   });
 
   /**
