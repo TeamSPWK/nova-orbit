@@ -56,16 +56,22 @@ export function createSessionRoutes(ctx: AppContext): Router {
       FROM sessions
     `).get();
 
-    // Detect orphan sessions: active in DB but process not running
+    // Detect orphan sessions: active in DB but process not running.
+    // Grace period: sessions started < 30s ago may not have a PID yet
+    // (CLI spawn → "working" event delay). Don't count them as orphans.
     const activeSessions = db.prepare(
-      "SELECT id, pid FROM sessions WHERE status = 'active'",
-    ).all() as { id: string; pid: number | null }[];
+      "SELECT id, pid, started_at FROM sessions WHERE status = 'active'",
+    ).all() as { id: string; pid: number | null; started_at: string }[];
 
     let orphanCount = 0;
+    const now = Date.now();
+    const GRACE_MS = 30_000;
     for (const s of activeSessions) {
+      const age = now - new Date(s.started_at + "Z").getTime();
+      if (age < GRACE_MS) continue; // still starting up
       if (!s.pid) { orphanCount++; continue; }
       try {
-        process.kill(s.pid, 0); // check if alive
+        process.kill(s.pid, 0);
       } catch {
         orphanCount++;
       }
@@ -97,11 +103,15 @@ export function createSessionRoutes(ctx: AppContext): Router {
   // Cleanup orphan sessions (active in DB but process dead)
   router.post("/cleanup", (_req, res) => {
     const active = db.prepare(
-      "SELECT id, pid, agent_id FROM sessions WHERE status = 'active'",
-    ).all() as { id: string; pid: number | null; agent_id: string }[];
+      "SELECT id, pid, agent_id, started_at FROM sessions WHERE status = 'active'",
+    ).all() as { id: string; pid: number | null; agent_id: string; started_at: string }[];
 
+    const now = Date.now();
+    const GRACE_MS = 30_000;
     let cleaned = 0;
     for (const s of active) {
+      const age = now - new Date(s.started_at + "Z").getTime();
+      if (age < GRACE_MS) continue; // still starting up — don't kill
       let alive = false;
       if (s.pid) {
         try { process.kill(s.pid, 0); alive = true; } catch { alive = false; }
