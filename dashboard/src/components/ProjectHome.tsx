@@ -1687,11 +1687,13 @@ export function ProjectHome() {
                               if (goalTasks.length > 0 && !hasRunning) return (
                                 <button
                                   onClick={() => handleDecomposeGoal(goal.id)}
-                                  disabled={isDecomposing || decomposingGoalId !== null}
+                                  disabled={isDecomposing || isGeneratingSpec || decomposingGoalId !== null}
                                   className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
                                     decomposingGoalId === goal.id
                                       ? "bg-orange-200 dark:bg-orange-800/60 text-orange-500 dark:text-orange-300 cursor-wait"
-                                      : "bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
+                                      : isGeneratingSpec
+                                        ? "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed"
+                                        : "bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
                                   }`}
                                 >
                                   {decomposingGoalId === goal.id ? (
@@ -1715,7 +1717,11 @@ export function ProjectHome() {
                               return null;
                             })()}
                             {!tasks.some((tk) => tk.goal_id === goal.id) && (
-                              isDecomposing ? (
+                              isGeneratingSpec ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-800/40 text-indigo-400 dark:text-indigo-300 whitespace-nowrap cursor-not-allowed">
+                                  {t("specGeneratingInCard")}
+                                </span>
+                              ) : isDecomposing ? (
                                 <span className="text-[10px] px-2 py-0.5 rounded bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 whitespace-nowrap flex items-center gap-1 cursor-wait">
                                   <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1776,7 +1782,7 @@ export function ProjectHome() {
                                     t("decompose")
                                   )}
                                 </button>
-                              )
+                              ))
                             )}
                             <button
                               onClick={() => handleAddTask(goal.id)}
