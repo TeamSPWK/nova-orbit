@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { AgentTerminal } from "./AgentTerminal";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { parseActivity } from "./OrgChart";
+import { parseActivity, getCtoPhase } from "./OrgChart";
 import { AgentAvatar } from "./AgentAvatar";
 
 interface Agent {
@@ -430,22 +430,30 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
               {t("agentDetailSessionInfo")}
             </h3>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500 dark:text-gray-400">{t("agentDetailStatus")}</span>
-                <span
-                  className={`text-[10px] px-2 py-0.5 rounded font-medium ${
-                    STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle
-                  }`}
-                >
-                  {t({
-                    idle: "statusIdle",
-                    working: "statusWorking",
-                    waiting_approval: "statusWaitingApproval",
-                    paused: "statusPaused",
-                    terminated: "statusTerminated",
-                  }[agent.status] ?? "statusIdle")}
-                </span>
-              </div>
+              {(() => {
+                const phase = getCtoPhase((agent as any).current_activity);
+                const isCtoSupport = agent.status === "working" && phase;
+                const statusBadgeClass = isCtoSupport
+                  ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+                  : (STATUS_COLORS[agent.status] ?? STATUS_COLORS.idle);
+                const statusLabel = isCtoSupport
+                  ? t(phase === "architect" ? "statusArchitect" : phase === "decompose" ? "statusDecompose" : "statusSpecGen")
+                  : t({
+                      idle: "statusIdle",
+                      working: "statusWorking",
+                      waiting_approval: "statusWaitingApproval",
+                      paused: "statusPaused",
+                      terminated: "statusTerminated",
+                    }[agent.status] ?? "statusIdle");
+                return (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{t("agentDetailStatus")}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${statusBadgeClass}`}>
+                      {statusLabel}
+                    </span>
+                  </div>
+                );
+              })()}
               {agent.session_id && (
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500 dark:text-gray-400">{t("agentDetailSessionId")}</span>
@@ -456,15 +464,23 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
               )}
               {currentTask ? (
                 <div className="flex items-start justify-between gap-3">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{t("agentDetailCurrentTask")}</span>
-                  <span className="text-xs text-gray-700 dark:text-gray-300 text-right">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                    {getCtoPhase((agent as any).current_activity)
+                      ? t("agentDetailDesignFor")
+                      : t("agentDetailCurrentTask")}
+                  </span>
+                  <span className={`text-xs text-right ${getCtoPhase((agent as any).current_activity) ? "text-blue-600 dark:text-blue-400" : "text-gray-700 dark:text-gray-300"}`}>
                     {currentTask.title}
                   </span>
                 </div>
               ) : (agent as any).current_activity ? (
                 <div className="flex items-start justify-between gap-3">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{t("agentDetailCurrentTask")}</span>
-                  <span className="text-xs text-indigo-600 dark:text-indigo-400 text-right">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                    {getCtoPhase((agent as any).current_activity)
+                      ? t("agentDetailDesignFor")
+                      : t("agentDetailCurrentTask")}
+                  </span>
+                  <span className={`text-xs text-right ${getCtoPhase((agent as any).current_activity) ? "text-blue-600 dark:text-blue-400" : "text-indigo-600 dark:text-indigo-400"}`}>
                     {parseActivity((agent as any).current_activity, t)}
                   </span>
                 </div>

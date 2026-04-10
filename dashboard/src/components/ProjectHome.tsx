@@ -4,7 +4,7 @@ import { useStore } from "../stores/useStore";
 import { api } from "../lib/api";
 
 import { TaskTimeline } from "./TaskTimeline";
-import { OrgChart } from "./OrgChart";
+import { OrgChart, parseActivity, getCtoPhase } from "./OrgChart";
 import { AgentDetail } from "./AgentDetail";
 import { TaskList } from "./TaskList";
 import { VerificationLog } from "./VerificationLog";
@@ -1451,44 +1451,69 @@ export function ProjectHome() {
 
               {/* Rate Limit Banner — removed, now shown as overlay on task area */}
 
-              {/* Agents Section — compact summary */}
+              {/* Agents Section — compact summary with activity */}
               <section className="mb-8">
-                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  <span className="font-medium text-gray-700 dark:text-gray-300 shrink-0">{t("agents")}:</span>
-                  {agents.length === 0 ? (
-                    <button
-                      onClick={handleAddAgent}
-                      className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                    >
-                      {t("addAgent")}
-                    </button>
-                  ) : (
-                    <>
-                      <span className="flex flex-wrap gap-1 items-center min-w-0">
-                        {agents.map((a, idx) => (
-                          <span key={a.id} className="inline-flex items-center gap-0.5">
-                            {a.status === "working" && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
-                            )}
-                            <span className="text-gray-700 dark:text-gray-300">{a.name}</span>
-                            {idx < agents.length - 1 && (
-                              <span className="text-gray-300 dark:text-gray-600">,</span>
-                            )}
-                          </span>
-                        ))}
-                        <span className="text-gray-400 dark:text-gray-500">
-                          ({t("agentCount", { count: agents.length })})
-                        </span>
-                      </span>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <span className="font-medium text-gray-700 dark:text-gray-300 shrink-0">{t("agents")}:</span>
+                    {agents.length === 0 ? (
                       <button
-                        onClick={() => setTab("agents")}
-                        className="shrink-0 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors whitespace-nowrap"
+                        onClick={handleAddAgent}
+                        className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
                       >
-                        {t("goToAgentsTab")}
+                        {t("addAgent")}
                       </button>
-                    </>
-                  )}
+                    ) : (
+                      <>
+                        <span className="flex flex-wrap gap-1 items-center min-w-0">
+                          {agents.map((a, idx) => {
+                            const phase = getCtoPhase(a.current_activity);
+                            const dotClass = a.status === "working" && phase
+                              ? "bg-blue-400 animate-pulse"
+                              : a.status === "working"
+                              ? "bg-green-400 animate-pulse"
+                              : null;
+                            return (
+                              <span key={a.id} className="inline-flex items-center gap-0.5">
+                                {dotClass && <span className={`w-1.5 h-1.5 rounded-full ${dotClass} shrink-0`} />}
+                                <span className="text-gray-700 dark:text-gray-300">{a.name}</span>
+                                {idx < agents.length - 1 && (
+                                  <span className="text-gray-300 dark:text-gray-600">,</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                          <span className="text-gray-400 dark:text-gray-500">
+                            ({t("agentCount", { count: agents.length })})
+                          </span>
+                        </span>
+                        <button
+                          onClick={() => setTab("agents")}
+                          className="shrink-0 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors whitespace-nowrap"
+                        >
+                          {t("goToAgentsTab")}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
+                {/* Active agent activities */}
+                {agents.filter((a) => a.status === "working" && a.current_activity).length > 0 && (
+                  <div className="space-y-1.5 ml-1">
+                    {agents.filter((a) => a.status === "working" && a.current_activity).map((a) => {
+                      const phase = getCtoPhase(a.current_activity);
+                      return (
+                        <div key={a.id} className="flex items-center gap-2 text-[11px]">
+                          <span className={`w-1 h-1 rounded-full shrink-0 ${phase ? "bg-blue-400" : "bg-green-400"}`} />
+                          <span className="text-gray-500 dark:text-gray-400">{a.name}</span>
+                          <span className={phase ? "text-blue-500 dark:text-blue-400" : "text-green-600 dark:text-green-400"}>
+                            {parseActivity(a.current_activity, t)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
 
               {/* Goals Section */}

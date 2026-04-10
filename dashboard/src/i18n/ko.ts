@@ -97,6 +97,9 @@ const ko = {
   statusWaitingApproval: "승인 대기",
   statusPaused: "일시정지",
   statusTerminated: "종료",
+  statusArchitect: "설계 중",
+  statusDecompose: "분할 중",
+  statusSpecGen: "기획 중",
   stopAgent: "중지",
 
   // TaskList status labels
@@ -355,11 +358,13 @@ const ko = {
   agentDetailStatus: "상태",
   agentDetailSessionId: "에이전트 ID",
   agentDetailCurrentTask: "현재 태스크",
+  agentDetailDesignFor: "설계 대상",
   activityTask: "{{name}}",
   activityFix: "수정 중: {{name}}",
   activityReview: "검증 중: {{name}}",
   activitySpecGen: "기획서 생성 중: {{name}}",
   activityDecompose: "태스크 분할 중: {{name}}",
+  activityArchitect: "설계 중: {{name}}",
   activityGoalGen: "새 목표 생성 중",
   activityBranchMerge: "브랜치 병합 중",
   agentDetailSystemPrompt: "역할 지시사항",

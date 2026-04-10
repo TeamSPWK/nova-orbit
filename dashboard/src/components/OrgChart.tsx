@@ -15,6 +15,7 @@ export function parseActivity(raw: string | null | undefined, t: (k: string, opt
     "review": "activityReview",
     "spec_gen": "activitySpecGen",
     "decompose": "activityDecompose",
+    "architect": "activityArchitect",
     "goal_generation": "activityGoalGen",
     "branch_merge": "activityBranchMerge",
   };
@@ -29,6 +30,16 @@ export function parseActivity(raw: string | null | undefined, t: (k: string, opt
   const key = ACTIVITY_MAP[raw];
   if (key) return t(key);
   return raw; // fallback: show raw
+}
+
+/** CTO 보조 활동(설계/분할/기획서) 여부 — UX에서 "작업 중"과 구분 */
+export type CtoPhase = "architect" | "decompose" | "spec_gen" | null;
+export function getCtoPhase(activity: string | null | undefined): CtoPhase {
+  if (!activity) return null;
+  if (activity.startsWith("architect:")) return "architect";
+  if (activity.startsWith("decompose:")) return "decompose";
+  if (activity.startsWith("spec_gen:")) return "spec_gen";
+  return null;
 }
 
 /** BFS로 agentId의 모든 하위 노드 ID 집합 반환 (순환 방지용) */
@@ -146,6 +157,8 @@ function OrgNode({ agent, agents, childrenMap, selectedId, onSelect, onQuickProm
               ? "border-blue-500 bg-blue-100 dark:bg-blue-900/30 ring-2 ring-blue-300 dark:ring-blue-600 scale-105"
               : isSelected
               ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm shadow-blue-200 dark:shadow-blue-900/40"
+              : isWorking && getCtoPhase((agent as any).current_activity)
+              ? "border-blue-300 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-900/10 hover:border-blue-400"
               : isWorking
               ? "border-green-300 dark:border-green-700 bg-green-50/60 dark:bg-green-900/10 hover:border-green-400"
               : "border-gray-200 dark:border-gray-700 bg-white dark:bg-[#25253d] hover:border-gray-300 dark:hover:border-gray-600"
@@ -155,21 +168,32 @@ function OrgNode({ agent, agents, childrenMap, selectedId, onSelect, onQuickProm
           <span className="text-[11px] font-medium text-gray-800 dark:text-gray-200 leading-tight truncate w-full">
             {agent.name}
           </span>
-          <div className="flex items-center gap-1 justify-center">
-            <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                STATUS_DOT[agent.status] ?? STATUS_DOT.idle
-              }`}
-            />
-            <span className="text-[9px] text-gray-400 dark:text-gray-500 capitalize">
-              {STATUS_LABEL[agent.status] ?? "idle"}
-            </span>
-          </div>
-          {isWorking && (agent as any).current_activity && (
-            <p className="text-[8px] text-indigo-500 dark:text-indigo-400 truncate w-full px-1 leading-tight">
-              {parseActivity((agent as any).current_activity, t)}
-            </p>
-          )}
+          {(() => {
+            const phase = getCtoPhase((agent as any).current_activity);
+            const isCtoSupport = isWorking && phase;
+            const dotClass = isCtoSupport
+              ? "bg-blue-400 animate-pulse"
+              : (STATUS_DOT[agent.status] ?? STATUS_DOT.idle);
+            const labelText = isCtoSupport
+              ? t(phase === "architect" ? "statusArchitect" : phase === "decompose" ? "statusDecompose" : "statusSpecGen")
+              : (STATUS_LABEL[agent.status] ?? "idle");
+            const labelClass = isCtoSupport
+              ? "text-blue-500 dark:text-blue-400"
+              : "text-gray-400 dark:text-gray-500";
+            return (
+              <>
+                <div className="flex items-center gap-1 justify-center">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
+                  <span className={`text-[9px] capitalize ${labelClass}`}>{labelText}</span>
+                </div>
+                {isWorking && (agent as any).current_activity && (
+                  <p className={`text-[8px] truncate w-full px-1 leading-tight ${isCtoSupport ? "text-blue-400 dark:text-blue-300" : "text-indigo-500 dark:text-indigo-400"}`}>
+                    {parseActivity((agent as any).current_activity, t)}
+                  </p>
+                )}
+              </>
+            );
+          })()}
         </button>
 
         {/* Quick prompt button — inside padded container to avoid clipping */}

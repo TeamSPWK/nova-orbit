@@ -97,6 +97,9 @@ const en = {
   statusWaitingApproval: "waiting approval",
   statusPaused: "paused",
   statusTerminated: "terminated",
+  statusArchitect: "designing",
+  statusDecompose: "splitting",
+  statusSpecGen: "planning",
   stopAgent: "Stop",
 
   // TaskList status labels
@@ -355,11 +358,13 @@ const en = {
   agentDetailStatus: "Status",
   agentDetailSessionId: "Agent ID",
   agentDetailCurrentTask: "Current Task",
+  agentDetailDesignFor: "Designing for",
   activityTask: "{{name}}",
   activityFix: "Fixing: {{name}}",
   activityReview: "Reviewing: {{name}}",
   activitySpecGen: "Generating spec: {{name}}",
   activityDecompose: "Splitting tasks: {{name}}",
+  activityArchitect: "Designing: {{name}}",
   activityGoalGen: "Generating new goals",
   activityBranchMerge: "Merging branches",
   agentDetailSystemPrompt: "Role Instructions",
