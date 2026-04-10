@@ -1627,7 +1627,7 @@ export function ProjectHome() {
                     return (
                       <div
                         key={goal.id}
-                        className={`mb-3 border rounded-lg overflow-hidden transition-all ${
+                        className={`mb-3 border rounded-lg overflow-visible transition-all ${
                           isDecomposing
                             ? "border-purple-300 dark:border-purple-600 bg-purple-50/50 dark:bg-purple-900/10 ring-1 ring-purple-200 dark:ring-purple-800 animate-pulse"
                             : isGeneratingSpec

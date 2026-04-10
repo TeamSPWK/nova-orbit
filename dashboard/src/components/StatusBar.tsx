@@ -157,7 +157,7 @@ export function StatusBar() {
       {status.ratePercent != null && (
         <>
           <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span className="flex items-center gap-1" title="5-hour rate limit usage">
+          <span className="flex items-center gap-1" title="터미널 Claude Code 세션의 5시간 사용량 한도 (Nova 에이전트 세션과 별개)">
             <span className="text-gray-500 dark:text-gray-500 text-[9px]">5h</span>
             <Gauge percent={status.ratePercent} segments={5} />
           </span>

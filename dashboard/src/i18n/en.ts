@@ -165,6 +165,8 @@ const en = {
   verdictPass: "PASS",
   verdictConditional: "CONDITIONAL",
   verdictFail: "FAIL",
+  failClickDetail: "Click to see failure details",
+  conditionalClickDetail: "Click to see conditional details",
   dimensionScore: "Quality Score",
   issues: "Issues",
   dimFunctionality: "Functionality",

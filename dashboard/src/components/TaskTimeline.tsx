@@ -195,7 +195,7 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
   }, [agentOutputs, expandedAgents]);
 
   const workingAgents = agents.filter((a) => a.status === "working");
-  const inProgressTasks = activeTasks.filter((t) => t.status === "in_progress");
+  const inProgressTasks = activeTasks.filter((t) => t.status === "in_progress" || t.status === "in_review");
   const hasActivity = inProgressTasks.length > 0 || events.length > 0;
 
   return (
@@ -210,8 +210,11 @@ export function TaskTimeline({ activeTasks, agents }: TaskTimelineProps) {
             return (
               <div key={task.id} className="space-y-0.5">
                 <div className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
-                  <span className="text-[11px] text-gray-700 dark:text-gray-300 truncate flex-1">{task.title}</span>
+                  <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${task.status === "in_review" ? "bg-purple-500" : "bg-blue-500"}`} />
+                  <span className="text-[11px] text-gray-700 dark:text-gray-300 truncate flex-1">
+                    {task.status === "in_review" && <span className="text-purple-500 mr-1">검토 중:</span>}
+                    {task.title}
+                  </span>
                   {agent && (
                     <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{agent.name}</span>
                   )}

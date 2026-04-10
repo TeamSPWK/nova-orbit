@@ -338,6 +338,48 @@ export function TaskDetail({ task, agents, onClose, onUpdate }: TaskDetailProps)
                   ))}
                 </div>
               </div>
+
+              {/* Issues list — shows WHY the verification failed */}
+              {verification.issues && verification.issues.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-medium text-gray-400 uppercase mb-1.5">
+                    {t("issues")} ({verification.issues.length})
+                  </p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {verification.issues.map((issue, i) => (
+                      <div
+                        key={i}
+                        className={`text-xs p-2 rounded border-l-2 ${
+                          issue.severity === "critical"
+                            ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                            : issue.severity === "high"
+                              ? "border-orange-400 bg-orange-50 dark:bg-orange-900/20"
+                              : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700/50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className={`text-[10px] font-medium uppercase ${
+                            issue.severity === "critical" ? "text-red-600 dark:text-red-400"
+                              : issue.severity === "high" ? "text-orange-600 dark:text-orange-400"
+                              : "text-gray-500"
+                          }`}>
+                            {issue.severity}
+                          </span>
+                          {issue.file && (
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              {issue.file}{issue.line ? `:${issue.line}` : ""}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-gray-700 dark:text-gray-300">{issue.message}</p>
+                        {issue.suggestion && (
+                          <p className="text-gray-400 dark:text-gray-500 mt-0.5 italic">{issue.suggestion}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

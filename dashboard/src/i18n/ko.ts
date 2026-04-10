@@ -165,6 +165,8 @@ const ko = {
   verdictPass: "통과",
   verdictConditional: "조건부",
   verdictFail: "실패",
+  failClickDetail: "클릭하여 실패 사유를 확인하세요",
+  conditionalClickDetail: "클릭하여 조건부 사유를 확인하세요",
   dimensionScore: "품질 점수",
   issues: "이슈",
   dimFunctionality: "기능성",
