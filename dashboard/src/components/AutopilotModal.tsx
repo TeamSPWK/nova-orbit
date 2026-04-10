@@ -7,6 +7,10 @@ interface AutopilotModalProps {
   currentMode: AutopilotMode;
   hasMission: boolean;
   hasCto: boolean;
+  /** Number of existing todo tasks (for context when switching modes) */
+  todoCount?: number;
+  /** Number of tasks currently running */
+  runningCount?: number;
   onConfirm: (mode: AutopilotMode) => void;
   onClose: () => void;
 }
@@ -17,7 +21,7 @@ const MODES: { id: AutopilotMode; color: string; activeColor: string; border: st
   { id: "full", color: "text-orange-600 dark:text-orange-400", activeColor: "bg-orange-50 dark:bg-orange-900/20 border-orange-500 dark:border-orange-400", border: "border-gray-200 dark:border-gray-700" },
 ];
 
-export function AutopilotModal({ currentMode, hasMission, hasCto, onConfirm, onClose }: AutopilotModalProps) {
+export function AutopilotModal({ currentMode, hasMission, hasCto, todoCount = 0, runningCount = 0, onConfirm, onClose }: AutopilotModalProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<AutopilotMode>(currentMode);
 
@@ -106,6 +110,40 @@ export function AutopilotModal({ currentMode, hasMission, hasCto, onConfirm, onC
             );
           })}
         </div>
+
+        {/* Transition context banners */}
+        {changed && (
+          <div className="px-6 pb-1 space-y-2">
+            {/* off → goal/full: explain what happens to existing tasks */}
+            {currentMode === "off" && selected !== "off" && todoCount > 0 && (
+              <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-[11px] text-blue-700 dark:text-blue-300">
+                {t("autopilotSwitchOnWithTasks", { count: todoCount })}
+              </div>
+            )}
+            {/* goal/full → off: explain running tasks won't stop immediately */}
+            {currentMode !== "off" && selected === "off" && runningCount > 0 && (
+              <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] text-amber-700 dark:text-amber-300">
+                {t("autopilotSwitchOffWithRunning", { count: runningCount })}
+              </div>
+            )}
+            {currentMode !== "off" && selected === "off" && runningCount === 0 && (
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-[11px] text-gray-500 dark:text-gray-400">
+                {t("autopilotSwitchOffClean")}
+              </div>
+            )}
+            {/* goal → full or full → goal */}
+            {currentMode === "goal" && selected === "full" && (
+              <div className="px-3 py-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-[11px] text-orange-700 dark:text-orange-300">
+                {t("autopilotGoalToFull")}
+              </div>
+            )}
+            {currentMode === "full" && selected === "goal" && (
+              <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-[11px] text-blue-700 dark:text-blue-300">
+                {t("autopilotFullToGoal")}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-2">

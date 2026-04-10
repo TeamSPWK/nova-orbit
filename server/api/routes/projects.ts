@@ -166,16 +166,34 @@ export function createProjectRoutes(ctx: AppContext): Router {
       }
     }
 
-    // Autopilot off → goal/full: rescue pending goals that were created
-    // while autopilot was disabled. Without this, a goal created via API
-    // or UI in manual mode is stuck at 0 tasks even after the user flips
-    // autopilot on, because the goal-creation path only triggers decompose
-    // if autopilot was already enabled at insert time. (Observed during
-    // Pulsar audit 2026-04-09.)
+    // Autopilot off → goal/full: rescue pending goals AND start queue for
+    // existing todo tasks. Without this:
+    //   (a) Goals created in manual mode stay at 0 tasks (no decompose)
+    //   (b) Already-decomposed goals with todo tasks sit idle (no queue)
+    // Both are confusing — user enables autopilot expecting work to start.
     const switchedOn =
       autopilot && autopilot !== "off" && existing.autopilot === "off";
     if (switchedOn) {
       rescuePendingGoals(req.params.id);
+
+      // Start queue if there are existing todo tasks waiting to run
+      const existingTodo = db.prepare(
+        "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status = 'todo' AND assignee_id IS NOT NULL",
+      ).get(req.params.id) as { cnt: number };
+
+      if (existingTodo.cnt > 0 && ctx.scheduler) {
+        if (!ctx.scheduler.isRunning(req.params.id)) {
+          ctx.scheduler.startQueue(req.params.id);
+          log.info(`Autopilot on: started queue for ${existingTodo.cnt} existing todo task(s)`);
+        }
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)",
+        ).run(
+          req.params.id,
+          `자동 실행 시작 — 대기 중인 태스크 ${existingTodo.cnt}개를 자동으로 진행합니다`,
+        );
+        broadcast("project:updated", { projectId: req.params.id });
+      }
     }
 
     // Autopilot goal/full → off: stop the queue. Previously the PATCH only

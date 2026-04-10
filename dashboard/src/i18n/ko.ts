@@ -466,6 +466,11 @@ const ko = {
   autopilotFullNeedsCto: "CTO 에이전트가 필요합니다",
   autopilotFullSafety1: "목표 최대 5개 자동 생성, 완료 후 반자동 모드로 전환",
   autopilotFullSafety2: "사용량 한도 도달 시 자동 일시정지 → 재시도",
+  autopilotSwitchOnWithTasks: "대기 중인 태스크 {{count}}개가 자동으로 실행됩니다.",
+  autopilotSwitchOffWithRunning: "진행 중인 태스크 {{count}}개는 중단되고 대기 상태로 돌아갑니다.",
+  autopilotSwitchOffClean: "큐가 정지되고 대기 상태로 전환됩니다. 수동으로 태스크를 실행할 수 있습니다.",
+  autopilotGoalToFull: "CTO가 미션을 분석해 새 목표를 자동 생성합니다. 기존 진행 중인 작업은 계속됩니다.",
+  autopilotFullToGoal: "새 목표 자동 생성이 중단됩니다. 기존 목표와 태스크는 계속 진행됩니다.",
   recommended: "추천",
   apply: "적용",
 

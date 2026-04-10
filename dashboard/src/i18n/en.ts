@@ -466,6 +466,11 @@ const en = {
   autopilotFullNeedsCto: "CTO agent is required",
   autopilotFullSafety1: "Max 5 goals auto-created, switches to Semi-Auto when done",
   autopilotFullSafety2: "Auto-pauses on usage limit with retry",
+  autopilotSwitchOnWithTasks: "{{count}} waiting tasks will start automatically.",
+  autopilotSwitchOffWithRunning: "{{count}} running tasks will be stopped and returned to waiting.",
+  autopilotSwitchOffClean: "Queue will stop. You can run tasks manually.",
+  autopilotGoalToFull: "CTO will analyze the mission and auto-generate new goals. Existing work continues.",
+  autopilotFullToGoal: "New goal generation will stop. Existing goals and tasks continue.",
   recommended: "Recommended",
   apply: "Apply",
 

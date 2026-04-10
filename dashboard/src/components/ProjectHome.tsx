@@ -1241,6 +1241,8 @@ export function ProjectHome() {
           currentMode={autopilotMode}
           hasMission={!!project?.mission?.trim()}
           hasCto={agents.some((a) => a.role === "cto")}
+          todoCount={tasks.filter((t) => t.status === "todo").length}
+          runningCount={tasks.filter((t) => t.status === "in_progress" || t.status === "in_review").length}
           onConfirm={handleAutopilotChange}
           onClose={() => setShowAutopilotModal(false)}
         />
