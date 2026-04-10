@@ -158,8 +158,10 @@ function loadProjectAgents(workdir: string): ProjectAgentDef[] {
       const parsed = parseFrontmatter(content);
       const name = parsed.meta.name ?? file.replace(/\.md$/, "");
 
-      // role: best-effort from Nova Orbit preset roles. "custom" is fine.
-      const role = inferRole(name, parsed.meta.description ?? "", parsed.body);
+      // role: explicit frontmatter > filename match > keyword inference > "custom"
+      const role = parsed.meta.role && isValidRole(parsed.meta.role)
+        ? parsed.meta.role
+        : inferRole(name, file, parsed.meta.description ?? "");
 
       results.push({ name, role, systemPrompt: parsed.body.trim(), file });
     } catch {
@@ -182,27 +184,55 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
   return { meta, body: match[2] };
 }
 
+const KNOWN_ROLES = new Set([
+  "cto", "pm", "backend", "frontend", "ux", "qa", "reviewer", "devops", "marketer", "coder", "designer", "custom",
+]);
+function isValidRole(role: string): boolean {
+  return KNOWN_ROLES.has(role.toLowerCase());
+}
+
 /**
- * Best-effort role inference — for UI display only, NOT for behavior.
- * Returns "custom" if no confident match. That's perfectly fine.
+ * Role inference — 3-layer:
+ *   1. Filename exact match (e.g., "backend.md" → backend)
+ *   2. Name-based keyword match (strict, avoids false positives)
+ *   3. "custom" fallback (safe default — better than wrong role)
+ *
+ * NOTE: description is NOT used for inference. "디자인 패턴 적용"→ux,
+ * "API 검증"→backend 등 false positive가 너무 많음. 사용자가 원하는
+ * role은 frontmatter `role:` 필드로 명시하는 게 정확.
  */
-function inferRole(name: string, description: string, _body: string): string {
-  // Only use name + description (short, intentional text).
-  // Body is too noisy (mentions "api", "server", "test" in all contexts).
-  const text = `${name} ${description}`.toLowerCase();
+function inferRole(name: string, filename: string, _description: string): string {
+  // Layer 1: filename → role (most reliable)
+  const FILENAME_ROLE: Record<string, string> = {
+    "backend.md": "backend", "server.md": "backend", "api.md": "backend", "api-dev.md": "backend",
+    "frontend.md": "frontend", "client.md": "frontend", "frontend-dev.md": "frontend",
+    "ux.md": "ux", "designer.md": "ux", "ux-designer.md": "ux",
+    "qa.md": "qa", "tester.md": "qa", "qa-engineer.md": "reviewer",
+    "reviewer.md": "reviewer", "review.md": "reviewer", "code-reviewer.md": "reviewer",
+    "cto.md": "cto", "lead.md": "cto", "architect.md": "cto", "tech-lead.md": "cto",
+    "devops.md": "devops", "infra.md": "devops", "ops.md": "devops", "devops-engineer.md": "devops",
+    "marketer.md": "marketer", "marketing.md": "marketer",
+    "pm.md": "pm", "product-manager.md": "pm",
+    "security.md": "custom", "security-engineer.md": "custom",
+    "senior-dev.md": "backend", "senior-developer.md": "backend",
+  };
+  const fileRole = FILENAME_ROLE[filename.toLowerCase()];
+  if (fileRole) return fileRole;
 
-  const SIGNALS: Array<{ test: (t: string) => boolean; role: string }> = [
-    { test: (t) => /\bcto\b|tech lead|architect/.test(t), role: "cto" },
-    { test: (t) => /\bbackend\b|api[\s-]dev|\bapi\b.*개발|route handler/.test(t), role: "backend" },
-    { test: (t) => /\bfrontend\b|프론트엔드|\bui\b.*개발|\breact\b.*ui/.test(t), role: "frontend" },
-    { test: (t) => /\bux\b|\bdesign\b|디자인/.test(t), role: "ux" },
-    { test: (t) => /\bqa\b|\breview|검증|품질/.test(t), role: "reviewer" },
-    { test: (t) => /\bdevops\b|\bdeploy|인프라|ci\/cd/.test(t), role: "devops" },
-    { test: (t) => /\bmarket|seo|growth|마케팅/.test(t), role: "marketer" },
+  // Layer 2: name-based (strict word boundary, name only — NOT description)
+  const nameLower = name.toLowerCase();
+  const NAME_SIGNALS: Array<{ test: RegExp; role: string }> = [
+    { test: /\bcto\b|^architect$|tech[\s-]?lead/, role: "cto" },
+    { test: /\bbackend\b|\bapi[\s-]dev\b|\bserver[\s-]dev\b|^senior[\s-]dev/, role: "backend" },
+    { test: /\bfrontend\b|\bclient[\s-]dev\b|\bweb[\s-]dev\b/, role: "frontend" },
+    { test: /^ux\b|^ui[\s/]ux\b/, role: "ux" },
+    { test: /\bqa\b|\breview(?:er)?\b|검증|품질/, role: "reviewer" },
+    { test: /\bdevops\b|\binfra\b|\bops\b|\bsre\b/, role: "devops" },
+    { test: /\bmarket|\bgrowth\b|\bseo\b/, role: "marketer" },
+    { test: /\bpm\b|product[\s-]?manager/, role: "pm" },
   ];
-
-  for (const { test, role } of SIGNALS) {
-    if (test(text)) return role;
+  for (const { test, role } of NAME_SIGNALS) {
+    if (test.test(nameLower)) return role;
   }
 
   return "custom";

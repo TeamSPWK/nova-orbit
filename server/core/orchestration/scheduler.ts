@@ -888,11 +888,29 @@ export function createScheduler(
         delegationEngine.checkParentCompletion(task.parent_task_id);
       }
     } catch (err: any) {
-      const isRateLimit = err.message?.toLowerCase().includes("rate limit") ||
-        err.message?.toLowerCase().includes("429") ||
-        err.message?.toLowerCase().includes("too many requests");
+      // Duplicate execution — another caller owns this task, nothing to do
+      if (err.message?.includes("skipping duplicate execution")) {
+        busy.delete(task.assignee_id);
+        return;
+      }
 
-      if (isRateLimit) {
+      const errMsg = err.message?.toLowerCase() ?? "";
+      const isRateLimit = errMsg.includes("rate limit") ||
+        errMsg.includes("429") ||
+        errMsg.includes("too many requests");
+
+      // Detect session exhaustion: CLI exits with code 1 and empty stderr/stdout.
+      // This happens when all Claude sessions are in use. Treat as rate-limit
+      // so the pause overlay shows instead of flooding red toasts.
+      const isSessionExhausted =
+        err.code === "CLI_EXIT_NONZERO" &&
+        (!err.detail || err.detail.trim() === "") &&
+        !errMsg.includes("enoent") && !errMsg.includes("not found");
+
+      if (isRateLimit || isSessionExhausted) {
+        if (isSessionExhausted) {
+          log.warn(`Session exhaustion detected for "${task.title}" — treating as rate limit`);
+        }
         handleRateLimit(projectId);
       } else {
         // CRITICAL: if engine.executeTask threw BEFORE calling
