@@ -729,13 +729,20 @@ export function createScheduler(
           broadcast("project:updated", { projectId });
         }
 
-        // Step 2: Decompose
-        setActivity(`decompose:${goalTitle.slice(0, 60)}`);
-        db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)").run(
-          projectId, `태스크 분할 중: "${goalTitle.slice(0, 60)}"`
-        );
-        broadcast("project:updated", { projectId });
-        await engine.decomposeGoal(goalId);
+        // Step 2: Decompose (skip if tasks already exist — decomposeGoal guards this too)
+        const existingTasks = (db.prepare(
+          "SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?"
+        ).get(goalId) as { count: number }).count;
+        if (existingTasks === 0) {
+          setActivity(`decompose:${goalTitle.slice(0, 60)}`);
+          db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)").run(
+            projectId, `태스크 분할 중: "${goalTitle.slice(0, 60)}"`
+          );
+          broadcast("project:updated", { projectId });
+          await engine.decomposeGoal(goalId);
+        } else {
+          log.info(`processNextGoal: goal ${goalId} already has ${existingTasks} task(s), skipping decompose`);
+        }
 
         // Step 3: Auto-approve
         const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;

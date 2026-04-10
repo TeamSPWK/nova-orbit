@@ -915,6 +915,21 @@ Fix ONLY these issues. Do not modify other code.
         log.warn(`decomposeGoal skipped: another run already in progress for goal ${goalId}`);
         throw new Error(`Decompose already in progress for goal ${goalId}`);
       }
+
+      // Duplicate task guard — prevent re-decomposition when tasks already exist.
+      // This is the single authoritative check; callers no longer need their own.
+      // The only path that intentionally re-decomposes (manual "작업 분할" button)
+      // DELETEs existing tasks before calling this method, so count will be 0.
+      // Returns taskCount: 0 on skip so callers don't auto-approve existing tasks.
+      const existingTaskCount = (db.prepare(
+        "SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?"
+      ).get(goalId) as { count: number }).count;
+      if (existingTaskCount > 0) {
+        const goalRow = db.prepare("SELECT project_id FROM goals WHERE id = ?").get(goalId) as { project_id: string } | undefined;
+        log.warn(`decomposeGoal skipped: goal ${goalId} already has ${existingTaskCount} task(s)`);
+        return { taskCount: 0, projectId: goalRow?.project_id ?? "" };
+      }
+
       inflightDecompose.add(goalId);
 
       const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as GoalRow | undefined;

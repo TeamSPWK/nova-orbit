@@ -10,7 +10,7 @@
     "postinstall": "cd dashboard && npm install",
     "predev": "bash scripts/predev.sh",
     "dev": "concurrently --kill-others \"npm run dev:server\" \"npm run dev:dashboard\"",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "NOVA_NO_AUTO_QUEUE=true tsx watch server/index.ts",
     "dev:dashboard": "wait-on http://127.0.0.1:7200/api/health && cd dashboard && VITE_WS_URL=ws://127.0.0.1:7200 npx vite --port 5173",
     "build": "npm run build:server && npm run build:dashboard",
     "build:server": "tsup",

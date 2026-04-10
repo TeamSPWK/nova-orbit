@@ -297,7 +297,9 @@ export async function startServer(config: ServerConfig): Promise<void> {
     console.log(`  Server listening on ${host}:${port}`);
 
     // Auto-resume queues for autopilot projects after startup
-    if (ctx.scheduler) {
+    // NOVA_NO_AUTO_QUEUE=true disables this (useful during development to prevent
+    // token waste when the server restarts frequently).
+    if (ctx.scheduler && !process.env.NOVA_NO_AUTO_QUEUE) {
       const autopilotProjects = db.prepare(
         "SELECT id, name, autopilot FROM projects WHERE status = 'active' AND autopilot != 'off'",
       ).all() as { id: string; name: string; autopilot: string }[];
@@ -308,6 +310,8 @@ export async function startServer(config: ServerConfig): Promise<void> {
           ctx.scheduler.startQueue(p.id);
         }
       }
+    } else if (process.env.NOVA_NO_AUTO_QUEUE) {
+      console.log("  Auto-queue disabled (NOVA_NO_AUTO_QUEUE is set)");
     }
   });
 
