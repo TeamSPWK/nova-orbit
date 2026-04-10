@@ -51,7 +51,7 @@ export function SessionList({ projectId }: { projectId?: string }) {
     try {
       const [sessionList, sessionStats] = await Promise.all([
         api.sessions.list({ status: filter || undefined, projectId }),
-        api.sessions.stats(),
+        api.sessions.stats(projectId),
       ]);
       setSessions(sessionList);
       setStats(sessionStats);

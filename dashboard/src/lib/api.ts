@@ -164,7 +164,7 @@ export const api = {
       if (params?.projectId) q.set("projectId", params.projectId);
       return request<any[]>(`/sessions?${q.toString()}`);
     },
-    stats: () => request<any>("/sessions/stats"),
+    stats: (projectId?: string) => request<any>(`/sessions/stats${projectId ? `?projectId=${projectId}` : ""}`),
     kill: (id: string) => request<any>(`/sessions/${id}`, { method: "DELETE" }),
     cleanup: () => request<{ success: boolean; cleaned: number; checked: number }>("/sessions/cleanup", { method: "POST" }),
   },

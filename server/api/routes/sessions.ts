@@ -42,26 +42,33 @@ export function createSessionRoutes(ctx: AppContext): Router {
     res.json(sessions);
   });
 
-  // Get session stats summary
-  router.get("/stats", (_req, res) => {
+  // Get session stats summary (optionally scoped to a project)
+  router.get("/stats", (req, res) => {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+
+    const whereClause = projectId
+      ? "WHERE s.agent_id IN (SELECT id FROM agents WHERE project_id = ?)"
+      : "";
+    const params = projectId ? [projectId] : [];
+
     const stats = db.prepare(`
       SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-        SUM(CASE WHEN status = 'killed' THEN 1 ELSE 0 END) as killed,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-        COALESCE(SUM(token_usage), 0) as total_tokens,
-        COALESCE(SUM(cost_usd), 0) as total_cost
-      FROM sessions
-    `).get();
+        SUM(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) as active,
+        SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN s.status = 'killed' THEN 1 ELSE 0 END) as killed,
+        SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) as failed,
+        COALESCE(SUM(s.token_usage), 0) as total_tokens,
+        COALESCE(SUM(s.cost_usd), 0) as total_cost
+      FROM sessions s
+      ${whereClause}
+    `).get(...params);
 
     // Detect orphan sessions: active in DB but process not running.
-    // Grace period: sessions started < 30s ago may not have a PID yet
-    // (CLI spawn → "working" event delay). Don't count them as orphans.
     const activeSessions = db.prepare(
-      "SELECT id, pid, started_at FROM sessions WHERE status = 'active'",
-    ).all() as { id: string; pid: number | null; started_at: string }[];
+      `SELECT s.id, s.pid, s.started_at FROM sessions s
+       ${projectId ? "WHERE s.status = 'active' AND s.agent_id IN (SELECT id FROM agents WHERE project_id = ?)" : "WHERE s.status = 'active'"}`,
+    ).all(...params) as { id: string; pid: number | null; started_at: string }[];
 
     let orphanCount = 0;
     const now = Date.now();
