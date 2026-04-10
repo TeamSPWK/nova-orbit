@@ -655,6 +655,7 @@ const en = {
   orbitTotalTokens: "Today's tokens (total: {{total}}K)",
   terminalRateLimit: "Terminal Claude Code session 5-hour rate limit (separate from agent sessions)",
   today: "Today",
+  sessions: " sessions",
   specGuideBody: "Click 'View Blueprint' on a goal to generate a detailed plan (requirements, features, user flow, acceptance criteria). A better blueprint means better results from your agents.",
   specGenerate: "Generate Blueprint",
   specGenerating: "Generating...",

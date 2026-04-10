@@ -656,6 +656,7 @@ const ko = {
   orbitTotalTokens: "오늘 토큰 (누적: {{total}}K)",
   terminalRateLimit: "터미널 Claude Code 세션 5시간 사용량 한도 (에이전트 세션과 별개)",
   today: "오늘",
+  sessions: "개 세션",
   specGuideBody: "목표의 '기획서 보기'를 클릭하면 요구사항, 기능명세, 유저플로우, 수락기준을 AI가 자동 생성합니다. 기획서가 상세할수록 에이전트 결과물이 좋아집니다.",
   specGenerate: "기획서 생성",
   specGenerating: "생성 중...",
