@@ -935,6 +935,7 @@ export function ProjectHome() {
 
   const handleAddGoalDirect = async (title: string, description: string) => {
     setShowDialog(null);
+    dismissAiSuggestions();
     if (!currentProjectId) return;
     try {
       const goal = await api.goals.create({ project_id: currentProjectId, title, description });
@@ -947,6 +948,7 @@ export function ProjectHome() {
 
   const handleAddGoalWithSpec = async (title: string, description: string) => {
     setShowDialog(null);
+    dismissAiSuggestions();
     if (!currentProjectId) return;
     try {
       const goal = await api.goals.create({ project_id: currentProjectId, title, description, withSpec: true });
@@ -1679,7 +1681,7 @@ export function ProjectHome() {
                               if (goalTasks.length > 0 && !hasRunning) return (
                                 <button
                                   onClick={() => handleDecomposeGoal(goal.id)}
-                                  disabled={decomposingGoalId !== null}
+                                  disabled={isDecomposing || decomposingGoalId !== null}
                                   className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
                                     decomposingGoalId === goal.id
                                       ? "bg-orange-200 dark:bg-orange-800/60 text-orange-500 dark:text-orange-300 cursor-wait"
@@ -1739,7 +1741,7 @@ export function ProjectHome() {
                               ) : (
                                 <button
                                   onClick={() => handleDecomposeGoal(goal.id)}
-                                  disabled={decomposingGoalId !== null}
+                                  disabled={isDecomposing || decomposingGoalId !== null}
                                   className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
                                     decomposingGoalId === goal.id
                                       ? "bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 cursor-wait"
