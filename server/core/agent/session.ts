@@ -31,10 +31,18 @@ export function createSessionManager(db: Database): SessionManager {
     spawnAgent(agentId: string, projectWorkdir: string, sessionKey?: string): ClaudeCodeSession {
       const key = sessionKey ?? agentId;
 
-      // Cleanup existing session for this key (memory map)
+      // Cleanup existing session for this key (memory map + DB)
       const existing = sessions.get(key);
       if (existing) {
         existing.cleanup();
+        // Mark previous DB row as killed so it doesn't linger as "active"
+        const prevRowId = keyToSessionRowId.get(key);
+        if (prevRowId) {
+          db.prepare("UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE id = ? AND status = 'active'").run(prevRowId);
+        }
+        sessions.delete(key);
+        keyToAgentId.delete(key);
+        keyToSessionRowId.delete(key);
       }
 
       // Get agent config from DB

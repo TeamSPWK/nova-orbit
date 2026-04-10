@@ -298,8 +298,9 @@ export function createOrchestrationEngine(
 
           const novaRules = createNovaRulesEngine();
           const architectPrompt = buildArchitectPrompt(task, novaRules);
+          const archSessionKey = `architect-${taskId}`;
           try {
-            const archSession = sessionManager.spawnAgent(ctoAgent.id, workdir);
+            const archSession = sessionManager.spawnAgent(ctoAgent.id, workdir, archSessionKey);
             // Mirror the listeners we attach to the impl session so that
             // architect-phase rate-limits and stream errors also surface to
             // the dashboard (previously they only showed up as an extra
@@ -370,7 +371,7 @@ export function createOrchestrationEngine(
               `아키텍처 설계 예외: ${(archErr?.message ?? String(archErr)).slice(0, 300)}`,
             );
           } finally {
-            sessionManager.killSession(ctoAgent.id);
+            sessionManager.killSession(archSessionKey);
             // Clear architect activity — killSession resets status but the
             // current_activity string "architect:..." can linger if another
             // code path had already set it. Explicit WHERE guard avoids
