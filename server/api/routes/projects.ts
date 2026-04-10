@@ -209,14 +209,24 @@ export function createProjectRoutes(ctx: AppContext): Router {
       if (ctx.scheduler) {
         try { ctx.scheduler.stopQueue(req.params.id); } catch { /* best-effort */ }
       }
+      // Kill active agent sessions so processes stop consuming tokens.
+      const activeAgents = db.prepare(
+        "SELECT DISTINCT agent_id FROM sessions WHERE status = 'active' AND agent_id IN (SELECT id FROM agents WHERE project_id = ?)",
+      ).all(req.params.id) as { agent_id: string }[];
+      for (const s of activeAgents) {
+        ctx.sessionManager?.killSession(s.agent_id);
+      }
       // 진행 중이던 task를 todo로 되돌려 다음 수동 실행 시 깨끗한 상태에서
       // 시작. 비파괴(retry_count 유지)로 둠.
       db.prepare(
         "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE project_id = ? AND status IN ('in_progress', 'in_review')",
       ).run(req.params.id);
-      // Working 상태 ghost agent 정리.
+      // Working 상태 ghost agent + session 정리.
       db.prepare(
         "UPDATE agents SET status = 'idle', current_task_id = NULL, current_activity = NULL WHERE project_id = ? AND status = 'working'",
+      ).run(req.params.id);
+      db.prepare(
+        "UPDATE sessions SET status = 'killed', ended_at = datetime('now') WHERE status = 'active' AND agent_id IN (SELECT id FROM agents WHERE project_id = ?)",
       ).run(req.params.id);
       db.prepare(
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_off', ?)",
@@ -281,11 +291,17 @@ export function createProjectRoutes(ctx: AppContext): Router {
           log.warn(`Rescue cannot run: generateGoalSpec not wired yet for goal ${g.id}`);
           continue;
         }
-        // Placeholder spec row so UI reflects progress
+        // Placeholder spec row so UI reflects progress.
+        // Use INSERT OR IGNORE + conditional UPDATE to avoid overwriting
+        // a user-edited spec that exists but was marked as failed.
         db.prepare(
-          `INSERT OR REPLACE INTO goal_specs
+          `INSERT OR IGNORE INTO goal_specs
              (goal_id, prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations, generated_by)
            VALUES (?, '{"_status":"generating"}', '[]', '[]', '[]', '[]', 'ai')`,
+        ).run(g.id);
+        db.prepare(
+          `UPDATE goal_specs SET prd_summary = '{"_status":"generating"}', updated_at = datetime('now')
+           WHERE goal_id = ? AND json_extract(prd_summary, '$._status') IN ('failed', NULL)`,
         ).run(g.id);
         broadcast("project:updated", { projectId });
 

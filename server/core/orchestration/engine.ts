@@ -900,7 +900,9 @@ Fix ONLY these issues. Do not modify other code.
           try {
             const { removeWorktree } = await import("../project/worktree.js");
             removeWorktree(workdir, worktreeInfo.path, worktreeInfo.branch);
-          } catch { /* 정리 실패는 무시 */ }
+          } catch (cleanupErr: any) {
+            log.warn(`Worktree cleanup failed for ${worktreeInfo.path}: ${cleanupErr?.message ?? cleanupErr}`);
+          }
         }
       }
     },
@@ -931,10 +933,10 @@ Fix ONLY these issues. Do not modify other code.
       }
 
       inflightDecompose.add(goalId);
+      try {
 
       const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as GoalRow | undefined;
       if (!goal) {
-        inflightDecompose.delete(goalId);
         throw new Error(`Goal ${goalId} not found`);
       }
 
@@ -1238,6 +1240,12 @@ Respond in this EXACT JSON format:
         db.prepare(
           "UPDATE agents SET current_activity = NULL WHERE id = ? AND current_activity LIKE 'decompose:%'",
         ).run(agent.id);
+      }
+
+      } finally {
+        // Single cleanup point: ensure inflightDecompose is ALWAYS released,
+        // whether the inner try-catch-finally ran or an early throw occurred
+        // (e.g. goal/project/agent not found).
         inflightDecompose.delete(goalId);
       }
     },

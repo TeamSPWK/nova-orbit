@@ -258,12 +258,14 @@ Respond in this EXACT JSON format:
       if (!task) return;
 
       if (allDone) {
-        // Guard: prevent duplicate verification if multiple subtasks finish concurrently
-        if (task.status === "in_review" || task.status === "done") return;
+        // CAS guard: atomically transition parent to in_review only if it's still
+        // in_progress. Prevents duplicate verification when multiple subtasks
+        // finish concurrently — only the first caller wins the CAS.
+        const cas = db.prepare(
+          "UPDATE tasks SET status = 'in_review', updated_at = datetime('now') WHERE id = ? AND status = 'in_progress'",
+        ).run(parentTaskId);
+        if (cas.changes === 0) return; // already transitioned by concurrent caller
 
-        // Transition parent to in_review while verification runs
-        db.prepare("UPDATE tasks SET status = 'in_review', updated_at = datetime('now') WHERE id = ?")
-          .run(parentTaskId);
         broadcast("task:updated", { ...task, status: "in_review" });
 
         if (!parentVerifier) {

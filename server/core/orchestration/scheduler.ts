@@ -306,8 +306,12 @@ export function createScheduler(
         ?? agents[0];
 
       if (!altAgent || altAgent.id === t.assignee_id) {
-        // No alternative — permanently blocked
+        // No alternative — mark as permanently blocked so this task exits the
+        // exhausted query and doesn't loop every poll cycle.
         log.warn(`Task "${t.title}" permanently blocked — no different agent`);
+        db.prepare(
+          "UPDATE tasks SET reassign_count = ?, updated_at = datetime('now') WHERE id = ?",
+        ).run(MAX_REASSIGNS, t.id);
         db.prepare(
           "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_skipped', ?)",
         ).run(projectId, `Permanently blocked: ${t.title}`);
@@ -358,6 +362,7 @@ export function createScheduler(
       const effective = stats.total - stats.permanently_blocked;
       const progress = effective > 0 ? Math.round((stats.done / effective) * 100) : (stats.total === stats.permanently_blocked ? 100 : 0);
       db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goal_id);
+      broadcast("project:updated", { projectId });
 
       if (stats.permanently_blocked > 0) {
         // Log once per goal — suppress repeated warnings for unchanged state
@@ -499,6 +504,7 @@ export function createScheduler(
       db.prepare(
         "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)"
       ).run(projectId, `중단된 작업 자동 복구: 진행 상태 → todo`);
+      broadcast("project:updated", { projectId });
     }
 
     // Step 1: identify the active goal (one at a time)

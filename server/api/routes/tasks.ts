@@ -317,6 +317,7 @@ export function createTaskRoutes(ctx: AppContext): Router {
     const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ error: "Task not found" });
     if (task?.goal_id) updateGoalProgress(db, task.goal_id);
+    if (task?.project_id) broadcast("project:updated", { projectId: task.project_id });
     res.json({ success: true });
   });
 
