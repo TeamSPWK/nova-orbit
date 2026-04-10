@@ -406,11 +406,34 @@ export function createScheduler(
       return;
     }
 
-    // Round-robin assignment among available agents
-    for (let i = 0; i < unassigned.length; i++) {
-      const agent = agents[i % agents.length];
+    // Role-aware round-robin: try to match task's original role hint first,
+    // then fall back to round-robin across all available agents.
+    const roleCount = new Map<string, number>();
+    for (const task of unassigned) {
+      // Try to recover a role hint from the task's previous assignee or description
+      const taskDetail = db.prepare("SELECT description, title FROM tasks WHERE id = ?").get(task.id) as { description: string; title: string } | undefined;
+      const titleLower = (taskDetail?.title ?? "").toLowerCase();
+
+      // Heuristic: match role keywords in task title
+      const roleHint = agents.find((a) => titleLower.includes(a.role))?.role;
+      const roleAgents = roleHint
+        ? agents.filter((a) => a.role === roleHint)
+        : [];
+
+      let agent;
+      if (roleAgents.length > 0) {
+        const count = roleCount.get(roleHint!) ?? 0;
+        roleCount.set(roleHint!, count + 1);
+        agent = roleAgents[count % roleAgents.length];
+      } else {
+        // Fallback: global round-robin
+        const count = roleCount.get("__global__") ?? 0;
+        roleCount.set("__global__", count + 1);
+        agent = agents[count % agents.length];
+      }
+
       db.prepare("UPDATE tasks SET assignee_id = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(agent.id, unassigned[i].id);
+        .run(agent.id, task.id);
     }
 
     log.info(`Auto-assigned ${unassigned.length} unassigned tasks in project ${projectId}`);

@@ -899,6 +899,17 @@ export function AgentDetail({ agent, agents = [], tasks, onClose, onKill, onDele
               </button>
             )}
             <button
+              onClick={async () => {
+                try {
+                  await api.agents.clone(agent.id);
+                  window.dispatchEvent(new CustomEvent("nova:refresh"));
+                } catch { /* ignore */ }
+              }}
+              className="w-full py-2 text-sm font-medium text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              {t("cloneAgent")}
+            </button>
+            <button
               onClick={() => setShowDeleteConfirm(true)}
               className="w-full py-2 text-sm font-medium text-red-700 dark:text-red-500 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
             >

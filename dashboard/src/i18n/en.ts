@@ -375,6 +375,7 @@ const en = {
   agentDetailTaskHistory: "Task History",
   agentDetailNoTasks: "No tasks assigned yet.",
   agentDetailKillSession: "End Session",
+  cloneAgent: "Clone Agent",
   deleteAgent: "Delete Agent",
   deleteAgentConfirm: "Are you sure you want to delete this agent?",
   deleteAgentConfirmWithTasks: "This agent has {{count}} unfinished task(s). Deleting will unassign them. Continue?",

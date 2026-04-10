@@ -1113,11 +1113,29 @@ Respond in this EXACT JSON format:
         const candidates = ctoChildren.length > 0 ? ctoChildren : nonCto;
 
         // Flexible role matching: exact → partial keyword → any coder → first available
+        // When multiple agents share the same role, round-robin across them so
+        // decomposed tasks are evenly distributed (e.g., frontend-dev-1 and
+        // frontend-dev-2 each get roughly half the frontend tasks).
+        const roleAssignCount = new Map<string, number>();
         const findAgent = (role: string) => {
           const r = role.toLowerCase();
-          return candidates.find((a) => a.role === r) ??
-            candidates.find((a) => r.includes(a.role) || a.role.includes(r)) ??
-            candidates.find((a) => a.role === "coder" || a.role === "frontend" || a.role === "backend") ??
+          // 1) Exact role matches
+          const exactMatches = candidates.filter((a) => a.role === r);
+          if (exactMatches.length > 0) {
+            const count = roleAssignCount.get(r) ?? 0;
+            roleAssignCount.set(r, count + 1);
+            return exactMatches[count % exactMatches.length];
+          }
+          // 2) Partial keyword match
+          const partialMatches = candidates.filter((a) => r.includes(a.role) || a.role.includes(r));
+          if (partialMatches.length > 0) {
+            const key = `partial:${r}`;
+            const count = roleAssignCount.get(key) ?? 0;
+            roleAssignCount.set(key, count + 1);
+            return partialMatches[count % partialMatches.length];
+          }
+          // 3) Any worker fallback
+          return candidates.find((a) => a.role === "coder" || a.role === "frontend" || a.role === "backend") ??
             candidates[0] ?? projectAgents.find((a) => a.role !== "cto") ?? projectAgents[0] ?? null;
         };
 

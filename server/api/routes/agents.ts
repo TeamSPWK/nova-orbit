@@ -347,6 +347,45 @@ export function createAgentRoutes(ctx: AppContext): Router {
     res.json(updated);
   });
 
+  // Clone agent — duplicate with a new name
+  router.post("/:id/clone", (req, res) => {
+    const source = db.prepare("SELECT * FROM agents WHERE id = ?").get(req.params.id) as any;
+    if (!source) return res.status(404).json({ error: "Agent not found" });
+
+    // Generate unique name: append (2), (3), etc.
+    const baseName = req.body.name?.trim() || source.name;
+    let cloneName = baseName;
+    const existing = db.prepare(
+      "SELECT name FROM agents WHERE project_id = ?",
+    ).all(source.project_id) as { name: string }[];
+    const names = new Set(existing.map((a) => a.name));
+    if (names.has(cloneName)) {
+      for (let i = 2; i <= 99; i++) {
+        cloneName = `${baseName} (${i})`;
+        if (!names.has(cloneName)) break;
+      }
+    }
+
+    try {
+      const result = db.prepare(`
+        INSERT INTO agents (project_id, name, role, system_prompt, prompt_source, session_behavior, parent_id, needs_worktree, model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        source.project_id, cloneName, source.role,
+        source.system_prompt ?? "", source.prompt_source ?? "auto",
+        source.session_behavior ?? "resume-or-new",
+        source.parent_id ?? null,
+        source.needs_worktree ?? 1,
+        source.model ?? null,
+      );
+      const cloned = db.prepare("SELECT * FROM agents WHERE rowid = ?").get(result.lastInsertRowid);
+      broadcast("project:updated", { projectId: source.project_id });
+      res.status(201).json(cloned);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // Bulk delete all agents in a project (MUST be before /:id to avoid route conflict)
   router.delete("/bulk/:projectId", (req, res) => {
     const { projectId } = req.params;

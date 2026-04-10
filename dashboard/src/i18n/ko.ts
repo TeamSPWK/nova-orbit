@@ -375,6 +375,7 @@ const ko = {
   agentDetailTaskHistory: "태스크 이력",
   agentDetailNoTasks: "아직 할당된 태스크가 없습니다.",
   agentDetailKillSession: "에이전트 종료",
+  cloneAgent: "에이전트 복제",
   deleteAgent: "에이전트 삭제",
   deleteAgentConfirm: "이 에이전트를 삭제하시겠습니까?",
   deleteAgentConfirmWithTasks: "이 에이전트에 미완료 태스크 {{count}}개가 있습니다. 삭제하면 태스크 담당자가 해제됩니다. 삭제하시겠습니까?",
