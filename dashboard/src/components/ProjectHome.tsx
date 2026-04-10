@@ -1718,8 +1718,11 @@ export function ProjectHome() {
                             })()}
                             {!tasks.some((tk) => tk.goal_id === goal.id) && (
                               isGeneratingSpec ? (
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-800/40 text-indigo-400 dark:text-indigo-300 whitespace-nowrap cursor-not-allowed">
-                                  {t("specGeneratingInCard")}
+                                <span
+                                  title={t("decomposeDisabledSpecGen")}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-300 dark:text-purple-600 whitespace-nowrap cursor-not-allowed opacity-50"
+                                >
+                                  {t("decompose")}
                                 </span>
                               ) : isDecomposing ? (
                                 <span className="text-[10px] px-2 py-0.5 rounded bg-purple-200 dark:bg-purple-800/60 text-purple-500 dark:text-purple-300 whitespace-nowrap flex items-center gap-1 cursor-wait">

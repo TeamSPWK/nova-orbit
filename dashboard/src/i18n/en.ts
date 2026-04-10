@@ -57,6 +57,7 @@ const en = {
   reDecomposeConfirmWithDone: "This will delete {count} tasks ({done} completed) and re-split. Continue?",
   reDecomposeSuccess: "Task re-creation started.",
   decomposing: "Splitting into tasks...",
+  decomposeDisabledSpecGen: "Available after blueprint generation completes",
   decomposeSuccess: "Task creation started.",
   decomposeFailed: "Failed to split goal into tasks. Please try again.",
   addTask: "+ Task",

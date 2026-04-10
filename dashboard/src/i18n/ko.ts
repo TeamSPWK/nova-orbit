@@ -57,6 +57,7 @@ const ko = {
   reDecomposeConfirmWithDone: "기존 태스크 {count}개 (완료 {done}개 포함)를 모두 삭제하고 다시 분할합니다. 계속하시겠습니까?",
   reDecomposeSuccess: "태스크 재분할이 시작되었습니다.",
   decomposing: "태스크 분할 중...",
+  decomposeDisabledSpecGen: "기획서 생성이 완료되면 작업 분할이 가능합니다",
   decomposeSuccess: "태스크 분할이 시작되었습니다.",
   decomposeFailed: "태스크 분할에 실패했습니다. 다시 시도해주세요.",
   addTask: "+ 태스크",
