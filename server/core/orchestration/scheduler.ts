@@ -399,6 +399,55 @@ export function createScheduler(
   }
 
   /**
+   * Auto-resolve permanently blocked tasks — no user intervention required.
+   *
+   * When both retry and reassign budgets are exhausted, the task is unsolvable
+   * by the current agent pool. Leaving it as 'blocked' forever stalls the UI
+   * and confuses non-technical users. Instead:
+   *   1. Mark it as 'done' with a result_summary explaining it was auto-skipped
+   *   2. Log a clear activity entry so the user can review later
+   *   3. Update goal progress so the next goal can start
+   *
+   * This runs on every scheduler poll — idempotent (only targets blocked tasks
+   * that haven't been resolved yet).
+   */
+  function autoResolvePermanentlyBlocked(projectId: string): void {
+    const stuck = db.prepare(`
+      SELECT t.id, t.title, t.goal_id FROM tasks t
+      WHERE t.project_id = ? AND t.status = 'blocked'
+        AND t.retry_count >= ? AND t.reassign_count >= ?
+    `).all(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { id: string; title: string; goal_id: string }[];
+
+    if (stuck.length === 0) return;
+
+    for (const t of stuck) {
+      db.prepare(
+        "UPDATE tasks SET status = 'done', result_summary = ?, updated_at = datetime('now') WHERE id = ?",
+      ).run(`[자동 건너뜀] 재시도 한도 초과 — 수동 확인 권장`, t.id);
+
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_auto_resolved', ?)",
+      ).run(projectId, `자동 건너뜀: "${t.title}" — 재시도 ${MAX_TASK_RETRIES}회 + 재할당 ${MAX_REASSIGNS}회 소진`);
+
+      log.info(`Auto-resolved permanently blocked task "${t.title}" (${t.id}) → done (skipped)`);
+    }
+
+    // Recalculate goal progress now that blocked → done
+    const goalIds = [...new Set(stuck.map((t) => t.goal_id))];
+    for (const goalId of goalIds) {
+      const stats = db.prepare(`
+        SELECT COUNT(*) as total, SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
+        FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+      `).get(goalId) as { total: number; done: number };
+      const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 100;
+      db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, goalId);
+    }
+
+    broadcast("project:updated", { projectId });
+    log.info(`Auto-resolved ${stuck.length} permanently blocked task(s) in project ${projectId}`);
+  }
+
+  /**
    * Update goal progress for goals that have permanently blocked tasks.
    * Permanently blocked = blocked + retry exhausted + reassign exhausted.
    * These tasks are excluded from the denominator so the goal can still complete.
@@ -526,6 +575,10 @@ export function createScheduler(
 
     // Auto-retry blocked tasks that haven't exceeded retry limit
     retryBlockedTasks(projectId);
+
+    // Auto-resolve permanently blocked tasks (retry+reassign exhausted) → done(skipped)
+    // Must run AFTER retryBlockedTasks so we don't skip tasks that could still be retried
+    autoResolvePermanentlyBlocked(projectId);
 
     // Recompute goal progress accounting for permanently-blocked tasks.
     // Previously this only fired from inside retryBlockedTasks when there were
