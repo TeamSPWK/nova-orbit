@@ -531,14 +531,6 @@ export function ProjectHome() {
   const [autopilotChanging, setAutopilotChanging] = useState(false);
   const [showAutopilotModal, setShowAutopilotModal] = useState(false);
 
-  // Dev server state
-  const [devServerStatus, setDevServerStatus] = useState<{
-    running: boolean;
-    port: number | null;
-    url: string | null;
-  }>({ running: false, port: null, url: null });
-  const [devServerStarting, setDevServerStarting] = useState(false);
-
   // Dialog / toast state
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
@@ -630,8 +622,7 @@ export function ProjectHome() {
       api.goals.list(currentProjectId),
       api.tasks.list(currentProjectId),
       api.orchestration.queueStatus(currentProjectId).catch(() => ({ running: false, paused: false, rateLimitRetries: 0, nextRetryAt: null as string | null })),
-      api.projects.devServerStatus(currentProjectId).catch(() => ({ running: false, port: null, url: null })),
-    ]).then(([a, g, t, qs, ds]) => {
+    ]).then(([a, g, t, qs]) => {
       setAgents(a);
       setGoals(g);
       setTasks(t);
@@ -646,7 +637,6 @@ export function ProjectHome() {
       } else {
         setQueuePausedInfo(null);
       }
-      setDevServerStatus({ running: ds.running, port: ds.port ?? null, url: ds.url ?? null });
       setLoading(false);
     });
   }, [currentProjectId, setAgents, setGoals, setTasks]);
@@ -1121,29 +1111,6 @@ export function ProjectHome() {
     }
   };
 
-  const handleStartDevServer = async () => {
-    if (!currentProjectId || devServerStarting) return;
-    setDevServerStarting(true);
-    try {
-      const result = await api.projects.startDevServer(currentProjectId);
-      setDevServerStatus({ running: true, port: result.port, url: result.url });
-    } catch (err: any) {
-      showToast(t("errorStartDevServer"), "error", err.message);
-    } finally {
-      setDevServerStarting(false);
-    }
-  };
-
-  const handleStopDevServer = async () => {
-    if (!currentProjectId) return;
-    try {
-      await api.projects.stopDevServer(currentProjectId);
-      setDevServerStatus({ running: false, port: null, url: null });
-    } catch (err: any) {
-      showToast(t("errorStopDevServer"), "error", err.message);
-    }
-  };
-
   const handleSendPanelPrompt = async () => {
     if (!panelPromptMessage.trim() || !panelPromptAgentId || panelPromptSending) return;
     setPanelPromptSending(true);
@@ -1340,46 +1307,6 @@ export function ProjectHome() {
               </span>
             )}
             {/* Dev server controls */}
-            {project.workdir && (
-              <div className="flex items-center gap-1.5 ml-auto">
-                {devServerStatus.running ? (
-                  <>
-                    <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      {t("devServerRunning", { port: devServerStatus.port })}
-                    </span>
-                    {devServerStatus.url && (
-                      <a
-                        href={devServerStatus.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
-                      >
-                        {t("openInBrowser")}
-                      </a>
-                    )}
-                    <button
-                      onClick={handleStopDevServer}
-                      className="text-xs px-2.5 py-0.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded hover:bg-red-100 dark:hover:bg-red-900/50 font-medium"
-                    >
-                      {t("stopDevServer")}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={handleStartDevServer}
-                    disabled={devServerStarting}
-                    className={`text-xs px-2.5 py-0.5 rounded font-medium transition-colors ${
-                      devServerStarting
-                        ? "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-wait"
-                        : "bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/50"
-                    }`}
-                  >
-                    {devServerStarting ? t("devServerStarting") : t("startDevServer")}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -1848,7 +1775,7 @@ export function ProjectHome() {
                             )}
                           </div>
                         </div>
-                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3 overflow-hidden">
+                        <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-1 mx-3 overflow-hidden">
                           {isDecomposing ? (
                             <div className="h-1 rounded-full bg-gradient-to-r from-purple-400 via-purple-300 to-purple-400 animate-shimmer" style={{ width: "100%", backgroundSize: "200% 100%" }} />
                           ) : (

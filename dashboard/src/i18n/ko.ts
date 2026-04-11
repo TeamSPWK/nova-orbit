@@ -438,14 +438,6 @@ const ko = {
   createFixTask: "수정 태스크 생성",
   fixTaskCreated: "수정 태스크가 생성되었습니다",
 
-  // Dev server controls
-  startDevServer: "실행",
-  stopDevServer: "중지",
-  devServerRunning: "실행 중 (포트 {{port}})",
-  devServerStopped: "중지됨",
-  devServerStarting: "시작 중...",
-  openInBrowser: "브라우저에서 열기",
-
   // Queue controls
   runQueue: "전체 자동 실행",
   stopQueue: "자동 실행 중지",
@@ -742,9 +734,6 @@ const ko = {
   // Error toasts (#15)
   errorAutopilotChange: "자동화 모드 변경에 실패했습니다",
   errorResumeQueue: "자동 실행 재개에 실패했습니다",
-  errorStartDevServer: "개발 서버 시작에 실패했습니다",
-  errorStopDevServer: "개발 서버 중지에 실패했습니다",
-
   // Goal search (#13)
   goalSearchPlaceholder: "목표 검색...",
 

@@ -438,14 +438,6 @@ const en = {
   createFixTask: "Create Fix Task",
   fixTaskCreated: "Fix task created",
 
-  // Dev server controls
-  startDevServer: "Run",
-  stopDevServer: "Stop",
-  devServerRunning: "Running (port {{port}})",
-  devServerStopped: "Stopped",
-  devServerStarting: "Starting...",
-  openInBrowser: "Open in browser",
-
   // Queue controls
   runQueue: "Auto-run All",
   stopQueue: "Stop Auto-run",
@@ -741,9 +733,6 @@ const en = {
   // Error toasts (#15)
   errorAutopilotChange: "Failed to change automation mode",
   errorResumeQueue: "Failed to resume auto-run",
-  errorStartDevServer: "Failed to start dev server",
-  errorStopDevServer: "Failed to stop dev server",
-
   // Goal search (#13)
   goalSearchPlaceholder: "Search goals...",
 

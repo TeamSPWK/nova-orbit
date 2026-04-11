@@ -794,7 +794,6 @@ ${branchList}
     }
     const result = db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
     if (result.changes === 0) return res.status(404).json({ error: "Project not found" });
-    ctx.devServerManager.stop(projectId);
     broadcast("project:updated", { id: projectId, deleted: true });
     res.json({ success: true });
   });
@@ -819,41 +818,6 @@ ${branchList}
     `).all(req.params.id);
 
     res.json({ costs });
-  });
-
-  // Dev server routes
-  router.post("/:id/dev-server/start", async (req, res) => {
-    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
-    if (!project) return res.status(404).json({ error: "Project not found" });
-    if (!project.workdir) return res.status(400).json({ error: "Project has no workdir configured" });
-
-    try {
-      // 요청 body에 port가 있으면 우선, 없으면 프로젝트 설정의 dev_port, 없으면 자동 할당
-      const preferredPort = req.body?.port ?? project.dev_port ?? undefined;
-      const force = req.body?.force ?? false;
-      const { port, url } = await ctx.devServerManager.start(
-        req.params.id, project.workdir, { port: preferredPort, force },
-      );
-      res.json({ status: "started", port, url });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  router.post("/:id/dev-server/stop", (req, res) => {
-    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
-    if (!project) return res.status(404).json({ error: "Project not found" });
-
-    ctx.devServerManager.stop(req.params.id);
-    res.json({ status: "stopped" });
-  });
-
-  router.get("/:id/dev-server/status", (req, res) => {
-    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
-    if (!project) return res.status(404).json({ error: "Project not found" });
-
-    const status = ctx.devServerManager.getStatus(req.params.id);
-    res.json(status);
   });
 
   // --- Full autopilot: generate goals from mission, decompose, run queue ---

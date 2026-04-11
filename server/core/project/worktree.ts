@@ -129,35 +129,18 @@ export function removeWorktree(projectWorkdir: string, worktreePath: string, bra
     log.warn(`Failed to remove worktree: ${err.message}`);
   }
 
-  // 2. branch 정리 — merge된 branch만 삭제, 빈 branch는 강제 삭제
+  // 2. branch 정리 — 재시도 시 새 브랜치를 생성하므로 실패 브랜치도 강제 삭제
   if (branch) {
     try {
-      const result = spawnSync("git", ["branch", "-d", branch], {
+      const result = spawnSync("git", ["branch", "-D", branch], {
         cwd: projectWorkdir,
         stdio: "pipe",
         timeout: 10_000,
       });
       if (result.status === 0) {
-        log.info(`Deleted merged branch: ${branch}`);
+        log.info(`Deleted branch: ${branch}`);
       } else {
-        // merge 안된 branch — main과 diff가 없으면 빈 브랜치이므로 강제 삭제
-        const diffResult = spawnSync("git", ["diff", "HEAD..." + branch, "--stat"], {
-          cwd: projectWorkdir,
-          stdio: "pipe",
-          timeout: 10_000,
-        });
-        const diffOutput = diffResult.stdout?.toString().trim() ?? "";
-        if (diffOutput === "") {
-          // main과 동일 — 커밋 없이 끝난 빈 브랜치
-          spawnSync("git", ["branch", "-D", branch], {
-            cwd: projectWorkdir,
-            stdio: "pipe",
-            timeout: 10_000,
-          });
-          log.info(`Deleted empty branch: ${branch} (no diff from HEAD)`);
-        } else {
-          log.info(`Keeping unmerged branch: ${branch} (has uncommitted changes)`);
-        }
+        log.warn(`Failed to delete branch ${branch}: ${result.stderr?.toString()}`);
       }
     } catch (err: any) {
       log.warn(`Failed to delete branch ${branch}: ${err.message}`);
@@ -196,22 +179,13 @@ export function cleanupStaleWorktrees(projectWorkdir: string): number {
         .map(b => b.trim())
         .filter(b => b && b.startsWith("agent/"));
       for (const b of branches) {
-        // merge된 branch만 삭제
-        const delResult = spawnSync("git", ["branch", "-d", b], { cwd: projectWorkdir, stdio: "pipe", timeout: 5_000 });
+        // 재시도 시 새 브랜치를 생성하므로 stale agent 브랜치는 모두 강제 삭제
+        const delResult = spawnSync("git", ["branch", "-D", b], { cwd: projectWorkdir, stdio: "pipe", timeout: 5_000 });
         if (delResult.status === 0) {
-          log.info(`Cleaned up stale merged branch: ${b}`);
+          log.info(`Cleaned up stale branch: ${b}`);
           cleaned++;
         } else {
-          // main과 diff 없으면 빈 브랜치 → 강제 삭제
-          const diffResult = spawnSync("git", ["diff", "HEAD..." + b, "--stat"], { cwd: projectWorkdir, stdio: "pipe", timeout: 5_000 });
-          const diffOutput = diffResult.stdout?.toString().trim() ?? "";
-          if (diffOutput === "") {
-            spawnSync("git", ["branch", "-D", b], { cwd: projectWorkdir, stdio: "pipe", timeout: 5_000 });
-            log.info(`Cleaned up empty stale branch: ${b}`);
-            cleaned++;
-          } else {
-            log.info(`Keeping unmerged stale branch: ${b}`);
-          }
+          log.warn(`Failed to clean up stale branch: ${b}`);
         }
       }
     }

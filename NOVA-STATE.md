@@ -37,6 +37,7 @@
 | Goal 의존성 | depends_on_goal_id 미구현 | Low |
 | npm publish | npmjs.com 미배포 | Low |
 | activities CASCADE | 프로젝트 삭제 시 activities 고아 레코드 가능 (현재 audit trail 보존) | Low |
+| dev_port 잔여 컬럼 | Dev Server 기능 제거했으나 SQLite dev_port 컬럼은 잔존 (무해, NULL) | Low |
 
 ## Key Architecture Changes
 
@@ -55,7 +56,7 @@
 - `NOVA_NO_AUTO_QUEUE=true` 환경변수 → dev:server에 기본 적용
 
 ## Last Activity
-- 5인 적대적 UX 평가 → 15건 도출 → S1~S4 스프린트 전부 완료 (12 commits) | 2026-04-11T19:30:00+09:00
+- Dev Server 기능 전체 제거 (9파일), 고아 브랜치 정리 기본값 변경, 목표 카드 overflow 수정 | 2026-04-11T21:30:00+09:00
 
 ## Refs
 - Session commits: `3c447a4` → `1405646` → `ae690c0` → `6d00535` → `e478141` → `7e703be` → `1e09156` → `e42539f` → `1fa360d` → `2d8cfeb` → `b31cefa` → `bd0a3fd`

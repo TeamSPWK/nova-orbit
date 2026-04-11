@@ -17,7 +17,7 @@ import { createActivityRoutes } from "./api/routes/activities.js";
 import { createFsRoutes } from "./api/routes/fs.js";
 import { createSessionRoutes } from "./api/routes/sessions.js";
 import { createWSHandler } from "./api/websocket.js";
-import { createDevServerManager, type DevServerManager } from "./core/project/dev-server.js";
+
 import { loadOrCreateApiKey, authMiddleware } from "./api/middleware/auth.js";
 import type { Database } from "better-sqlite3";
 import type { SessionManager } from "./core/agent/session.js";
@@ -33,7 +33,6 @@ export interface AppContext {
   wss: WebSocketServer;
   broadcast: (event: string, data: unknown) => void;
   sessionManager?: SessionManager;
-  devServerManager: DevServerManager;
   // Set by orchestration routes, used by goals/projects autopilot triggers
   orchestrationEngine?: {
     decomposeGoal: (goalId: string) => Promise<{ taskCount: number; projectId: string }>;
@@ -174,8 +173,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
     }
   };
 
-  const devServerManager = createDevServerManager(port);
-  const ctx: AppContext = { db, wss, broadcast, devServerManager };
+  const ctx: AppContext = { db, wss, broadcast };
 
   // WebSocket handler
   createWSHandler(wss, apiKey);
@@ -393,10 +391,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
       for (const p of projects) ctx.scheduler.stopQueue(p.id);
     }
 
-    // 3. Dev server 정리
-    devServerManager.stopAll();
-
-    // 4. WebSocket / HTTP 종료
+    // 3. WebSocket / HTTP 종료
     wss.close();
     server.close();
 

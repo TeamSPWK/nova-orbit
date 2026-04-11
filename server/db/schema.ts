@@ -215,11 +215,6 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE projects ADD COLUMN autopilot TEXT NOT NULL DEFAULT 'off'");
   }
 
-  // dev_port on projects — 사용자 지정 dev server 포트 (NULL이면 자동 할당 4001-4099)
-  if (!projectColumns.some((c) => c.name === "dev_port")) {
-    db.exec("ALTER TABLE projects ADD COLUMN dev_port INTEGER");
-  }
-
   // parent_task_id on tasks (for hierarchical delegation subtasks)
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
   if (!taskColumns.some((c) => c.name === "parent_task_id")) {

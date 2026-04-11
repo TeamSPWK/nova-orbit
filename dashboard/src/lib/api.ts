@@ -71,14 +71,6 @@ export const api = {
       request<{ costs: Array<{ agentId: string; agentName: string; totalTokens: number; totalCost: number }> }>(
         `/projects/${id}/cost`,
       ),
-    startDevServer: (id: string) =>
-      request<{ status: string; port: number; url: string }>(`/projects/${id}/dev-server/start`, { method: "POST" }),
-    stopDevServer: (id: string) =>
-      request<{ status: string }>(`/projects/${id}/dev-server/stop`, { method: "POST" }),
-    devServerStatus: (id: string) =>
-      request<{ running: boolean; port: number | null; pid: number | null; url: string | null }>(
-        `/projects/${id}/dev-server/status`,
-      ),
     listBranches: (id: string) =>
       request<{ branches: string[] }>(`/projects/${id}/branches`),
     mergeAllBranches: (id: string) =>
