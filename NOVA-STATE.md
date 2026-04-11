@@ -50,7 +50,7 @@
 - `NOVA_NO_AUTO_QUEUE=true` 환경변수 → dev:server에 기본 적용
 
 ## Last Activity
-- scheduler retry 방어 로직 검증 PASS (QA: 18 시나리오, 1 FAIL 수정) | 2026-04-11T10:30:00+09:00
+- /nova:review → CONDITIONAL — 대시보드 전체 UI/UX (비개발자 관점). Critical 3, Warning 7 | 2026-04-11T18:15:00+09:00
 
 ## Refs
 - Latest commit: `3c447a4`

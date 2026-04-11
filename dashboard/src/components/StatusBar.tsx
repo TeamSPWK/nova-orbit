@@ -151,11 +151,11 @@ export function StatusBar() {
           )}
           <span className="text-gray-300 dark:text-gray-600">|</span>
           <span className="text-amber-500 dark:text-amber-400 tabular-nums" title={t("orbitTodayCost", { total: orbit.totalCost.toFixed(2) })}>
-            ${orbit.todayCost > 0 ? orbit.todayCost.toFixed(2) : "0"}
+            <span className="text-[9px] text-amber-400/70 dark:text-amber-500/60 mr-0.5">{t("costLabel")}</span>${orbit.todayCost > 0 ? orbit.todayCost.toFixed(2) : "0"}
           </span>
           <span className="text-gray-300 dark:text-gray-600">|</span>
           <span className="tabular-nums" title={t("orbitTotalTokens", { total: Math.round(orbit.totalTokens / 1000) })}>
-            {Math.round(orbit.todayTokens / 1000)}K
+            <span className="text-[9px] text-gray-400/70 dark:text-gray-500/60 mr-0.5">{t("tokenLabel")}</span>{Math.round(orbit.todayTokens / 1000)}K
           </span>
           <span className="text-gray-300 dark:text-gray-600">|</span>
           <span className="text-gray-500 dark:text-gray-400 font-sans text-[9px]" title={`${t("today")} ${orbit.todaySessions} sessions`}>

@@ -653,6 +653,8 @@ const en = {
   orbitActiveAgents: "Active agents",
   orbitTodayCost: "Today's cost (total: ${{total}})",
   orbitTotalTokens: "Today's tokens (total: {{total}}K)",
+  costLabel: "Cost",
+  tokenLabel: "Tokens",
   terminalRateLimit: "Terminal Claude Code session 5-hour rate limit (separate from agent sessions)",
   today: "Today",
   sessions: " sessions",

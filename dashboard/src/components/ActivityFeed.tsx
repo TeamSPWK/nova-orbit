@@ -14,6 +14,21 @@ interface ActivityFeedProps {
   projectId: string;
 }
 
+/** Simplify cryptic technical error messages for non-developer users */
+function humanizeMessage(msg: string): string {
+  return msg
+    .replace(/\[CLI_EXIT_NONZERO\]:\s*/gi, "에이전트 실행 실패: ")
+    .replace(/Agent CLI exited with code \d+/gi, "에이전트가 비정상 종료됨")
+    .replace(/ENOENT/gi, "파일을 찾을 수 없음")
+    .replace(/EACCES/gi, "권한 부족")
+    .replace(/ENOMEM/gi, "메모리 부족")
+    .replace(/EPERM/gi, "권한 부족")
+    .replace(/SIGTERM/gi, "중단됨")
+    .replace(/SIGKILL/gi, "강제 종료됨")
+    .replace(/null reference/gi, "내부 오류")
+    .replace(/rate limit/gi, "사용량 한도 초과");
+}
+
 const TYPE_ICONS: Record<string, string> = {
   task_started: "▶",
   task_completed: "✅",
@@ -157,7 +172,7 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
           </span>
           <div className="min-w-0 flex-1">
             <span className={`break-words ${a.type === "system:error" ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"}`}>
-              {a.message}
+              {humanizeMessage(a.message)}
             </span>
           </div>
           <span className="shrink-0 text-gray-300 dark:text-gray-600 tabular-nums">

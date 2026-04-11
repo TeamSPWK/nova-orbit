@@ -90,10 +90,10 @@ function SortableCard({
         className="relative z-10"
         onClick={(e) => { e.stopPropagation(); onCardClick(task.id); }}
       >
-        <div className="text-sm text-gray-800 dark:text-gray-200 mb-1.5">{task.title}</div>
-        <div className="flex items-center gap-1.5">
+        <div className="text-sm text-gray-800 dark:text-gray-200 mb-1.5 line-clamp-2">{task.title}</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
           {agent && (
-            <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-500 dark:text-gray-400">
+            <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-500 dark:text-gray-400 truncate max-w-[120px]">
               {agent.name}
             </span>
           )}
@@ -105,7 +105,7 @@ function SortableCard({
                 ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
                 : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400"
             }`}>
-              {task.verification_verdict.toUpperCase()}
+              {task.verification_verdict === "pass" ? t("verdictPass") : task.verification_verdict === "fail" ? t("verdictFail") : t("verdictConditional")}
             </span>
           ) : task.verification_id ? (
             <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400 rounded">

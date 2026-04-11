@@ -6,6 +6,7 @@ import { Toast } from "./Toast";
 interface Verification {
   id: string;
   task_id: string;
+  task_title?: string;
   verdict: string;
   scope: string;
   severity: string;
@@ -148,6 +149,9 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${VERDICT_COLORS[v.verdict]}`}>
               {v.verdict === "pass" ? t("verdictPass") : v.verdict === "conditional" ? t("verdictConditional") : t("verdictFail")}
             </span>
+            {v.task_title && (
+              <span className="text-xs text-gray-600 dark:text-gray-300 truncate min-w-0">{v.task_title}</span>
+            )}
             <span className={`text-xs shrink-0 ${SEVERITY_COLORS[v.severity]}`}>
               {v.severity}
             </span>

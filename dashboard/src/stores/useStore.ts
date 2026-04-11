@@ -27,6 +27,7 @@ interface Agent {
   role: string;
   status: string;
   current_task_id: string | null;
+  current_activity: string | null;
 }
 
 interface Task {

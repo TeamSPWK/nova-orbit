@@ -654,6 +654,8 @@ const ko = {
   orbitActiveAgents: "활성 에이전트 수",
   orbitTodayCost: "오늘 비용 (누적: ${{total}})",
   orbitTotalTokens: "오늘 토큰 (누적: {{total}}K)",
+  costLabel: "비용",
+  tokenLabel: "토큰",
   terminalRateLimit: "터미널 Claude Code 세션 5시간 사용량 한도 (에이전트 세션과 별개)",
   today: "오늘",
   sessions: "개 세션",

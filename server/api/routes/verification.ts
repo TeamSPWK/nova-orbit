@@ -17,7 +17,7 @@ export function createVerificationRoutes(ctx: AppContext): Router {
       ).all(taskId);
     } else if (projectId) {
       verifications = db.prepare(`
-        SELECT v.* FROM verifications v
+        SELECT v.*, t.title AS task_title FROM verifications v
         JOIN tasks t ON v.task_id = t.id
         WHERE t.project_id = ?
         ORDER BY v.created_at DESC
