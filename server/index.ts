@@ -125,9 +125,37 @@ export async function startServer(config: ServerConfig): Promise<void> {
     next();
   });
 
+  // In-memory rate limiter — /api/ 전체: 분당 120요청
+  // express-rate-limit 패키지 없이 구현 (zero-dependency)
+  {
+    const WINDOW_MS = 60_000; // 1분
+    const MAX_REQUESTS = 120;
+    // key → { count, windowStart }
+    const hits = new Map<string, { count: number; windowStart: number }>();
+
+    app.use("/api/", (req, res, next) => {
+      const key = req.ip ?? req.socket.remoteAddress ?? "unknown";
+      const now = Date.now();
+      const entry = hits.get(key);
+
+      if (!entry || now - entry.windowStart >= WINDOW_MS) {
+        hits.set(key, { count: 1, windowStart: now });
+        return next();
+      }
+
+      entry.count += 1;
+      if (entry.count > MAX_REQUESTS) {
+        const retryAfter = Math.ceil((WINDOW_MS - (now - entry.windowStart)) / 1000);
+        res.set("Retry-After", String(retryAfter));
+        return res.status(429).json({ error: "Too Many Requests", retryAfter });
+      }
+      next();
+    });
+  }
+
   // API authentication
   const apiKey = loadOrCreateApiKey(dataDir);
-  app.use(authMiddleware(apiKey));
+  app.use(authMiddleware(apiKey, dataDir));
 
   // HTTP + WebSocket server
   const server = createServer(app);

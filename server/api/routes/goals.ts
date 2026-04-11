@@ -15,13 +15,16 @@ export function createGoalRoutes(ctx: AppContext): Router {
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
     if (!projectId) return res.status(400).json({ error: "projectId query param required" });
 
+    const rawLimit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 200;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
+
     const goals = db.prepare(
       `SELECT g.*,
         CASE WHEN gs.id IS NOT NULL THEN 1 ELSE 0 END AS has_spec,
         gs.prd_summary AS _raw_prd
        FROM goals g LEFT JOIN goal_specs gs ON g.id = gs.goal_id
-       WHERE g.project_id = ? ORDER BY g.priority, g.created_at`,
-    ).all(projectId) as any[];
+       WHERE g.project_id = ? ORDER BY g.priority, g.created_at LIMIT ?`,
+    ).all(projectId, limit) as any[];
     // Derive spec_status from prd_summary JSON
     res.json(goals.map((g) => {
       let spec_status: string | null = null;

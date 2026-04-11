@@ -10,18 +10,21 @@ export function createVerificationRoutes(ctx: AppContext): Router {
     const taskId = typeof req.query.taskId === "string" ? req.query.taskId : undefined;
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
+    const rawLimit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 200;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
+
     let verifications;
     if (taskId) {
       verifications = db.prepare(
-        "SELECT * FROM verifications WHERE task_id = ? ORDER BY created_at DESC",
-      ).all(taskId);
+        "SELECT * FROM verifications WHERE task_id = ? ORDER BY created_at DESC LIMIT ?",
+      ).all(taskId, limit);
     } else if (projectId) {
       verifications = db.prepare(`
         SELECT v.*, t.title AS task_title FROM verifications v
         JOIN tasks t ON v.task_id = t.id
         WHERE t.project_id = ?
-        ORDER BY v.created_at DESC
-      `).all(projectId);
+        ORDER BY v.created_at DESC LIMIT ?
+      `).all(projectId, limit);
     } else {
       return res.status(400).json({ error: "taskId or projectId query param required" });
     }

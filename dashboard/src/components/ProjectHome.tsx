@@ -832,6 +832,15 @@ export function ProjectHome() {
   const activeTasks = useMemo(() => tasks.filter((t) => t.status === "in_progress" || t.status === "in_review"), [tasks]);
   const hasActiveTasks = activeTasks.length > 0;
   const pendingApprovalCount = useMemo(() => tasks.filter((t) => t.status === "pending_approval").length, [tasks]);
+  const tasksByGoalId = useMemo(() => {
+    const map = new Map<string, typeof tasks>();
+    for (const t of tasks) {
+      const arr = map.get(t.goal_id);
+      if (arr) arr.push(t);
+      else map.set(t.goal_id, [t]);
+    }
+    return map;
+  }, [tasks]);
 
   if (loading) {
     return (
@@ -977,7 +986,7 @@ export function ProjectHome() {
 
   const handleDecomposeGoal = async (goalId: string) => {
     // If tasks already exist (re-decompose), show confirm modal
-    const existingTasks = tasks.filter((tk) => tk.goal_id === goalId);
+    const existingTasks = tasksByGoalId.get(goalId) ?? [];
     if (existingTasks.length > 0) {
       setReDecomposeGoalId(goalId);
       return;
@@ -1218,7 +1227,7 @@ export function ProjectHome() {
         />
       )}
       {reDecomposeGoalId && (() => {
-        const goalTasks = tasks.filter((tk) => tk.goal_id === reDecomposeGoalId);
+        const goalTasks = tasksByGoalId.get(reDecomposeGoalId) ?? [];
         const doneCount = goalTasks.filter((tk) => tk.status === "done").length;
         const msg = doneCount > 0
           ? t("reDecomposeConfirmWithDone").replace("{count}", String(goalTasks.length)).replace("{done}", String(doneCount))
@@ -1600,7 +1609,7 @@ export function ProjectHome() {
                 )}
                 {(() => {
                   const renderGoalCard = (goal: typeof goals[0]) => {
-                    const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                    const goalTasks = tasksByGoalId.get(goal.id) ?? [];
                     const doneTasks = goalTasks.filter((tk) => tk.status === "done");
                     const activeTasks = goalTasks.filter((tk) => tk.status !== "done");
                     const pct = goalTasks.length > 0 ? Math.round((doneTasks.length / goalTasks.length) * 100) : 0;
@@ -1695,7 +1704,7 @@ export function ProjectHome() {
                               </button>
                             )}
                             {(() => {
-                              const goalTasks = tasks.filter((tk) => tk.goal_id === goal.id);
+                              const goalTasks = tasksByGoalId.get(goal.id) ?? [];
                               const hasRunning = goalTasks.some((tk) => tk.status === "in_progress" || tk.status === "in_review");
                               if (goalTasks.length > 0 && !hasRunning) return (
                                 <button
@@ -1889,14 +1898,14 @@ export function ProjectHome() {
                   };
 
                   const activeGoals = goals.filter((g) => {
-                    const goalTasks = tasks.filter((tk) => tk.goal_id === g.id);
+                    const goalTasks = tasksByGoalId.get(g.id) ?? [];
                     const pct = goalTasks.length > 0
                       ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
                       : 0;
                     return !(pct === 100 && goalTasks.length > 0);
                   });
                   const completedGoals = goals.filter((g) => {
-                    const goalTasks = tasks.filter((tk) => tk.goal_id === g.id);
+                    const goalTasks = tasksByGoalId.get(g.id) ?? [];
                     const pct = goalTasks.length > 0
                       ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
                       : 0;

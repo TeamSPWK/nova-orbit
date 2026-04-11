@@ -11,6 +11,9 @@ export function createTaskRoutes(ctx: AppContext): Router {
     const goalId = typeof req.query.goalId === "string" ? req.query.goalId : undefined;
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
+    const rawLimit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 200;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
+
     // Join verification verdict + issues so the dashboard can render verification badges & block reasons
     const withVerification = `
       SELECT t.*,
@@ -24,9 +27,9 @@ export function createTaskRoutes(ctx: AppContext): Router {
 
     let tasks;
     if (goalId) {
-      tasks = db.prepare(`${withVerification} WHERE t.goal_id = ? ORDER BY t.created_at DESC`).all(goalId);
+      tasks = db.prepare(`${withVerification} WHERE t.goal_id = ? ORDER BY t.created_at DESC LIMIT ?`).all(goalId, limit);
     } else if (projectId) {
-      tasks = db.prepare(`${withVerification} WHERE t.project_id = ? ORDER BY t.status, t.created_at DESC`).all(projectId);
+      tasks = db.prepare(`${withVerification} WHERE t.project_id = ? ORDER BY t.status, t.created_at DESC LIMIT ?`).all(projectId, limit);
     } else {
       return res.status(400).json({ error: "projectId or goalId query param required" });
     }
