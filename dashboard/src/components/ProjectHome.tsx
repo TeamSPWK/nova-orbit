@@ -581,6 +581,7 @@ export function ProjectHome() {
   const [reDecomposeGoalId, setReDecomposeGoalId] = useState<string | null>(null);
   const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
   const [queueToggling, setQueueToggling] = useState(false);
+  const [goalMenuOpenId, setGoalMenuOpenId] = useState<string | null>(null);
 
   // Spec generation tracking (goal IDs currently generating)
   const [generatingSpecGoalIds, setGeneratingSpecGoalIds] = useState<Set<string>>(new Set());
@@ -1647,24 +1648,36 @@ export function ProjectHome() {
                             <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
                               {doneTasks.length}/{goalTasks.length} ({pct}%)
                             </span>
-                            <button
-                              onClick={() => setEditGoalId(goal.id)}
-                              title={t("editGoal")}
-                              className="text-gray-300 dark:text-gray-600 hover:text-blue-400 dark:hover:text-blue-400 transition-colors p-0.5"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteGoal(goal.id)}
-                              title={t("deleteGoal")}
-                              className="text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 transition-colors p-0.5"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                              </svg>
-                            </button>
+                            <div className="relative">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setGoalMenuOpenId(goalMenuOpenId === goal.id ? null : goal.id); }}
+                                aria-label={t("goalMoreActions")}
+                                className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-300 transition-colors p-0.5 rounded"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                                </svg>
+                              </button>
+                              {goalMenuOpenId === goal.id && (
+                                <div
+                                  className="absolute right-0 top-full mt-1 w-28 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+                                  onMouseLeave={() => setGoalMenuOpenId(null)}
+                                >
+                                  <button
+                                    onClick={() => { setGoalMenuOpenId(null); setEditGoalId(goal.id); }}
+                                    className="w-full text-left text-xs px-3 py-1.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                  >
+                                    {t("editGoal")}
+                                  </button>
+                                  <button
+                                    onClick={() => { setGoalMenuOpenId(null); handleDeleteGoal(goal.id); }}
+                                    className="w-full text-left text-xs px-3 py-1.5 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                  >
+                                    {t("deleteGoal")}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                             {isGeneratingSpec ? (
                               <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-500 dark:text-indigo-400 whitespace-nowrap flex items-center gap-1">
                                 <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
@@ -2075,7 +2088,7 @@ export function ProjectHome() {
                       </div>
                     </div>
                   )}
-                  <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} autopilotMode={autopilotMode} />
+                  <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} autopilotMode={autopilotMode} onAddGoal={handleAddGoal} />
                 </div>
               </section>
             </div>

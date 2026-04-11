@@ -518,6 +518,12 @@ const ko = {
   emptyGoalsDesc: "목표를 설정하면 AI가 태스크로 분할합니다.",
   emptyTasksTitle: "태스크가 없습니다",
   emptyTasksDesc: "직접 태스크를 추가하거나 목표에서 \"작업 분할\"을 사용하세요.",
+  emptyTasksHint: "목표를 추가하면 AI가 자동으로 작업을 분할합니다.",
+  emptyTasksAddGoal: "+ 목표 추가",
+  taskStatusUpdateFailed: "상태 변경에 실패했습니다. 다시 시도해주세요.",
+  expandSubtasks: "하위 작업 펼치기",
+  collapseSubtasks: "하위 작업 접기",
+  goalMoreActions: "더 보기",
 
   // ProjectStats
   statTotalTasks: "전체 태스크",

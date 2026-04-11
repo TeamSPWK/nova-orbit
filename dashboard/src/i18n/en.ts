@@ -518,6 +518,12 @@ const en = {
   emptyGoalsDesc: "Set a goal and let AI split it into tasks.",
   emptyTasksTitle: "No tasks yet",
   emptyTasksDesc: "Add a task manually or use \"Split into Tasks\" on a goal.",
+  emptyTasksHint: "Add a goal and AI will automatically split it into tasks.",
+  emptyTasksAddGoal: "+ Add Goal",
+  taskStatusUpdateFailed: "Failed to update status. Please try again.",
+  expandSubtasks: "Expand subtasks",
+  collapseSubtasks: "Collapse subtasks",
+  goalMoreActions: "More actions",
 
   // ProjectStats
   statTotalTasks: "Total Tasks",

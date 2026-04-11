@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { TaskDetail } from "./TaskDetail";
 import { RejectDialog } from "./RejectDialog";
+import { useToast } from "../stores/useToast";
 
 const STATUSES = ["pending_approval", "todo", "in_progress", "in_review", "done", "blocked"];
 
@@ -43,6 +44,7 @@ interface TaskListProps {
   projectId?: string;
   onUpdate?: () => void;
   autopilotMode?: string; // 'off' | 'goal' | 'full'
+  onAddGoal?: () => void;
 }
 
 const DONE_PREVIEW_COUNT = 5;
@@ -56,9 +58,10 @@ function groupBy<T>(arr: T[], key: keyof T): Record<string, T[]> {
   }, {});
 }
 
-export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "off" }: TaskListProps) {
+export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "off", onAddGoal }: TaskListProps) {
   const isAutopilot = autopilotMode !== "off";
   const { t } = useTranslation();
+  const { showToast } = useToast();
   const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
   const [verifyingTasks, setVerifyingTasks] = useState<Set<string>>(new Set());
   const [elapsedSeconds, setElapsedSeconds] = useState<Record<string, number>>({});
@@ -176,8 +179,13 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
   };
 
   const handleStatusChange = async (taskId: string, newStatus: string) => {
-    await api.tasks.update(taskId, { status: newStatus });
-    onUpdate?.();
+    try {
+      await api.tasks.update(taskId, { status: newStatus });
+      onUpdate?.();
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : undefined;
+      showToast(t("taskStatusUpdateFailed"), "error", detail);
+    }
   };
 
   const handleRunTask = async (taskId: string) => {
@@ -240,6 +248,8 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
             {hasChildren && (
               <button
                 onClick={(e) => { e.stopPropagation(); toggleExpand(task.id); }}
+                aria-label={isExpanded ? t("collapseSubtasks") : t("expandSubtasks")}
+                aria-expanded={isExpanded}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 w-4 h-4 flex items-center justify-center"
               >
                 <svg className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -346,6 +356,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
           ) : (
             <button
               onClick={() => setAssigningTaskId(task.id)}
+              aria-label={t("assign")}
               className="text-[10px] text-gray-300 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-300 px-1.5 py-0.5 border border-dashed border-gray-200 dark:border-gray-600 rounded"
             >
               {t("assign")}
@@ -455,6 +466,7 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
               <button
                 onClick={() => handleRunTask(task.id)}
                 disabled={isRunning}
+                aria-label={isRunning ? t("taskRunning", { seconds }) : t("run")}
                 className={`text-[10px] px-2 py-0.5 rounded font-medium transition-colors flex items-center gap-1 ${
                   isRunning
                     ? "bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 cursor-not-allowed"
@@ -527,9 +539,21 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
         <p className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
           {t("emptyTasksTitle")}
         </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500">
+        <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
           {t("emptyTasksDesc")}
         </p>
+        <p className="text-xs text-blue-500 dark:text-blue-400 mb-3">
+          {t("emptyTasksHint")}
+        </p>
+        {onAddGoal && (
+          <button
+            onClick={onAddGoal}
+            aria-label={t("emptyTasksAddGoal")}
+            className="text-xs px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors"
+          >
+            {t("emptyTasksAddGoal")}
+          </button>
+        )}
       </div>
     );
   }

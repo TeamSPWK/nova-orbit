@@ -87,8 +87,12 @@ function SortableCard({
       )}
       {/* Clickable content above drag layer */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={task.title}
         className="relative z-10"
         onClick={(e) => { e.stopPropagation(); onCardClick(task.id); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onCardClick(task.id); } }}
       >
         <div className="text-sm text-gray-800 dark:text-gray-200 mb-1.5 line-clamp-2">{task.title}</div>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -256,6 +260,7 @@ export function KanbanBoard({ tasks, agents, onUpdate }: KanbanBoardProps) {
                   {isDone && columnTasks.length > KANBAN_DONE_PREVIEW && (
                     <button
                       onClick={() => setShowAllDone((v) => !v)}
+                      aria-label={showAllDone ? t("showLessDone") : t("showMoreDone", { count: hiddenCount })}
                       className="w-full text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 py-1 text-center transition-colors"
                     >
                       {showAllDone
