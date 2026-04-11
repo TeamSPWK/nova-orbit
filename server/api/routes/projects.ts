@@ -7,6 +7,7 @@ import { validateWorkdir } from "../../utils/validate-path.js";
 import { analyzeProject } from "../../core/project/analyzer.js";
 import { connectGitHub } from "../../core/project/github.js";
 import { createLogger } from "../../utils/logger.js";
+import { MAX_TASK_RETRIES, MAX_REASSIGNS } from "../../utils/constants.js";
 
 const log = createLogger("projects");
 
@@ -246,14 +247,75 @@ export function createProjectRoutes(ctx: AppContext): Router {
    * as activity rows so the dashboard can show them.
    */
   function rescuePendingGoals(projectId: string): void {
+    // Sequential goal processing: only rescue the FIRST pending goal by priority,
+    // and ONLY if no goal is already in progress. The scheduler's
+    // triggerGoalProcessingIfNeeded handles subsequent goals after the current
+    // one completes. Rescuing while another goal has active tasks causes
+    // parallel spec generation, wasting tokens and violating the 1-goal-at-a-time model.
+
+    // Pre-step: recalculate progress for goals with permanently-blocked tasks.
+    // Without this, a goal at 75% (6 done + 2 permanently blocked) looks incomplete
+    // and blocks the pending-goal query from finding the real next goal.
+    const staleGoals = db.prepare(`
+      SELECT g.id, g.progress FROM goals g
+      WHERE g.project_id = ? AND g.progress < 100
+        AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM tasks t
+          WHERE t.goal_id = g.id AND t.status NOT IN ('done', 'blocked')
+        )
+    `).all(projectId) as { id: string; progress: number }[];
+
+    for (const sg of staleGoals) {
+      const stats = db.prepare(`
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done,
+               SUM(CASE WHEN status = 'blocked' AND retry_count >= ? AND reassign_count >= ? THEN 1 ELSE 0 END) as perm_blocked
+        FROM tasks WHERE goal_id = ? AND parent_task_id IS NULL
+      `).get(MAX_TASK_RETRIES, MAX_REASSIGNS, sg.id) as { total: number; done: number; perm_blocked: number };
+
+      const effective = stats.total - stats.perm_blocked;
+      const progress = effective > 0 ? Math.round((stats.done / effective) * 100) : 100;
+      if (progress !== sg.progress) {
+        db.prepare("UPDATE goals SET progress = ? WHERE id = ?").run(progress, sg.id);
+        log.info(`Rescue pre-step: updated goal ${sg.id} progress ${sg.progress}% → ${progress}% (excluding ${stats.perm_blocked} permanently blocked)`);
+        broadcast("project:updated", { projectId });
+      }
+    }
+
+    // Guard: if any goal still has tasks that can make progress (not done AND
+    // not permanently blocked), the scheduler should handle it first.
+    // Retryable blocked tasks (retry or reassign budget remaining) count as active.
+    const activeGoal = db.prepare(`
+      SELECT g.id FROM goals g
+      WHERE g.project_id = ? AND g.progress < 100
+        AND EXISTS (
+          SELECT 1 FROM tasks t
+          WHERE t.goal_id = g.id
+            AND t.status != 'done'
+            AND NOT (t.status = 'blocked' AND t.retry_count >= ? AND t.reassign_count >= ?)
+        )
+      LIMIT 1
+    `).get(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { id: string } | undefined;
+
+    if (activeGoal) {
+      log.info(`Rescue skipped: goal ${activeGoal.id} still has actionable tasks — scheduler will handle it`);
+      return;
+    }
+
     const pending = db.prepare(`
       SELECT g.id, g.title, gs.id AS spec_id,
              COALESCE(json_extract(gs.prd_summary, '$._status'), '') AS spec_status
       FROM goals g
       LEFT JOIN goal_specs gs ON gs.goal_id = g.id
       WHERE g.project_id = ?
-        AND g.progress = 0
+        AND g.progress < 100
         AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = g.id)
+      ORDER BY
+        CASE g.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+        g.sort_order ASC,
+        g.created_at ASC
+      LIMIT 1
     `).all(projectId) as Array<{
       id: string;
       title: string;
@@ -263,18 +325,19 @@ export function createProjectRoutes(ctx: AppContext): Router {
 
     if (pending.length === 0) return;
 
+    const g = pending[0];
     log.info(
-      `Autopilot enabled: rescuing ${pending.length} pending goal(s) for project ${projectId}`,
+      `Autopilot enabled: rescuing 1 pending goal for project ${projectId} (next by priority: "${g.title}")`,
     );
     db.prepare(
       "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_rescue', ?)",
     ).run(
       projectId,
-      `Autopilot 전환 감지 — 대기 중인 목표 ${pending.length}개에 대해 기획서/작업 분할 재개`,
+      `Autopilot 전환 감지 — 다음 목표 기획서/작업 분할 시작: ${g.title.slice(0, 80)}`,
     );
     broadcast("project:updated", { projectId });
 
-    for (const g of pending) {
+    {
       // Case 1: spec missing or failed → generate spec, then decompose
       const needSpec = !g.spec_id || g.spec_status === "failed";
       // Case 2: spec still generating → leave alone, it will trigger
@@ -283,13 +346,13 @@ export function createProjectRoutes(ctx: AppContext): Router {
 
       if (stillGenerating) {
         log.info(`Rescue skipping goal ${g.id} — spec still generating`);
-        continue;
+        return;
       }
 
       if (needSpec) {
         if (!ctx.generateGoalSpec) {
           log.warn(`Rescue cannot run: generateGoalSpec not wired yet for goal ${g.id}`);
-          continue;
+          return;
         }
         // Placeholder spec row so UI reflects progress.
         // Use INSERT OR IGNORE + conditional UPDATE to avoid overwriting
@@ -337,7 +400,7 @@ export function createProjectRoutes(ctx: AppContext): Router {
         // Case 3: spec already complete → go straight to decompose
         if (!ctx.orchestrationEngine) {
           log.warn(`Rescue cannot run: orchestrationEngine not wired yet for goal ${g.id}`);
-          continue;
+          return;
         }
         log.info(`Rescue: spec already exists for goal ${g.id}, triggering decompose directly`);
         ctx.orchestrationEngine.decomposeGoal(g.id).catch((err: any) => {
