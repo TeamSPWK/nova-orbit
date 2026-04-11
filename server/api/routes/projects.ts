@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { AppContext } from "../../index.js";
 import { validateWorkdir } from "../../utils/validate-path.js";
@@ -693,6 +693,45 @@ ${branchList}
     }
 
     res.json(docs);
+  });
+
+  // List .claude/agents/*.md files with content
+  router.get("/:id/agent-files", (req, res) => {
+    const project = db.prepare("SELECT workdir FROM projects WHERE id = ?").get(req.params.id) as { workdir: string } | undefined;
+    if (!project || !project.workdir) return res.status(404).json({ error: "Project not found or no workdir" });
+
+    const agentsDir = resolve(project.workdir, ".claude", "agents");
+
+    // Path traversal guard: agentsDir must be inside workdir
+    const resolvedWorkdir = resolve(project.workdir);
+    if (!agentsDir.startsWith(resolvedWorkdir + "/") && agentsDir !== resolvedWorkdir) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    if (!existsSync(agentsDir)) return res.json([]);
+
+    let files: string[];
+    try {
+      files = readdirSync(agentsDir).filter((f) => f.endsWith(".md"));
+    } catch {
+      return res.json([]);
+    }
+
+    const result = files.map((filename) => {
+      const filePath = resolve(agentsDir, filename);
+      // Per-file path traversal guard
+      if (!filePath.startsWith(agentsDir + "/") && filePath !== agentsDir) {
+        return null;
+      }
+      try {
+        const content = readFileSync(filePath, "utf-8");
+        return { filename, content };
+      } catch {
+        return { filename, content: "" };
+      }
+    }).filter(Boolean) as Array<{ filename: string; content: string }>;
+
+    res.json(result);
   });
 
   // Connect GitHub repo (clone + analyze + create project + agents)

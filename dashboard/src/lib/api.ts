@@ -89,6 +89,8 @@ export const api = {
       request<{ deleted: string[] }>(`/projects/${id}/branches`, { method: "DELETE" }),
     listDocs: (id: string) =>
       request<Array<{ path: string; name: string; dir: string }>>(`/projects/${id}/docs`),
+    agentFiles: (id: string) =>
+      request<Array<{ filename: string; content: string }>>(`/projects/${id}/agent-files`),
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
@@ -176,6 +178,10 @@ export const api = {
     listByTask: (taskId: string) => request<any[]>(`/verifications?taskId=${taskId}`),
     createFixTask: (id: string) =>
       request<any>(`/verifications/${id}/create-fix-task`, { method: "POST" }),
+    stats: (projectId: string) =>
+      request<{ total: number; passed: number; conditional: number; failed: number; passRate: number | null; avgRetries: number | null }>(
+        `/verifications/stats?projectId=${projectId}`,
+      ),
   },
   orchestration: {
     executeTask: (taskId: string, scope = "standard") =>

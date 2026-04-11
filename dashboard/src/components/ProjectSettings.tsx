@@ -26,6 +26,29 @@ export function ProjectSettings({ projectId }: Props) {
   const [devPort, setDevPort] = useState<string>(project?.dev_port?.toString() ?? "");
   const [devPortSaving, setDevPortSaving] = useState(false);
 
+  // Agent role files
+  const [agentFiles, setAgentFiles] = useState<Array<{ filename: string; content: string }>>([]);
+  const [agentFilesLoading, setAgentFilesLoading] = useState(false);
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!project?.workdir) return;
+    setAgentFilesLoading(true);
+    api.projects.agentFiles(projectId)
+      .then((files) => setAgentFiles(files))
+      .catch(() => setAgentFiles([]))
+      .finally(() => setAgentFilesLoading(false));
+  }, [projectId, project?.workdir]);
+
+  const toggleFileExpand = useCallback((filename: string) => {
+    setExpandedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(filename)) next.delete(filename);
+      else next.add(filename);
+      return next;
+    });
+  }, []);
+
   // Branch management
   const [branches, setBranches] = useState<string[]>([]);
   const [merging, setMerging] = useState(false);
@@ -414,6 +437,62 @@ export function ProjectSettings({ projectId }: Props) {
           </div>
         </section>
       )}
+
+      {/* Agent Role Files */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          {t("settingsAgentFiles")}
+        </h2>
+        <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-[#25253d]">
+          {!project.workdir ? (
+            <p className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500">
+              {t("settingsAgentFilesNoWorkdir")}
+            </p>
+          ) : agentFilesLoading ? (
+            <p className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500">{t("loading")}</p>
+          ) : agentFiles.length === 0 ? (
+            <p className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500">
+              {t("settingsAgentFilesEmpty")}
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+              {agentFiles.map(({ filename, content }) => {
+                const isExpanded = expandedFiles.has(filename);
+                const previewLines = content.split("\n").slice(0, 3).join("\n");
+                const hasMore = content.split("\n").length > 3;
+                return (
+                  <li key={filename} className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-mono font-medium text-gray-700 dark:text-gray-300">
+                        {filename}
+                      </span>
+                      {hasMore && (
+                        <button
+                          onClick={() => toggleFileExpand(filename)}
+                          className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                        >
+                          {isExpanded ? t("settingsAgentFilesCollapse") : t("settingsAgentFilesExpand")}
+                        </button>
+                      )}
+                    </div>
+                    <pre className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-[#1a1a2e] rounded px-3 py-2 whitespace-pre-wrap break-words overflow-hidden">
+                      {isExpanded ? content : previewLines}
+                      {!isExpanded && hasMore && (
+                        <span className="text-gray-300 dark:text-gray-600">…</span>
+                      )}
+                    </pre>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {agentFiles.length > 0 && (
+            <p className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 text-[11px] text-gray-400 dark:text-gray-500">
+              {t("settingsAgentFilesDesc")}
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* Danger Zone */}
       <section>

@@ -2,6 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
+interface VerificationStats {
+  total: number;
+  passed: number;
+  conditional: number;
+  failed: number;
+  passRate: number | null;
+  avgRetries: number | null;
+}
+
 interface Task {
   status: string;
   verification_id?: string | null;
@@ -20,6 +29,7 @@ export function ProjectStats({ tasks, projectId }: ProjectStatsProps) {
   // deltaCost: accumulated from live WebSocket usage events
   const [deltaCostUsd, setDeltaCostUsd] = useState(0);
   const [deltaTokens, setDeltaTokens] = useState(0);
+  const [verifStats, setVerifStats] = useState<VerificationStats | null>(null);
 
   // Track which project's base cost is already loaded to avoid double-counting
   const loadedProjectRef = useRef<string | null>(null);
@@ -31,6 +41,7 @@ export function ProjectStats({ tasks, projectId }: ProjectStatsProps) {
     setDeltaTokens(0);
     setBaseCostUsd(0);
     setBaseTokens(0);
+    setVerifStats(null);
     loadedProjectRef.current = projectId;
 
     api.projects.getCost(projectId).then((data) => {
@@ -41,6 +52,13 @@ export function ProjectStats({ tasks, projectId }: ProjectStatsProps) {
       setBaseTokens(totalTok);
     }).catch(() => {
       // Non-fatal — REST cost unavailable, delta from WS still works
+    });
+
+    api.verifications.stats(projectId).then((data) => {
+      if (loadedProjectRef.current !== projectId) return;
+      setVerifStats(data);
+    }).catch(() => {
+      // Non-fatal — verification stats unavailable
     });
   }, [projectId]);
 
@@ -73,6 +91,28 @@ export function ProjectStats({ tasks, projectId }: ProjectStatsProps) {
     totalTokens > 0
       ? t("contextTokens", { count: (totalTokens / 1000).toFixed(1) })
       : t("noCostData");
+
+  const passRateColor = (() => {
+    if (verifStats?.passRate == null) return "text-gray-400 dark:text-gray-500";
+    if (verifStats.passRate >= 80) return "text-green-600 dark:text-green-400";
+    if (verifStats.passRate >= 50) return "text-yellow-600 dark:text-yellow-400";
+    return "text-red-600 dark:text-red-400";
+  })();
+
+  const passRateLabel = (() => {
+    if (verifStats == null) return t("noCostData");
+    if (verifStats.passRate == null) return t("noCostData");
+    return `${verifStats.passRate}%`;
+  })();
+
+  const passRateDetail = (() => {
+    if (verifStats == null || verifStats.total === 0) return null;
+    return `${verifStats.passed + verifStats.conditional}/${verifStats.total}`;
+  })();
+
+  const avgRetriesLabel = verifStats?.avgRetries != null
+    ? String(verifStats.avgRetries)
+    : t("noCostData");
 
   const stats = [
     {
@@ -114,6 +154,21 @@ export function ProjectStats({ tasks, projectId }: ProjectStatsProps) {
           )}
         </div>
       ))}
+      <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+      <div className="text-center">
+        <div className="flex items-baseline gap-1 justify-center">
+          <span className={`text-lg font-bold ${passRateColor}`}>{passRateLabel}</span>
+          {passRateDetail && (
+            <span className="text-[11px] text-gray-400 dark:text-gray-500">{passRateDetail}</span>
+          )}
+        </div>
+        <p className="text-[11px] leading-none mt-0.5 text-gray-400 dark:text-gray-500">{t("statPassRate")}</p>
+      </div>
+      <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+      <div className="text-center">
+        <span className="text-lg font-bold text-gray-600 dark:text-gray-300">{avgRetriesLabel}</span>
+        <p className="text-[11px] leading-none mt-0.5 text-gray-400 dark:text-gray-500">{t("statAvgRetries")}</p>
+      </div>
       <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
       <div className="text-center">
         <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{costLabel}</span>

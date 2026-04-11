@@ -41,6 +41,40 @@ export function createVerificationRoutes(ctx: AppContext): Router {
     res.json(parsed);
   });
 
+  // Aggregated verification stats for a project
+  router.get("/stats", (req, res) => {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+    if (!projectId) {
+      return res.status(400).json({ error: "projectId query param required" });
+    }
+
+    const verdictRow = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN v.verdict = 'pass' THEN 1 ELSE 0 END) as passed,
+        SUM(CASE WHEN v.verdict = 'conditional' THEN 1 ELSE 0 END) as conditional,
+        SUM(CASE WHEN v.verdict = 'fail' THEN 1 ELSE 0 END) as failed
+      FROM verifications v
+      JOIN tasks t ON v.task_id = t.id
+      WHERE t.project_id = ?
+    `).get(projectId) as { total: number; passed: number; conditional: number; failed: number };
+
+    const retryRow = db.prepare(`
+      SELECT AVG(retry_count) as avg_retries
+      FROM tasks
+      WHERE project_id = ? AND status = 'done'
+    `).get(projectId) as { avg_retries: number | null };
+
+    const total = verdictRow.total ?? 0;
+    const passed = verdictRow.passed ?? 0;
+    const conditional = verdictRow.conditional ?? 0;
+    const failed = verdictRow.failed ?? 0;
+    const passRate = total > 0 ? Math.round(((passed + conditional) / total) * 100) : null;
+    const avgRetries = retryRow.avg_retries != null ? Math.round(retryRow.avg_retries * 10) / 10 : null;
+
+    res.json({ total, passed, conditional, failed, passRate, avgRetries });
+  });
+
   // Create verification result
   router.post("/", (req, res) => {
     const { task_id, verdict, scope = "standard", dimensions, issues = [], severity, evaluator_session_id } = req.body;
