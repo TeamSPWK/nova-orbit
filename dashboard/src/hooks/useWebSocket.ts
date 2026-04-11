@@ -34,14 +34,20 @@ export function useWebSocket() {
         if (!destroyed) reconnectTimer = setTimeout(connect, 1000);
         return;
       }
-      const wsUrl = `${wsHost}/ws?token=${token}`;
+      // 토큰을 URL 쿼리 대신 첫 메시지로 전송 (#12)
+      const wsUrl = `${wsHost}/ws`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       _wsInstance = ws;
 
       ws.onopen = () => {
         reconnectAttempts = 0; // Reset on successful connection
-        useStore.getState().setConnected(true);
+        // auth 메시지를 먼저 전송 — connected 응답 후 setConnected(true) 처리
+        try {
+          ws.send(JSON.stringify({ type: "auth", token }));
+        } catch {
+          // ignore
+        }
       };
 
       ws.onmessage = (event) => {
@@ -49,6 +55,10 @@ export function useWebSocket() {
           const msg = JSON.parse(event.data);
 
           switch (msg.type) {
+            case "connected":
+              // auth 방식: 서버가 connected를 보내면 인증 완료
+              useStore.getState().setConnected(true);
+              break;
             case "task:updated":
               useStore.getState().updateTask(msg.payload);
               window.dispatchEvent(new CustomEvent("nova:task-updated-event", { detail: msg.payload }));

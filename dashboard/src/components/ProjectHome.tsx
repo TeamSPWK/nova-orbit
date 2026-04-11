@@ -543,6 +543,9 @@ export function ProjectHome() {
   const [showDialog, setShowDialog] = useState<"addGoal" | "addTask" | null>(null);
   const [addTaskGoalId, setAddTaskGoalId] = useState<string | null>(null);
 
+  // Goal search (#13)
+  const [goalSearch, setGoalSearch] = useState("");
+
   // AI Goal Suggestion — lifted from AddGoalDialog for background persistence
   type Suggestion = { title: string; description: string; priority: string; reason: string };
   const [aiSuggestions, setAiSuggestions] = useState<Suggestion[]>([]);
@@ -1080,7 +1083,7 @@ export function ProjectHome() {
       updateProject(updated);
       setAutopilotMode(mode);
     } catch (err: any) {
-      showToast("Failed to change autopilot mode", "error", err.message);
+      showToast(t("errorAutopilotChange"), "error", err.message);
     } finally {
       setAutopilotChanging(false);
     }
@@ -1093,7 +1096,7 @@ export function ProjectHome() {
       setQueuePaused(false);
       setQueuePausedInfo(null);
     } catch (err: any) {
-      showToast("Failed to resume queue", "error", err.message);
+      showToast(t("errorResumeQueue"), "error", err.message);
     }
   };
 
@@ -1125,7 +1128,7 @@ export function ProjectHome() {
       const result = await api.projects.startDevServer(currentProjectId);
       setDevServerStatus({ running: true, port: result.port, url: result.url });
     } catch (err: any) {
-      showToast("Failed to start dev server", "error", err.message);
+      showToast(t("errorStartDevServer"), "error", err.message);
     } finally {
       setDevServerStarting(false);
     }
@@ -1137,7 +1140,7 @@ export function ProjectHome() {
       await api.projects.stopDevServer(currentProjectId);
       setDevServerStatus({ running: false, port: null, url: null });
     } catch (err: any) {
-      showToast("Failed to stop dev server", "error", err.message);
+      showToast(t("errorStopDevServer"), "error", err.message);
     }
   };
 
@@ -1556,6 +1559,16 @@ export function ProjectHome() {
                     {t("addGoal")}
                   </button>
                 </div>
+                {/* Goal search (#13) */}
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    value={goalSearch}
+                    onChange={(e) => setGoalSearch(e.target.value)}
+                    placeholder={t("goalSearchPlaceholder")}
+                    className="w-full text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e2e] text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:focus:ring-blue-600"
+                  />
+                </div>
                 {/* AI Suggestion Banner — shown when loading or results ready */}
                 {aiSuggestLoading && showDialog !== "addGoal" && (
                   <button
@@ -1657,6 +1670,11 @@ export function ProjectHome() {
                             <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
                               {doneTasks.length}/{goalTasks.length} ({pct}%)
                             </span>
+                            {goalTasks.length > 0 && !isComplete && (
+                              <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                                {t("remainingTasks", { count: goalTasks.length - doneTasks.length })}
+                              </span>
+                            )}
                             <div className="relative">
                               <button
                                 onClick={(e) => { e.stopPropagation(); setGoalMenuOpenId(goalMenuOpenId === goal.id ? null : goal.id); }}
@@ -1897,14 +1915,18 @@ export function ProjectHome() {
                     );
                   };
 
-                  const activeGoals = goals.filter((g) => {
+                  const goalSearchLower = goalSearch.trim().toLowerCase();
+                  const filteredGoals = goalSearchLower
+                    ? goals.filter((g) => (g.title || g.description || "").toLowerCase().includes(goalSearchLower))
+                    : goals;
+                  const activeGoals = filteredGoals.filter((g) => {
                     const goalTasks = tasksByGoalId.get(g.id) ?? [];
                     const pct = goalTasks.length > 0
                       ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
                       : 0;
                     return !(pct === 100 && goalTasks.length > 0);
                   });
-                  const completedGoals = goals.filter((g) => {
+                  const completedGoals = filteredGoals.filter((g) => {
                     const goalTasks = tasksByGoalId.get(g.id) ?? [];
                     const pct = goalTasks.length > 0
                       ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)

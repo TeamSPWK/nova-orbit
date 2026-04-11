@@ -729,6 +729,18 @@ const en = {
   sessionKillConfirm: "Kill session for {{agent}} ({{project}})?",
   sessionCleanup: "Clean {{count}} orphan sessions",
   sessionCleaning: "Cleaning...",
+
+  // Error toasts (#15)
+  errorAutopilotChange: "Failed to change automation mode",
+  errorResumeQueue: "Failed to resume auto-run",
+  errorStartDevServer: "Failed to start dev server",
+  errorStopDevServer: "Failed to stop dev server",
+
+  // Goal search (#13)
+  goalSearchPlaceholder: "Search goals...",
+
+  // Remaining tasks (#11)
+  remainingTasks: "{{count}} left",
 } as const;
 
 export default en;

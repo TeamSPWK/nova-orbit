@@ -730,6 +730,18 @@ const ko = {
   sessionKillConfirm: "{{agent}} ({{project}}) 세션을 종료하시겠습니까?",
   sessionCleanup: "고아 세션 {{count}}개 정리",
   sessionCleaning: "정리 중...",
+
+  // Error toasts (#15)
+  errorAutopilotChange: "자동화 모드 변경에 실패했습니다",
+  errorResumeQueue: "자동 실행 재개에 실패했습니다",
+  errorStartDevServer: "개발 서버 시작에 실패했습니다",
+  errorStopDevServer: "개발 서버 중지에 실패했습니다",
+
+  // Goal search (#13)
+  goalSearchPlaceholder: "목표 검색...",
+
+  // Remaining tasks (#11)
+  remainingTasks: "{{count}}개 남음",
 } as const;
 
 export default ko;

@@ -8,11 +8,12 @@ export function createWSHandler(wss: WebSocketServer, apiKey: string): void {
   });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    // 인증 확인 — close()는 proxy EPIPE 가능성이 있어 유예 close 사용
+    // 인증: URL 쿼리 토큰(레거시) 또는 첫 메시지 auth 토큰(신규) 지원
+    // close()는 proxy EPIPE 가능성이 있어 유예 close 사용
     // 미인증 연결은 subscribe/broadcast 모두 차단되고 10초 후 close
     const url = new URL(req.url ?? "", "http://localhost");
-    const token = url.searchParams.get("token");
-    const authed = token === apiKey;
+    const urlToken = url.searchParams.get("token");
+    let authed = urlToken === apiKey;
     (ws as any).__authenticated = authed;
 
     // Handle client errors gracefully
@@ -20,19 +21,44 @@ export function createWSHandler(wss: WebSocketServer, apiKey: string): void {
       console.error("[WS Client] Error:", err.message);
     });
 
+    // URL 토큰 미인증 시: 첫 메시지로 auth 패킷을 기다림 (10초 타임아웃)
+    let authTimer: ReturnType<typeof setTimeout> | null = null;
     if (!authed) {
-      // Delayed close lets proxies finish their handshake cleanly
-      try { ws.send(JSON.stringify({ type: "error", payload: { code: "unauthorized" } })); } catch { /* ignore */ }
-      const closeTimer = setTimeout(() => {
-        try { ws.close(4001, "Unauthorized"); } catch { /* already closed */ }
+      authTimer = setTimeout(() => {
+        if (!(ws as any).__authenticated) {
+          try { ws.send(JSON.stringify({ type: "error", payload: { code: "unauthorized" } })); } catch { /* ignore */ }
+          try { ws.close(4001, "Unauthorized"); } catch { /* already closed */ }
+        }
       }, 10_000);
-      ws.on("close", () => clearTimeout(closeTimer));
-      return; // Do NOT register message handler — reject subscriptions outright
+      ws.on("close", () => { if (authTimer) clearTimeout(authTimer); });
     }
 
     ws.on("message", (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
+
+        // 첫 메시지 auth 처리 (신규 방식)
+        if (msg.type === "auth" && !authed) {
+          if (msg.token === apiKey) {
+            authed = true;
+            (ws as any).__authenticated = true;
+            if (authTimer) { clearTimeout(authTimer); authTimer = null; }
+            try {
+              ws.send(JSON.stringify({
+                type: "connected",
+                payload: { message: "Nova Orbit WebSocket connected" },
+                timestamp: new Date().toISOString(),
+              }));
+            } catch { /* ignore */ }
+          } else {
+            try { ws.send(JSON.stringify({ type: "error", payload: { code: "unauthorized" } })); } catch { /* ignore */ }
+            try { ws.close(4001, "Unauthorized"); } catch { /* already closed */ }
+          }
+          return;
+        }
+
+        // 미인증 연결 — subscribe/broadcast 차단
+        if (!(ws as any).__authenticated) return;
 
         if (msg.type === "subscribe" && msg.projectId) {
           (ws as any).__projectId = msg.projectId;
@@ -51,14 +77,17 @@ export function createWSHandler(wss: WebSocketServer, apiKey: string): void {
       }
     });
 
-    try {
-      ws.send(JSON.stringify({
-        type: "connected",
-        payload: { message: "Nova Orbit WebSocket connected" },
-        timestamp: new Date().toISOString(),
-      }));
-    } catch {
-      // Client may have disconnected immediately
+    // URL 토큰으로 이미 인증된 경우 즉시 connected 전송 (레거시 호환)
+    if (authed) {
+      try {
+        ws.send(JSON.stringify({
+          type: "connected",
+          payload: { message: "Nova Orbit WebSocket connected" },
+          timestamp: new Date().toISOString(),
+        }));
+      } catch {
+        // Client may have disconnected immediately
+      }
     }
   });
 }
