@@ -11,12 +11,13 @@ export function createTaskRoutes(ctx: AppContext): Router {
     const goalId = typeof req.query.goalId === "string" ? req.query.goalId : undefined;
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
 
-    // Join verification verdict so the dashboard can render verification badges
+    // Join verification verdict + issues so the dashboard can render verification badges & block reasons
     const withVerification = `
       SELECT t.*,
              v.verdict        AS verification_verdict,
              v.severity       AS verification_severity,
-             v.scope          AS verification_scope
+             v.scope          AS verification_scope,
+             v.issues         AS verification_issues
       FROM tasks t
       LEFT JOIN verifications v ON v.id = t.verification_id
     `;

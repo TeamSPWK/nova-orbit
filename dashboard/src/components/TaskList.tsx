@@ -33,6 +33,8 @@ interface TaskItem {
   parent_task_id?: string | null;
   verification_id: string | null;
   verification_verdict?: string | null;
+  verification_issues?: string | null;
+  result_summary?: string | null;
 }
 
 interface TaskListProps {
@@ -283,7 +285,26 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
               ${(usage.costUsd ?? 0).toFixed(2)}
             </span>
           )}
+          {task.result_summary?.startsWith("[자동 건너뜀]") && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 rounded shrink-0"
+              title={task.result_summary}>
+              건너뜀
+            </span>
+          )}
         </div>
+        {/* Block reason — show top verification failure for blocked/auto-skipped tasks */}
+        {(task.status === "blocked" || task.result_summary?.startsWith("[자동 건너뜀]")) && task.verification_issues && (() => {
+          try {
+            const issues = JSON.parse(task.verification_issues);
+            if (!Array.isArray(issues) || issues.length === 0) return null;
+            const top = issues[0];
+            return (
+              <div className="text-[11px] text-red-500/80 dark:text-red-400/70 pl-6 truncate" title={top.message}>
+                {top.severity === "critical" ? "⚠ " : ""}{top.message?.slice(0, 120)}
+              </div>
+            );
+          } catch { return null; }
+        })()}
 
         {/* Active reviewer for in_review tasks — surfaces the Generator-Evaluator
             separation so users see *which* agent is currently reviewing. */}
