@@ -256,26 +256,81 @@ export function createScheduler(
    * so the goal can still complete with the remaining tasks.
    */
   function retryBlockedTasks(projectId: string): void {
-    const cooldownSeconds = Math.round(BLOCKED_RETRY_DELAY_MS / 1000);
+    const baseCooldownSeconds = Math.round(BLOCKED_RETRY_DELAY_MS / 1000);
+
+    // Step 0: Circuit breaker — detect repeated identical verification failures.
+    // If a task has 2+ consecutive 'fail' verdicts with the same top issue,
+    // exhaust its retry/reassign budget immediately. Retrying the same prompt
+    // against the same code will produce the same failure — burning tokens.
+    const blockedWithRetries = db.prepare(`
+      SELECT id, title FROM tasks
+      WHERE project_id = ? AND status = 'blocked'
+        AND NOT (retry_count >= ? AND reassign_count >= ?)
+    `).all(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { id: string; title: string }[];
+
+    for (const task of blockedWithRetries) {
+      const recentFails = db.prepare(`
+        SELECT issues FROM verifications
+        WHERE task_id = ? AND verdict = 'fail'
+        ORDER BY created_at DESC LIMIT 2
+      `).all(task.id) as { issues: string }[];
+
+      if (recentFails.length < 2) continue;
+
+      // Compare top issue signatures across the two most recent failures
+      try {
+        const sig = (issuesJson: string): string => {
+          const issues = JSON.parse(issuesJson);
+          if (!Array.isArray(issues) || issues.length === 0) return "";
+          // Signature: severity + first 120 chars of message (normalize line numbers only)
+          // Targeted normalization: file.ts:42 → file.ts:N, line 42 → line N
+          // Preserves identifiers like variable1, foo2 to avoid false positives
+          return issues.slice(0, 3).map((i: any) =>
+            `${i.severity ?? ""}:${(i.message ?? "").replace(/:\d+/g, ":N").replace(/line \d+/gi, "line N").slice(0, 120)}`
+          ).join("|");
+        };
+        const sig0 = sig(recentFails[0].issues);
+        const sig1 = sig(recentFails[1].issues);
+        if (sig0 && sig0 === sig1) {
+          db.prepare(
+            "UPDATE tasks SET retry_count = ?, reassign_count = ?, updated_at = datetime('now') WHERE id = ?"
+          ).run(MAX_TASK_RETRIES, MAX_REASSIGNS, task.id);
+          log.warn(`Circuit breaker: task "${task.title}" has identical failures — permanently blocked`);
+          db.prepare(
+            "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_skipped', ?)"
+          ).run(projectId, `반복 동일 실패 감지 — 자동 중단: ${task.title}`);
+          broadcast("project:updated", { projectId });
+        }
+      } catch { /* ignore JSON parse errors — proceed with normal retry */ }
+    }
 
     // Step 1: Retry tasks that still have attempts left (same agent)
-    const retried = db.prepare(`
-      UPDATE tasks SET status = 'todo', retry_count = retry_count + 1, updated_at = datetime('now')
-      WHERE project_id = ? AND status = 'blocked' AND retry_count < ?
-        AND updated_at <= datetime('now', '-${cooldownSeconds} seconds')
-    `).run(projectId, MAX_TASK_RETRIES);
+    // Exponential backoff: cooldown doubles with each retry (10s → 20s → 40s → ...)
+    // Query each retry level separately to apply per-level cooldown.
+    let totalRetried = 0;
+    for (let level = 0; level < MAX_TASK_RETRIES; level++) {
+      const levelCooldown = baseCooldownSeconds * Math.pow(2, level);
+      const retried = db.prepare(`
+        UPDATE tasks SET status = 'todo', retry_count = retry_count + 1, updated_at = datetime('now')
+        WHERE project_id = ? AND status = 'blocked' AND retry_count = ?
+          AND updated_at <= datetime('now', '-${levelCooldown} seconds')
+      `).run(projectId, level);
+      totalRetried += retried.changes;
+    }
 
-    if (retried.changes > 0) {
-      log.info(`Auto-retried ${retried.changes} blocked tasks (same agent)`);
+    if (totalRetried > 0) {
+      log.info(`Auto-retried ${totalRetried} blocked tasks (same agent, exponential backoff)`);
       broadcast("project:updated", { projectId });
     }
 
     // Step 2: Escalate — reassign retry-exhausted tasks to a different agent
     // Only if reassign_count < MAX_REASSIGNS (prevents infinite agent-switching loop)
+    // Use escalated cooldown for reassignment (base × 2^MAX_TASK_RETRIES)
+    const reassignCooldown = baseCooldownSeconds * Math.pow(2, MAX_TASK_RETRIES);
     const exhausted = db.prepare(`
       SELECT t.id, t.assignee_id, t.title, t.reassign_count FROM tasks t
       WHERE t.project_id = ? AND t.status = 'blocked' AND t.retry_count >= ? AND t.reassign_count < ?
-        AND t.updated_at <= datetime('now', '-${cooldownSeconds} seconds')
+        AND t.updated_at <= datetime('now', '-${reassignCooldown} seconds')
     `).all(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { id: string; assignee_id: string | null; title: string; reassign_count: number }[];
 
     if (exhausted.length === 0) return;
@@ -286,8 +341,11 @@ export function createScheduler(
     ).all(projectId) as { id: string; role: string }[];
 
     if (agents.length <= 1) {
-      // Only one agent — can't reassign, give up on these tasks
+      // Only one agent — can't reassign, exhaust reassign budget to prevent repeat queries
       for (const t of exhausted) {
+        db.prepare(
+          "UPDATE tasks SET reassign_count = ?, updated_at = datetime('now') WHERE id = ?",
+        ).run(MAX_REASSIGNS, t.id);
         log.warn(`Task "${t.title}" permanently blocked — no alternative agent available`);
         db.prepare(
           "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_skipped', ?)",
@@ -492,13 +550,25 @@ export function createScheduler(
     // with a task that was just transitioned but hasn't been added to busy yet.
     const STALE_THRESHOLD_SECONDS = Math.ceil((TASK_TIMEOUT_MS * 3) / 1000);
     const staleCandidates = db.prepare(`
-      SELECT id, assignee_id, status FROM tasks
+      SELECT id, assignee_id, status, retry_count, reassign_count FROM tasks
       WHERE project_id = ?
         AND status IN ('in_progress', 'in_review')
         AND (strftime('%s', 'now') - strftime('%s', updated_at)) > ?
-    `).all(projectId, STALE_THRESHOLD_SECONDS) as { id: string; assignee_id: string | null; status: string }[];
+    `).all(projectId, STALE_THRESHOLD_SECONDS) as { id: string; assignee_id: string | null; status: string; retry_count: number; reassign_count: number }[];
     for (const ghost of staleCandidates) {
       if (ghost.assignee_id && busy.has(ghost.assignee_id)) continue; // really running
+
+      // Respect retry/reassign limits — don't revive permanently exhausted tasks
+      if (ghost.retry_count >= MAX_TASK_RETRIES && ghost.reassign_count >= MAX_REASSIGNS) {
+        db.prepare("UPDATE tasks SET status = 'blocked', updated_at = datetime('now') WHERE id = ?").run(ghost.id);
+        log.warn(`Stale ${ghost.status} task ${ghost.id} → blocked (retry/reassign exhausted, not revivable)`);
+        db.prepare(
+          "INSERT INTO activities (project_id, type, message) VALUES (?, 'task_skipped', ?)"
+        ).run(projectId, `중단된 작업 영구 차단됨 (재시도 한도 초과)`);
+        broadcast("project:updated", { projectId });
+        continue;
+      }
+
       db.prepare("UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?").run(ghost.id);
       log.warn(`Stale ${ghost.status} task ${ghost.id} reset to todo (no live runtime, idle > ${STALE_THRESHOLD_SECONDS}s)`);
       db.prepare(
@@ -652,23 +722,25 @@ export function createScheduler(
 
   /**
    * Check if the queue should auto-stop:
-   * No todo, in_progress, pending_approval, or retryable blocked tasks remain.
+   * No todo, in_progress, in_review, pending_approval, or retryable blocked tasks remain.
    */
   function shouldAutoStop(projectId: string): boolean {
     const remaining = db.prepare(`
       SELECT COUNT(*) as cnt FROM tasks
       WHERE project_id = ?
-        AND status IN ('todo', 'in_progress', 'pending_approval')
+        AND status IN ('todo', 'in_progress', 'in_review', 'pending_approval')
     `).get(projectId) as { cnt: number };
 
     if (remaining.cnt > 0) return false;
 
     // Check for blocked tasks that could still be retried
+    // A task is retryable only if BOTH conditions aren't exhausted.
+    // Previously used OR which incorrectly kept retrying when one limit was hit but not the other.
     const retryable = db.prepare(`
       SELECT COUNT(*) as cnt FROM tasks
       WHERE project_id = ?
         AND status = 'blocked'
-        AND (retry_count < ? OR reassign_count < ?)
+        AND NOT (retry_count >= ? AND reassign_count >= ?)
     `).get(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { cnt: number };
 
     if (retryable.cnt > 0) return false;
