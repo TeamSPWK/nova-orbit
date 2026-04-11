@@ -373,7 +373,15 @@ export function createProjectRoutes(ctx: AppContext): Router {
             log.info(`Rescue: spec generated for goal ${g.id}, triggering decompose`);
             broadcast("project:updated", { projectId });
             if (ctx.orchestrationEngine) {
-              ctx.orchestrationEngine.decomposeGoal(g.id).catch((err: any) => {
+              ctx.orchestrationEngine.decomposeGoal(g.id).then(() => {
+                // Auto-approve tasks in goal/full autopilot mode
+                const proj = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+                if (proj && (proj.autopilot === "goal" || proj.autopilot === "full")) {
+                  db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(g.id);
+                  broadcast("project:updated", { projectId });
+                  log.info(`Rescue: auto-approved tasks for goal ${g.id}`);
+                }
+              }).catch((err: any) => {
                 log.error(`Rescue decompose failed for goal ${g.id}`, err);
                 db.prepare(
                   "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)",
@@ -403,7 +411,15 @@ export function createProjectRoutes(ctx: AppContext): Router {
           return;
         }
         log.info(`Rescue: spec already exists for goal ${g.id}, triggering decompose directly`);
-        ctx.orchestrationEngine.decomposeGoal(g.id).catch((err: any) => {
+        ctx.orchestrationEngine.decomposeGoal(g.id).then(() => {
+          // Auto-approve tasks in goal/full autopilot mode
+          const proj = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+          if (proj && (proj.autopilot === "goal" || proj.autopilot === "full")) {
+            db.prepare("UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'").run(g.id);
+            broadcast("project:updated", { projectId });
+            log.info(`Rescue: auto-approved tasks for goal ${g.id}`);
+          }
+        }).catch((err: any) => {
           log.error(`Rescue decompose failed for goal ${g.id}`, err);
           db.prepare(
             "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)",

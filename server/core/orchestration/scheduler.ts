@@ -1220,6 +1220,20 @@ export function createScheduler(
         return;
       }
       log.info(`Starting queue for project ${projectId} (max concurrency: ${DEFAULT_MAX_CONCURRENCY})`);
+
+      // Auto-approve any stuck pending_approval tasks from previous runs
+      // (e.g., rescue decompose completed but server restarted before approval)
+      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(projectId) as { autopilot: string } | undefined;
+      if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+        const approved = db.prepare(
+          "UPDATE tasks SET status = 'todo' WHERE project_id = ? AND status = 'pending_approval'"
+        ).run(projectId);
+        if (approved.changes > 0) {
+          log.info(`startQueue: auto-approved ${approved.changes} stuck pending_approval task(s) for project ${projectId}`);
+          broadcast("project:updated", { projectId });
+        }
+      }
+
       busyAgents.set(projectId, new Set());
       pauseState.delete(projectId);
       timers.set(projectId, setTimeout(() => poll(projectId), 0));
