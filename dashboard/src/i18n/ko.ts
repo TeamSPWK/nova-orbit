@@ -162,6 +162,9 @@ const ko = {
   dropHere: "여기에 놓기",
 
   // VerificationLog
+  "severity_hard-block": "즉시 수정 필요",
+  "severity_soft-block": "권장 수정",
+  "severity_auto-resolve": "자동 해결",
   verdictPass: "통과",
   verdictConditional: "조건부",
   verdictFail: "실패",
@@ -283,6 +286,8 @@ const ko = {
   recentActivity: "최근 활동",
 
   // Error / status messages (inline)
+  importedSuccess: "프로젝트를 가져왔습니다",
+  connectedSuccess: "GitHub 저장소를 연결했습니다",
   errorImportFailed: "가져오기 실패",
   errorGitHubFailed: "GitHub 연결 실패",
   errorAgentNotFound: "에이전트를 찾을 수 없습니다",

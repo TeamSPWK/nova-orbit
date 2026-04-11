@@ -162,6 +162,9 @@ const en = {
   dropHere: "Drop here",
 
   // VerificationLog
+  "severity_hard-block": "Must Fix",
+  "severity_soft-block": "Should Fix",
+  "severity_auto-resolve": "Auto-resolved",
   verdictPass: "PASS",
   verdictConditional: "CONDITIONAL",
   verdictFail: "FAIL",
@@ -283,6 +286,8 @@ const en = {
   recentActivity: "Recent Activity",
 
   // Error / status messages (inline)
+  importedSuccess: "Project imported successfully",
+  connectedSuccess: "GitHub repository connected",
   errorImportFailed: "Import failed",
   errorGitHubFailed: "GitHub connect failed",
   errorAgentNotFound: "Agent not found",

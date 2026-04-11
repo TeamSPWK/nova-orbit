@@ -153,7 +153,7 @@ export function VerificationLog({ projectId }: VerificationLogProps) {
               <span className="text-xs text-gray-600 dark:text-gray-300 truncate min-w-0">{v.task_title}</span>
             )}
             <span className={`text-xs shrink-0 ${SEVERITY_COLORS[v.severity]}`}>
-              {v.severity}
+              {t(`severity_${v.severity}`, v.severity)}
             </span>
             <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{v.scope}</span>
           </button>

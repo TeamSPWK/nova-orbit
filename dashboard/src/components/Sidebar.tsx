@@ -71,10 +71,7 @@ export function Sidebar() {
       setProjects(updatedProjects);
       setCurrentProject(data.project.id);
 
-      const agentNames = data.agents.map((a: any) => `${a.name} (${a.role})`).join(", ");
-      showToast(
-        `Imported! Tech: ${data.analysis.techStack.languages.join(", ")} | Agents: ${agentNames}`,
-      );
+      showToast(t("importedSuccess"));
     } catch (err: any) {
       showToast(`${t("errorImportFailed")}: ${err.message}`);
     }
@@ -104,10 +101,7 @@ export function Sidebar() {
       setProjects(updatedProjects);
       setCurrentProject(data.project.id);
 
-      const agentNames = data.agents.map((a: any) => `${a.name} (${a.role})`).join(", ");
-      showToast(
-        `Connected! Branch: ${data.branch} | Tech: ${data.analysis.techStack.languages.join(", ")} | Agents: ${agentNames}`,
-      );
+      showToast(t("connectedSuccess"));
     } catch (err: any) {
       showToast(`${t("errorGitHubFailed")}: ${err.message}`);
     }
@@ -195,8 +189,13 @@ export function Sidebar() {
           </button>
           <button
             onClick={() => window.dispatchEvent(new CustomEvent("nova:show-guide"))}
-            className="w-full py-1.5 text-sm text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors text-[10px]"
+            className={`w-full py-1.5 text-xs rounded transition-colors flex items-center gap-1.5 justify-center font-medium ${
+              projects.length === 0
+                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800"
+                : "text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            }`}
           >
+            <span>📖</span>
             {t("gettingStarted")}
           </button>
         </div>

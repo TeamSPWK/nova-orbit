@@ -1448,7 +1448,7 @@ export function ProjectHome() {
                         ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                         : "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
                   }`}>
-                    {autopilotMode === "off" ? "Manual" : autopilotMode === "goal" ? "Goal" : "Full"}
+                    {autopilotMode === "off" ? t("autopilotMode_off") : autopilotMode === "goal" ? t("autopilotMode_goal") : t("autopilotMode_full")}
                   </span>
                   <span className="text-[11px] text-gray-400 dark:text-gray-500 flex-1 truncate">
                     {autopilotMode === "off" && t("autopilotDescManual")}
