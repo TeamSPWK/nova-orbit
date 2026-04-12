@@ -1083,13 +1083,15 @@ reachable from an empty install via any of: seed script, dev-mode bypass
 the goal is implemented but unusable. If goal is pure refactor/visual,
 write "no bootstrap: non-gated" in the first task's description.
 
+CRITICAL: Keep your response SHORT. Each task description must be under 100 words. Do NOT add lengthy explanations. Total response must fit in 2000 tokens.
+
 Respond in this EXACT JSON format:
 \`\`\`json
 {
   "tasks": [
     {
-      "title": "Task title",
-      "description": "Detailed description with acceptance criteria",
+      "title": "Task title (concise)",
+      "description": "Brief description with key acceptance criteria — max 100 words",
       "role": "${availableAgents[0]?.role ?? "coder"}",
       "priority": "high",
       "order": 1,

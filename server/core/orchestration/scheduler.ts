@@ -71,6 +71,7 @@ export function createScheduler(
    * them independent without extra state.
    */
   const fullAutopilotLock = new Set<string>();
+  const decomposRetryCount = new Map<string, number>();
 
   // projectId → set of currently busy agent IDs
   const busyAgents = new Map<string, Set<string>>();
@@ -944,6 +945,36 @@ export function createScheduler(
           projectId, `목표 처리 실패 "${goalTitle.slice(0, 40)}": ${err.message?.slice(0, 150)}`
         );
         broadcast("project:updated", { projectId });
+
+        // Auto-retry decompose failures (rate limit, truncated JSON, etc.)
+        // Max 2 retries with 60s backoff. Only retry if no tasks were created
+        // (partial creation is handled by the fallback auto-approve path).
+        const retryKey = `decompose-retry-${goalId}`;
+        const retryCount = (decomposRetryCount.get(retryKey) ?? 0) + 1;
+        decomposRetryCount.set(retryKey, retryCount);
+        const existingAfterError = (db.prepare(
+          "SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?"
+        ).get(goalId) as { count: number }).count;
+
+        if (retryCount <= 2 && existingAfterError === 0) {
+          const retryDelayMs = 60_000 * retryCount; // 60s, 120s
+          log.info(`Decompose retry ${retryCount}/2 for goal "${goalTitle}" in ${retryDelayMs / 1000}s`);
+          db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)").run(
+            projectId, `작업 분할 재시도 ${retryCount}/2 — ${retryDelayMs / 1000}초 후 자동 재시도`
+          );
+          broadcast("project:updated", { projectId });
+          setTimeout(() => {
+            decomposRetryCount.delete(retryKey);
+            processNextGoal(projectId, goalId);
+          }, retryDelayMs);
+        } else if (retryCount > 2) {
+          decomposRetryCount.delete(retryKey);
+          log.warn(`Decompose retry exhausted for goal "${goalTitle}" — manual retry required`);
+          db.prepare("INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_warning', ?)").run(
+            projectId, `작업 분할 ${retryCount}회 실패 — 수동 재시도 필요: "${goalTitle.slice(0, 60)}"`
+          );
+          broadcast("project:updated", { projectId });
+        }
       } finally {
         clearActivity();
         fullAutopilotLock.delete(`process-${projectId}`);
