@@ -1073,10 +1073,12 @@ export function createScheduler(
       log.info(`AIMD: concurrency ${prevConcurrency} → ${newConcurrency} for ${projectId} (rate limit, multiplicative decrease)`);
     }
 
-    // Do not pause — only reduce concurrency. Unpause immediately so the queue
-    // keeps running with the reduced slot count.
-    state.paused = false;
-    state.nextRetryAt = null;
+    // Cancel any previous backoff timer to prevent timer overlap
+    // (e.g., 60s timer fires while 120s timer is still pending → double poll)
+    if (state.resumeTimer) clearTimeout(state.resumeTimer);
+
+    // Pause during backoff — resumed by the timer below
+    state.paused = true;
 
     const backoffMs = Math.min(
       BACKOFF_BASE_MS * Math.pow(2, state.consecutiveRateLimits - 1),
@@ -1096,6 +1098,7 @@ export function createScheduler(
 
     // Short backoff before allowing next pick — prevents immediate retry spam
     state.resumeTimer = setTimeout(() => {
+      state.paused = false;
       state.nextRetryAt = null;
       log.info(`Queue AIMD backoff elapsed for project ${projectId}`);
       broadcast("queue:resumed", { projectId });
