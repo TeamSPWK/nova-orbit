@@ -1,63 +1,77 @@
 # Nova State
 
 ## Current
-- **Goal**: 스케줄러 안정화 + 대시보드 UX 개선
-- **Phase**: done (12 commits)
+- **Goal**: Pulsar v2 하이브리드 마케팅 오케스트레이터 + Nova Orbit 오케스트레이션 개선
+- **Phase**: Pulsar v1 목표 완료, v2 기획 전달 완료, Nova Orbit 개선 커밋 완료
 - **Blocker**: none
 
-## Tasks (이번 세션 — 2026-04-11)
+## Tasks (이번 세션 — 2026-04-11~12)
+
+### Nova Orbit 오케스트레이션 개선
 | Task | Status | Note |
 |------|--------|------|
-| zippit retry 루프 조사 + 세션 kill | done | 21개 세션 폭발 원인 분석 |
-| 스케줄러 retry 방어 4건 | done | 지수 백오프, 회로 차단기, ghost cleanup, shouldAutoStop |
-| rescue 순차 처리 | done | 병렬 spec 생성 방지, activeGoal 가드, progress 갱신 |
-| 영구 blocked 자동 해결 | done | autoResolvePermanentlyBlocked → done(skipped) |
-| blocked 사유 UX + 가이드 문서 | done | verification_issues, 건너뜀 뱃지, docs/GUIDE.md |
-| /nova:review → UX 10건 | done | C-1~C-3 + W-1~W-7, 프로덕션 빌드 PASS |
-| 5인 적대적 UX 평가 → 15건 도출 | done | 온보딩/PM/파워유저/보안/경쟁분석 |
-| S1: Critical 성능 + 보안 | done | API LIMIT, O(N×M) Map, auth key 1회, rate limiter |
-| S2: 비개발자 용어 + 온보딩 | done | Autopilot 한국어, severity 번역, 시작 가이드, toast i18n |
-| S3: 검색 + 잔여 태스크 + WS 보안 | done | 목표 검색, N개 남음, WS auth 메시지 방식 |
-| S4: 실시간 파일명 + 메트릭 + 에이전트 파일 | done | stream-json 파싱, 통과율 API/UI, .claude/agents 표시 |
+| rescuePendingGoals auto-approve 누락 수정 | done | Goal/Full 모드에서 태스크 stuck 방지 |
+| startQueue pending_approval 자동 승인 | done | 서버 재시작 후 stuck 방지 |
+| 태스크 정렬 버그 수정 | done | done이 활성 태스크를 밀어내는 문제 — status 우선순위 정렬 |
+| 완료 목표 판정 수정 | done | 태스크 0개 + progress 100% → 완료로 분류 |
+| 목표 순서 leapfrog 방지 | done | 진행 중 목표가 있으면 높은 priority도 대기 |
+| 자동 건너뜀 FAIL 메시지 UI 수정 | done | done 태스크에서 block reason 미표시 |
+| NOVA_NO_AUTO_QUEUE 하드코딩 제거 | done | dev 모드에서도 큐 자동 시작 |
+| 태스크 유형별 검증 (task_type) | done | code/content/config/review 4분기, scope mismatch 오탐 제거 |
+| 적응형 동시성 AIMD | done | rate limit 시 동시성 절반, 성공 시 +1 복원 |
+| 태스크 의존성 그래프 DAG | done | depends_on 필드, decompose 시 태깅, pickNextTasks 필터 |
+| decompose 자동 재시도 | done | 실패 시 최대 2회, 60s/120s 백오프 |
+| decompose 프롬프트 간결화 | done | JSON truncation 방지, max 100 words/task |
+| AIMD 타이머 충돌 수정 | done | backoff 중 pause=true + 이전 타이머 취소 |
+| Rate limit UX 개선 (5인 UX Audit) | done | 모달→인라인 배너, Toast 5초, aria-live, 중립 톤 |
+
+### Pulsar 마케팅 전략 전환
+| Task | Status | Note |
+|------|--------|------|
+| Pulsar 현재 상태 분석 | done | UI 75%, 백엔드 90%, 전부 dry_run, fixture 데이터 |
+| 미션 변경 (개발→실행 중심) | done | "ZipPit 실제 발행 + 유입 100회" |
+| 목표 7개 등록 + 전부 완료 | done | Ghost 발행, 파이프라인, 대시보드, SEO, 유입추적, 카드뉴스, 뉴스레터 |
+| 국내 마케팅 채널 조사 | done | Ghost 국내 비효과, 네이버/티스토리/커뮤니티 중심 전환 |
+| 3인 다관점 자문 (/nova:consult) | done | Strong Consensus: 도구형+커뮤니티 시딩 > 블로그 |
+| v2 기획서 작성 | done | docs/plans/plan-v2-hybrid-orchestrator.md |
+| v2 미션+목표 5개 등록 | done | 수동태스크보드, 주간플랜, 티스토리, 커뮤니티인텔, 성과추적 |
+| pipeline.py SyntaxError 수정 | done | 2996줄 줄바꿈 `\` 누락 |
+| Pulsar 로컬 실행 검증 (Playwright) | done | 대시보드+API+Ghost+Redis 기동 확인 |
 
 ## Recently Done (max 3)
 | Task | Completed | Ref |
 |------|-----------|-----|
-| 스케줄러 안정화 + UX 개선 (7 commits) | 2026-04-11 | `3c447a4`→`7e703be` |
-| 오케스트레이션 엔진 안정화 (25+ 이슈) | 2026-04-10 | `1dc62b5`→`41e47f0` (9 commits) |
-| Nova Orbit UX/안정성 대규모 개선 (21 commits) | 2026-04-10 | 이전 세션 |
+| Nova Orbit 오케스트레이션 3대 개선 + 버그 14건 | 2026-04-12 | `355087f`, `47284a8`, `41e1547` |
+| Pulsar v1 목표 7개 전부 완료 + v2 기획 전달 | 2026-04-12 | 미션 전환, 5개 신규 목표 |
+| 스케줄러 안정화 + UX 개선 (7 commits) | 2026-04-11 | 이전 세션 |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
 |------|-------------------|----------|
-| 에이전트 파일 편집 UI | .claude/agents/ 파일 읽기 전용 표시 완료. 편집(쓰기) 기능은 미구현 | Low |
-| 에이전트 로그 과거 복원 | 새로고침 시 이전 실행 로그 사라짐 (DB/localStorage 캐싱 없음) | Low |
-| 3단계 팀 리더 위임 | FE 리더 → 팀원 위임 구조 (delegation.ts 확장) | Low |
-| Subtask verification | parent verification에 git diff 통합 | Medium |
-| Goal 의존성 | depends_on_goal_id 미구현 | Low |
+| DAG 순환 의존성 방지 | decompose 시 순환 감지 로직 미구현 — 수동 DB 수정으로 임시 해결 | **High** |
+| AIMD 쿨다운 후 resume 검증 | 타이머 충돌 수정했으나 장시간 운영 시 재현 테스트 필요 | Medium |
+| Pulsar fixture 데이터 | analytics.yaml의 seed fixture가 아직 집계에 포함됨 — v2 목표에 포함 | Medium |
+| 에이전트 파일 편집 UI | .claude/agents/ 읽기 전용. 편집 미구현 | Low |
 | npm publish | npmjs.com 미배포 | Low |
-| activities CASCADE | 프로젝트 삭제 시 activities 고아 레코드 가능 (현재 audit trail 보존) | Low |
-| dev_port 잔여 컬럼 | Dev Server 기능 제거했으나 SQLite dev_port 컬럼은 잔존 (무해, NULL) | Low |
 
 ## Key Architecture Changes
 
+### 오케스트레이션 3대 개선 (2026-04-12)
+1. **태스크 유형별 검증**: task_type(code/content/config/review) 컬럼 + evaluator 4분기 프롬프트
+2. **적응형 동시성 AIMD**: rate limit 1~2회 → 동시성 절반, 성공 시 +1, 3회 → 15분 쿨다운
+3. **태스크 의존성 그래프**: depends_on 컬럼, decompose 시 order→ID 매핑, pickNextTasks DAG 필터
+
+### Pulsar v2 전략 전환 (2026-04-12)
+- **Before**: Ghost 블로그 자동 발행 중심
+- **After**: 하이브리드 오케스트레이터 (자동 파이프라인 + 수동 태스크 보드)
+- 기획서: `pulsar/docs/plans/plan-v2-hybrid-orchestrator.md`
+- 핵심: 도구형 마케팅(계산기 공유) + 커뮤니티 시딩 + 국내 채널(네이버/티스토리)
+
 ### 스케줄러 retry 방어 체계 (2026-04-11)
-1. **회로 차단기**: 연속 2회 동일 검증 실패 시 시그니처 비교 → 즉시 영구 blocked
-2. **지수 백오프**: retry level별 쿨다운 (10s × 2^level), reassign은 40s
-3. **ghost cleanup 한도 체크**: retry/reassign 소진된 stale 태스크는 todo가 아닌 blocked로 전이
-4. **shouldAutoStop 보완**: in_review 포함 + 단일 에이전트 시 reassign 예산 소진
-
-### 중복 태스크 방지 3층 방어 (2026-04-10)
-1. **decomposeGoal 근본 가드**: 기존 태스크 존재 시 taskCount=0 반환, AI 세션 spawn 방지
-2. **processNextGoal 이중 방어**: decompose 전 count 체크 + auto-approve를 decompose 분기 안으로
-3. **6개 호출 경로 전부 보호**: triggerAutopilotDecompose, rescuePendingGoals, triggerFullAutopilot 등
-
-### 개발 모드 토큰 절약 (2026-04-10)
-- `NOVA_NO_AUTO_QUEUE=true` 환경변수 → dev:server에 기본 적용
+1. 회로 차단기: 연속 2회 동일 검증 실패 시 즉시 영구 blocked
+2. 지수 백오프: retry level별 쿨다운
+3. ghost cleanup 한도 체크
+4. shouldAutoStop 보완
 
 ## Last Activity
-- Dev Server 기능 전체 제거 (9파일), 고아 브랜치 정리 기본값 변경, 목표 카드 overflow 수정 | 2026-04-11T21:30:00+09:00
-
-## Refs
-- Session commits: `3c447a4` → `1405646` → `ae690c0` → `6d00535` → `e478141` → `7e703be` → `1e09156` → `e42539f` → `1fa360d` → `2d8cfeb` → `b31cefa` → `bd0a3fd`
-- Last Verification: tsc (server+dashboard) PASS, npm run build PASS
+- Pulsar v2 기획서 작성 + 미션/목표 전달, AIMD 타이머 버그 수정 | 2026-04-12T22:55:00+09:00
