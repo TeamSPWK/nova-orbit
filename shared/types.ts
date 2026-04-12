@@ -87,6 +87,9 @@ export type TaskStatus =
   | "done"
   | "blocked";
 
+/** 태스크 유형 — 유형별로 검증 기준이 달라진다 */
+export type TaskType = "code" | "content" | "config" | "review";
+
 export interface Goal {
   id: string;
   projectId: string;
@@ -112,6 +115,10 @@ export interface Task {
   targetFiles: string[];
   /** Short stack/framework constraint, e.g. "Next.js 16 App Router". */
   stackHint: string;
+  /** 태스크 유형 — 검증 기준 결정. 기본값 'code'. */
+  taskType: TaskType;
+  /** DAG 의존성 — 이 태스크 시작 전 완료되어야 하는 task ID 배열. 빈 배열이면 제약 없음. */
+  dependsOn: string[];
   createdAt: string;
   updatedAt: string;
 }

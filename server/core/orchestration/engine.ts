@@ -29,6 +29,7 @@ interface TaskRow {
   verification_id: string | null;
   target_files: string | null;  // JSON array of paths (P2: scope anchoring)
   stack_hint: string | null;    // Short stack constraint (P2: scope anchoring)
+  depends_on: string | null;    // JSON array of task IDs (DAG dependency)
 }
 interface ProjectRow {
   id: string;
@@ -1052,7 +1053,13 @@ Rules:
 - Use the "role" field to assign tasks to available team members
 - Set "priority": "critical" | "high" | "medium" | "low" based on importance and dependency
 - Set "order": sequential number (1, 2, 3...) reflecting execution order — tasks with dependencies on others must have a higher number
+- Set "depends_on": array of order numbers that MUST complete before this task starts. Use [] for tasks with no dependencies. Example: a QA task after tasks 1,2,3 should have "depends_on": [1,2,3]. Independent tasks (e.g. parallel content generation) each get [].
 - Verification/review/QA tasks should always have the highest order number (run last)${goalSpec ? "\n- Reference the structured spec above to ensure complete coverage of all features and acceptance criteria" : ""}
+- Set "type": task type — determines verification criteria applied
+  - "code": source code implementation (default, 5-dimension verification)
+  - "content": documentation / copywriting / i18n (3-dimension: Completeness, Consistency, Clarity)
+  - "config": infrastructure / environment / CI config (2-dimension: Validity, Security)
+  - "review": QA execution / smoke test / integration test (execution-based pass/fail only)
 
 ## Required fields per task
 - \`target_files\`: array of file paths this task will touch (e.g.
@@ -1060,6 +1067,7 @@ Rules:
   only if you genuinely cannot guess. Evaluator rejects diff/scope drift.
 - \`stack_hint\`: short framework constraint (e.g. "Next.js 16 App Router",
   "FastAPI router"). Empty string if none. Prevents wrong-stack impls.
+- \`type\`: one of "code" | "content" | "config" | "review". Default "code".
 
 ## Fullstack contract rule (if goal touches backend API AND UI)
 The first task that touches the API MUST cite the exact response shape
@@ -1085,8 +1093,10 @@ Respond in this EXACT JSON format:
       "role": "${availableAgents[0]?.role ?? "coder"}",
       "priority": "high",
       "order": 1,
+      "type": "code",
       "target_files": ["relative/path/to/file.ext"],
-      "stack_hint": "Next.js 16 App Router"
+      "stack_hint": "Next.js 16 App Router",
+      "depends_on": []
     }
   ]
 }
@@ -1183,6 +1193,10 @@ Respond in this EXACT JSON format:
         let created = 0;
 
         const VALID_PRIORITIES = new Set(["critical", "high", "medium", "low"]);
+        const VALID_TASK_TYPES = new Set(["code", "content", "config", "review"]);
+
+        // Phase 1: INSERT all tasks, build order → task ID map for depends_on resolution
+        const orderToTaskId = new Map<number, string>();
 
         for (let i = 0; i < safeTasks.length; i++) {
           const t = safeTasks[i];
@@ -1199,17 +1213,45 @@ Respond in this EXACT JSON format:
             ? t.target_files.filter((f: unknown) => typeof f === "string" && f.length > 0 && f.length < 260).slice(0, 20)
             : [];
           const stackHint = typeof t.stack_hint === "string" ? t.stack_hint.slice(0, 200) : "";
+          // task_type: 유효값이 아니면 기본값 'code' 사용
+          const taskType = VALID_TASK_TYPES.has(t.type) ? t.type : "code";
           // Sprint 5: tasks created from decomposition start as pending_approval
           // so the user can review the plan before execution begins
-          db.prepare(`
-            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status, priority, sort_order, target_files, stack_hint)
-            VALUES (?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?)
-          `).run(
+          const row = db.prepare(`
+            INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status, priority, sort_order, target_files, stack_hint, task_type)
+            VALUES (?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?)
+            RETURNING id
+          `).get(
             goal.id, goal.project_id, title, description, agent?.id ?? null,
             priority, sortOrder,
-            JSON.stringify(targetFiles), stackHint,
-          );
-          created++;
+            JSON.stringify(targetFiles), stackHint, taskType,
+          ) as { id: string } | undefined;
+
+          if (row) {
+            orderToTaskId.set(sortOrder, row.id);
+            created++;
+          }
+        }
+
+        // Phase 2: resolve depends_on order numbers → actual task IDs and UPDATE
+        for (let i = 0; i < safeTasks.length; i++) {
+          const t = safeTasks[i];
+          if (!t.title || typeof t.title !== "string") continue;
+          const sortOrder = typeof t.order === "number" ? t.order : i + 1;
+          const taskId = orderToTaskId.get(sortOrder);
+          if (!taskId) continue;
+
+          const rawDeps = Array.isArray(t.depends_on) ? t.depends_on : [];
+          const resolvedDeps = rawDeps
+            .filter((d: unknown): d is number => typeof d === "number")
+            .map((orderNum: number) => orderToTaskId.get(orderNum))
+            .filter((id: string | undefined): id is string => id !== undefined && id !== taskId); // exclude self-reference
+
+          if (resolvedDeps.length > 0) {
+            db.prepare(
+              "UPDATE tasks SET depends_on = ? WHERE id = ?"
+            ).run(JSON.stringify(resolvedDeps), taskId);
+          }
         }
 
         log.info(`Created ${created} tasks from goal decomposition`);

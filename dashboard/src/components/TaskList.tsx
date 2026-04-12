@@ -302,8 +302,8 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
             </span>
           )}
         </div>
-        {/* Block reason — show top verification failure for blocked/auto-skipped tasks */}
-        {(task.status === "blocked" || task.result_summary?.startsWith("[자동 건너뜀]")) && task.verification_issues && (() => {
+        {/* Block reason — show top verification failure for blocked tasks only */}
+        {task.status === "blocked" && task.verification_issues && (() => {
           try {
             const issues = JSON.parse(task.verification_issues);
             if (!Array.isArray(issues) || issues.length === 0) return null;

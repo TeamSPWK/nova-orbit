@@ -377,6 +377,19 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE tasks ADD COLUMN stack_hint TEXT NOT NULL DEFAULT ''");
   }
 
+  // task_type on tasks — 태스크 유형별 검증 기준 차별화
+  // 유효값: 'code' | 'content' | 'config' | 'review'
+  // 기존 태스크는 'code' 기본값으로 처리
+  if (!taskColsLate.some((c) => c.name === "task_type")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'code'");
+  }
+
+  // depends_on on tasks — DAG dependency support (JSON array of task IDs)
+  // 기존 태스크는 '[]'이므로 동작 변화 없음
+  if (!taskColsLate.some((c) => c.name === "depends_on")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'");
+  }
+
 }
 
 export function generateId(): string {

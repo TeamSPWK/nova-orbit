@@ -124,7 +124,9 @@ export function createQualityGate(
 
         const runResult = await session.send(evaluationPrompt);
         const parsed = parseStreamJson(runResult.stdout);
-        let result = parseVerificationResult(taskId, parsed.text, opts.scope, evaluatorId);
+        // task_type을 전달하여 유형별 임계값 판정에 활용
+        const taskType = (task.task_type ?? "code") as string;
+        let result = parseVerificationResult(taskId, parsed.text, opts.scope, evaluatorId, taskType);
 
         // Retry once if parse failed (all dimensions score 0)
         const allZero = Object.values(result.dimensions).every((d) => d.value === 0);
@@ -133,7 +135,7 @@ export function createQualityGate(
           const retryPrompt = `이전 응답에서 JSON을 파싱하지 못했습니다. 반드시 \`\`\`json 블록으로만 응답하세요.\n\n${evaluationPrompt}`;
           const retryResult = await session.send(retryPrompt);
           const retryParsed = parseStreamJson(retryResult.stdout);
-          result = parseVerificationResult(taskId, retryParsed.text, opts.scope, evaluatorId);
+          result = parseVerificationResult(taskId, retryParsed.text, opts.scope, evaluatorId, taskType);
 
           // If still all zeros after retry — evaluator genuinely can't assess this task
           // (e.g., git merge/cleanup tasks with no code changes to review)
@@ -485,10 +487,21 @@ function buildEvaluationPrompt(
   const novaRules = createNovaRulesEngine();
   const verificationProtocol = novaRules.getVerificationProtocol(scope);
 
+  // task_type — 유효하지 않은 값은 'code'로 기본 처리
+  const VALID_TASK_TYPES = new Set(["code", "content", "config", "review"]);
+  const rawTaskType = (task.task_type ?? "code") as string;
+  const taskType = VALID_TASK_TYPES.has(rawTaskType) ? rawTaskType : "code";
+
+  // content/config/review 태스크는 scope mismatch 검증이 불필요하므로
+  // scope anchor 섹션을 포함하지 않는다 (오탐 방지)
+  const isCodeTask = taskType === "code";
+
   // Parse scope anchoring fields (P2). These are the explicit "where should
   // this code live" hints from task decomposition — if they exist, treat
   // mismatches as hard fails.
+  // code 타입이 아닌 경우에는 scope anchor check를 건너뛴다
   const targetFiles: string[] = (() => {
+    if (!isCodeTask) return [];
     try {
       const parsed = JSON.parse(task.target_files ?? "[]");
       return Array.isArray(parsed) ? parsed.filter((s: unknown) => typeof s === "string") : [];
@@ -496,7 +509,7 @@ function buildEvaluationPrompt(
       return [];
     }
   })();
-  const stackHint = (task.stack_hint ?? "").trim();
+  const stackHint = isCodeTask ? (task.stack_hint ?? "").trim() : "";
 
   // P3: Execution verification enforcement — if the task title/description
   // says "렌더링 검증", "로컬 실행", "smoke test" etc., the Evaluator must
@@ -667,6 +680,155 @@ changes are vanilla HTML/CSS/JS), return \`fail\`.`
     scopeAnchorSection = `\n## Scope Anchor — strict check\n${targetBlock}\n\n${stackBlock}\n`;
   }
 
+  // ── task_type별 분기 프롬프트 반환 ──────────────────────────────────────
+  // content / config / review 태스크는 코드 5차원 검증이 맞지 않는다.
+  // 각 유형에 맞는 최소 검증 기준만 적용하여 오탐을 방지한다.
+
+  if (taskType === "content") {
+    // content: 3차원 검증 (Completeness, Consistency, Clarity)
+    // scope mismatch / data flow / edge cases 제외 — 오탐 원인
+    return `# Content Review — Quality Verification (Nova Protocol)
+
+Review the content deliverable for task: "${task.title}"
+${task.description ? `\nTask description: ${task.description}` : ""}
+
+## Verification Type: CONTENT
+This is a content task (documentation / copywriting / i18n / copy).
+Do NOT apply code-specific checks (scope mismatch, data flow, edge cases).
+
+## Score each dimension 0-10:
+
+1. **Completeness** — Does the content cover everything the task required?
+2. **Consistency** — Is tone, terminology, and style consistent throughout?
+3. **Clarity** — Is the content clear and understandable to the target audience?
+
+## Verdict Rules (content — average 6.0+ → pass):
+- **PASS**: All three dimensions average 6.0+, no critical issues
+- **CONDITIONAL**: Content mostly complete but minor gaps exist
+- **FAIL**: Any dimension below 4.0, or critical accuracy/completeness issue
+
+## Output — respond ONLY with this JSON block:
+
+\`\`\`json
+{
+  "verdict": "pass",
+  "severity": "auto-resolve",
+  "dimensions": {
+    "functionality": { "value": 0, "notes": "N/A — content task" },
+    "dataFlow": { "value": 0, "notes": "N/A — content task" },
+    "designAlignment": { "value": 0, "notes": "N/A — content task" },
+    "craft": { "value": 0, "notes": "N/A — content task" },
+    "edgeCases": { "value": 0, "notes": "N/A — content task" },
+    "completeness": { "value": 8, "notes": "..." },
+    "consistency": { "value": 7, "notes": "..." },
+    "clarity": { "value": 8, "notes": "..." }
+  },
+  "issues": [],
+  "knownGaps": []
+}
+\`\`\`
+
+- Dimensions \`functionality\`, \`dataFlow\`, \`designAlignment\`, \`craft\`, \`edgeCases\` must be present but set value=0 and notes="N/A — content task"
+- Use \`completeness\`, \`consistency\`, \`clarity\` for the actual evaluation
+- \`issues\`: only list actual problems found, empty array if none
+`;
+  }
+
+  if (taskType === "config") {
+    // config: 2차원 검증 (Validity, Security)
+    // 설정 파일 / 인프라 / CI — 코드 품질 체크 불필요
+    return `# Config Review — Quality Verification (Nova Protocol)
+
+Review the configuration changes for task: "${task.title}"
+${task.description ? `\nTask description: ${task.description}` : ""}
+
+## Verification Type: CONFIG
+This is a configuration task (infrastructure / environment / CI / deploy config).
+Apply only Validity and Security checks.
+
+## Score each dimension 0-10:
+
+1. **Validity** — Is the configuration syntactically correct and functionally valid? (threshold: 8.0+)
+2. **Security** — Does the configuration expose secrets, overly broad permissions, or unsafe defaults? (threshold: 8.0+)
+
+## Verdict Rules (config — Validity ≥ 8.0 AND Security ≥ 8.0 → pass):
+- **PASS**: Both Validity and Security score 8.0 or above, no critical issues
+- **CONDITIONAL**: Valid config but non-critical security concern found
+- **FAIL**: Validity < 8.0 (broken config), or Security < 8.0 (security risk)
+
+## Output — respond ONLY with this JSON block:
+
+\`\`\`json
+{
+  "verdict": "pass",
+  "severity": "auto-resolve",
+  "dimensions": {
+    "functionality": { "value": 0, "notes": "N/A — config task" },
+    "dataFlow": { "value": 0, "notes": "N/A — config task" },
+    "designAlignment": { "value": 0, "notes": "N/A — config task" },
+    "craft": { "value": 0, "notes": "N/A — config task" },
+    "edgeCases": { "value": 0, "notes": "N/A — config task" },
+    "validity": { "value": 9, "notes": "..." },
+    "security": { "value": 8, "notes": "..." }
+  },
+  "issues": [],
+  "knownGaps": []
+}
+\`\`\`
+
+- Dimensions \`functionality\`, \`dataFlow\`, \`designAlignment\`, \`craft\`, \`edgeCases\` must be present but set value=0 and notes="N/A — config task"
+- Use \`validity\` and \`security\` for the actual evaluation
+- \`issues\`: only list actual problems found, empty array if none
+`;
+  }
+
+  if (taskType === "review") {
+    // review: 실행 결과 기반 pass/fail — LLM 추론 최소화
+    // QA / smoke test / integration test 등 실행 결과를 직접 확인해야 하는 태스크
+    return `# Execution Review — Quality Verification (Nova Protocol)
+
+Review the execution results for task: "${task.title}"
+${task.description ? `\nTask description: ${task.description}` : ""}
+
+${formatDiffSection(diff)}
+${executionGate}
+
+## Verification Type: REVIEW (Execution-based)
+This is an execution-verification task. Your verdict is based SOLELY on
+whether the execution succeeded — NOT on code quality metrics.
+
+## Verdict Rules (review — execution success → pass):
+- **PASS**: Commands executed successfully, all expected outputs confirmed
+- **CONDITIONAL**: Could not execute (sandbox limitation) — list what needs manual verification
+- **FAIL**: Execution failed, unexpected error, or critical runtime issue found
+
+Do NOT score code quality dimensions. Set all dimension values to 0 with "N/A — review task".
+
+## Output — respond ONLY with this JSON block:
+
+\`\`\`json
+{
+  "verdict": "pass",
+  "severity": "auto-resolve",
+  "dimensions": {
+    "functionality": { "value": 0, "notes": "N/A — review task, see execution results" },
+    "dataFlow": { "value": 0, "notes": "N/A — review task" },
+    "designAlignment": { "value": 0, "notes": "N/A — review task" },
+    "craft": { "value": 0, "notes": "N/A — review task" },
+    "edgeCases": { "value": 0, "notes": "N/A — review task" }
+  },
+  "issues": [],
+  "knownGaps": []
+}
+\`\`\`
+
+- Set all dimension values to 0 with notes="N/A — review task"
+- \`issues\`: only list execution failures found
+- \`knownGaps\`: commands you needed to run but couldn't execute
+`;
+  }
+
+  // ── code (기본): 기존 5차원 검증 유지 ─────────────────────────────────
   return `# Code Review — Quality Verification (Nova Protocol)
 
 Review the code changes for task: "${task.title}"
@@ -754,6 +916,7 @@ function parseVerificationResult(
   rawOutput: string,
   scope: VerificationScope,
   evaluatorSessionId: string,
+  taskType: string = "code",
 ): VerificationResult {
   const defaultScore: Score = { value: 0, notes: "Evaluation failed — could not parse result" };
   const parseErrorIssue: VerificationIssue = {
@@ -808,6 +971,31 @@ function parseVerificationResult(
     const VALID_VERDICTS = new Set(["pass", "conditional", "fail"]);
     const rawVerdict = String(parsed.verdict ?? "fail").toLowerCase().trim();
     let verdict: Verdict = VALID_VERDICTS.has(rawVerdict) ? (rawVerdict as Verdict) : "fail";
+
+    // ── task_type별 임계값 검사 ────────────────────────────────────────────
+    // 에이전트가 반환한 verdict를 기반으로 하되, 유형별 최소 임계값 미달 시
+    // fail로 강제 전환한다. pass→fail 방향만 허용 (fail→pass 금지).
+    if (taskType === "content" && verdict === "pass") {
+      // content: Completeness, Consistency, Clarity 평균 6.0+ 필요
+      const completeness = (parsed.dimensions?.completeness?.value ?? 0) as number;
+      const consistency = (parsed.dimensions?.consistency?.value ?? 0) as number;
+      const clarity = (parsed.dimensions?.clarity?.value ?? 0) as number;
+      const contentAvg = (completeness + consistency + clarity) / 3;
+      if (contentAvg < 6.0) {
+        verdict = "fail";
+        log.info(`content task 임계값 미달 (avg=${contentAvg.toFixed(1)} < 6.0) → fail 전환`);
+      }
+    } else if (taskType === "config" && verdict === "pass") {
+      // config: Validity ≥ 8.0 AND Security ≥ 8.0 필요
+      const validity = (parsed.dimensions?.validity?.value ?? 0) as number;
+      const security = (parsed.dimensions?.security?.value ?? 0) as number;
+      if (validity < 8.0 || security < 8.0) {
+        verdict = "fail";
+        log.info(`config task 임계값 미달 (validity=${validity}, security=${security}) → fail 전환`);
+      }
+    }
+    // review 타입은 에이전트의 실행 결과 verdict를 그대로 신뢰 (별도 임계값 없음)
+    // code 타입은 에이전트의 verdict를 그대로 신뢰 (기존 동작 유지)
 
     // Resolve message across known field name variants. Different evaluator
     // runs have returned the payload under `message`, `description`, `detail`,

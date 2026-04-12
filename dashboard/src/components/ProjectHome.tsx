@@ -687,6 +687,7 @@ export function ProjectHome() {
     const onResumed = () => {
       setQueuePaused(false);
       setQueuePausedInfo(null);
+      useToast.getState().showToast(t("rateLimitResumed"), "success");
     };
     const onStopped = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -1846,20 +1847,15 @@ export function ProjectHome() {
                   const filteredGoals = goalSearchLower
                     ? goals.filter((g) => (g.title || g.description || "").toLowerCase().includes(goalSearchLower))
                     : goals;
-                  const activeGoals = filteredGoals.filter((g) => {
+                  const isGoalCompleted = (g: typeof goals[0]) => {
                     const goalTasks = tasksByGoalId.get(g.id) ?? [];
-                    const pct = goalTasks.length > 0
-                      ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
-                      : 0;
-                    return !(pct === 100 && goalTasks.length > 0);
-                  });
-                  const completedGoals = filteredGoals.filter((g) => {
-                    const goalTasks = tasksByGoalId.get(g.id) ?? [];
-                    const pct = goalTasks.length > 0
-                      ? Math.round((goalTasks.filter((tk) => tk.status === "done").length / goalTasks.length) * 100)
-                      : 0;
-                    return pct === 100 && goalTasks.length > 0;
-                  });
+                    if (goalTasks.length > 0) {
+                      return goalTasks.every((tk) => tk.status === "done");
+                    }
+                    return g.progress >= 100;
+                  };
+                  const activeGoals = filteredGoals.filter((g) => !isGoalCompleted(g));
+                  const completedGoals = filteredGoals.filter((g) => isGoalCompleted(g));
                   const visibleCompleted = showCompletedGoals
                     ? completedGoals
                     : completedGoals.slice(0, COMPLETED_GOALS_THRESHOLD);
@@ -1955,10 +1951,8 @@ export function ProjectHome() {
                   </p>
                 )}
                 <div className="relative">
-                  {/* Rate limit paused overlay */}
+                  {/* Rate limit paused — inline banner (not modal) */}
                   {queuePaused && queuePausedInfo && (() => {
-                    // Derive countdown from absolute nextRetryAt. Read the
-                    // tick so React re-runs this block every second.
                     void countdownTick;
                     const now = Date.now();
                     const retryAt = queuePausedInfo.nextRetryAt
@@ -1967,83 +1961,53 @@ export function ProjectHome() {
                     const msLeft = retryAt ? Math.max(0, retryAt - now) : null;
                     const minutesLeft = msLeft != null ? Math.floor(msLeft / 60000) : null;
                     const secondsLeft = msLeft != null ? Math.floor((msLeft % 60000) / 1000) : null;
-                    const retryAtLabel = retryAt
-                      ? new Date(retryAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                    const timeDisplay = minutesLeft != null && secondsLeft != null
+                      ? (minutesLeft > 0 ? `${minutesLeft}:${String(secondsLeft).padStart(2, "0")}` : `${secondsLeft}${t("secondsSuffix")}`)
                       : null;
-                    const isCooldown = queuePausedInfo.reason === "rate_limit_cooldown";
-                    // Long cooldown (15min) gets red theme so the user can
-                    // tell it apart from short 1-2 minute backoffs at a glance.
-                    const theme = isCooldown
-                      ? { bg: "bg-red-50 dark:bg-red-950/80", border: "border-red-300 dark:border-red-700", text: "text-red-800 dark:text-red-200", subtext: "text-red-600 dark:text-red-400", iconBg: "bg-red-100 dark:bg-red-900/60", iconColor: "text-red-500", btnBg: "bg-red-500 hover:bg-red-600", iconCircle: "bg-red-200 dark:bg-red-900" }
-                      : { bg: "bg-amber-50 dark:bg-amber-950/80", border: "border-amber-300 dark:border-amber-700", text: "text-amber-800 dark:text-amber-200", subtext: "text-amber-600 dark:text-amber-400", iconBg: "bg-amber-100 dark:bg-amber-900/60", iconColor: "text-amber-500", btnBg: "bg-amber-500 hover:bg-amber-600", iconCircle: "bg-amber-200 dark:bg-amber-900" };
 
                     return (
-                      <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
-                        <div className={`flex flex-col items-center gap-3 px-6 py-5 ${theme.bg} border ${theme.border} rounded-xl shadow-lg max-w-sm text-center`}>
-                          <div className={`w-10 h-10 rounded-full ${theme.iconBg} flex items-center justify-center`}>
-                            <svg className={`w-5 h-5 ${theme.iconColor}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <circle cx="12" cy="12" r="10" />
-                              <polyline points="12 6 12 12 16 14" />
-                            </svg>
-                          </div>
-                          <div className="space-y-1.5">
-                            <p className={`text-sm font-semibold ${theme.text}`}>
-                              {isCooldown ? t("rateLimitCooldownTitle") : t("rateLimitPausedTitle")}
-                            </p>
-                            <p className={`text-xs ${theme.subtext}`}>
-                              {t("rateLimitPausedDesc", { retry: queuePausedInfo.retryNumber, max: queuePausedInfo.maxRetries })}
-                            </p>
-                            {retryAtLabel && msLeft != null && (
-                              <div className={`mt-2 pt-2 border-t ${theme.border}`}>
-                                <p className={`text-[11px] ${theme.subtext}`}>
-                                  {t("rateLimitAutoResumeAt", { time: retryAtLabel })}
-                                </p>
-                                <p className={`text-base font-mono font-semibold ${theme.text} tabular-nums mt-0.5`}>
-                                  {minutesLeft! > 0
-                                    ? `${minutesLeft}:${String(secondsLeft).padStart(2, "0")}`
-                                    : `${secondsLeft}${t("secondsSuffix")}`}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-2 w-full pt-1">
-                            <button
-                              onClick={handleResumeQueue}
-                              className={`text-sm px-5 py-2 ${theme.btnBg} text-white rounded-lg font-semibold transition-colors shadow-sm`}
-                            >
-                              {t("resumeNowEmphasized")}
-                            </button>
-                            <p className={`text-[10px] ${theme.subtext}`}>
-                              {t("rateLimitDontWait")}
-                            </p>
-                          </div>
+                      <div className="mb-3 flex items-center gap-3 px-4 py-3 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg" role="status" aria-live="polite" aria-atomic="true">
+                        <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+                          <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
                         </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-700 dark:text-gray-300">
+                            {t("rateLimitPausedBrief")}
+                            {timeDisplay && <span className="font-mono font-medium ml-1 tabular-nums">{timeDisplay}</span>}
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleResumeQueue}
+                          className="text-xs px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-md transition-colors flex-shrink-0"
+                        >
+                          {t("resumeNow")}
+                        </button>
                       </div>
                     );
                   })()}
-                  {/* Queue stopped by rate limit overlay */}
+                  {/* Queue stopped by rate limit — inline banner */}
                   {queueStoppedByRateLimit && !queueRunning && (
-                    <div className="absolute inset-0 z-10 bg-white/60 dark:bg-gray-900/70 backdrop-blur-[1px] rounded-lg flex items-start justify-center pt-16">
-                      <div className="flex flex-col items-center gap-3 px-6 py-5 bg-red-50 dark:bg-red-950/80 border border-red-300 dark:border-red-700 rounded-xl shadow-lg max-w-xs text-center">
-                        <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/60 flex items-center justify-center">
-                          <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <div className="mb-3 flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg" role="status">
+                        <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/60 flex items-center justify-center flex-shrink-0">
+                          <svg className="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="12" cy="12" r="10" />
-                            <line x1="15" y1="9" x2="9" y2="15" />
-                            <line x1="9" y1="9" x2="15" y2="15" />
+                            <line x1="12" y1="8" x2="12" y2="12" />
+                            <line x1="12" y1="16" x2="12.01" y2="16" />
                           </svg>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-red-800 dark:text-red-200">{t("rateLimitStoppedTitle")}</p>
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{t("rateLimitStoppedDesc")}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-amber-800 dark:text-amber-200">{t("rateLimitStoppedBrief")}</p>
                         </div>
                         <button
                           onClick={handleToggleQueue}
                           disabled={queueToggling}
-                          className="text-xs px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                          className="text-xs px-3 py-1.5 bg-amber-100 dark:bg-amber-800 hover:bg-amber-200 dark:hover:bg-amber-700 text-amber-800 dark:text-amber-200 rounded-md transition-colors disabled:opacity-50 flex-shrink-0"
                         >
                           {t("restartQueue")}
                         </button>
-                      </div>
                     </div>
                   )}
                   <TaskList tasks={tasks} agents={agents} projectId={currentProjectId ?? undefined} onUpdate={loadData} autopilotMode={autopilotMode} onAddGoal={handleAddGoal} />

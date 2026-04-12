@@ -54,6 +54,14 @@ export function createScheduler(
 
   // projectId → timer handle
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  // AIMD: projectId → current effective concurrency limit
+  // Starts at DEFAULT_MAX_CONCURRENCY, decreases on rate limit, increases on success.
+  const effectiveConcurrency = new Map<string, number>();
+
+  function getEffectiveConcurrency(projectId: string): number {
+    return effectiveConcurrency.get(projectId) ?? DEFAULT_MAX_CONCURRENCY;
+  }
   /**
    * Prevent duplicate pipeline work. Two disjoint key namespaces share this
    * Set intentionally:
@@ -727,6 +735,36 @@ export function createScheduler(
         }
       }
 
+      // Gate: DAG dependency check — all depends_on task IDs must be 'done'
+      // Permanently-blocked tasks (retry+reassign exhausted) are treated as done
+      // to prevent goals from being blocked forever by unresolvable tasks.
+      const rawDeps: string[] = (() => {
+        try {
+          const parsed = JSON.parse(task.depends_on ?? "[]");
+          return Array.isArray(parsed) ? parsed.filter((d: unknown): d is string => typeof d === "string") : [];
+        } catch {
+          return [];
+        }
+      })();
+
+      if (rawDeps.length > 0) {
+        const pendingDeps = rawDeps.filter((depId) => {
+          const dep = db.prepare(
+            "SELECT status, retry_count, reassign_count FROM tasks WHERE id = ?"
+          ).get(depId) as { status: string; retry_count: number; reassign_count: number } | undefined;
+          if (!dep) return false; // 존재하지 않는 ID는 무시 (안전하게)
+          if (dep.status === "done") return false;
+          // permanently blocked → done과 동일 취급
+          if (dep.retry_count >= MAX_TASK_RETRIES && dep.reassign_count >= MAX_REASSIGNS) return false;
+          return true; // 아직 미완료
+        });
+
+        if (pendingDeps.length > 0) {
+          log.debug(`Task "${task.title}" deferred: ${pendingDeps.length} dependencies not yet done`);
+          continue;
+        }
+      }
+
       picked.push(task);
       usedAgents.add(task.assignee_id);
     }
@@ -746,14 +784,26 @@ export function createScheduler(
     // Without this guard, all goals get decomposed upfront — wasting tokens
     // on spec/decompose for goals whose scope may change based on earlier
     // goal results.
+    //
+    // Two-layer check:
+    // 1. Any goal with non-terminal tasks (in_progress, in_review, todo, pending_approval)
+    // 2. Any goal with progress < 100 that has tasks (even if all blocked — progress
+    //    recalculation may not have run yet)
+    // This prevents a higher-priority new goal from leapfrogging a goal that
+    // still has work remaining but whose tasks are momentarily all blocked/done
+    // (e.g., waiting for reviewer gate, or between retry cycles).
     const activeGoal = db.prepare(`
       SELECT g.id FROM goals g
       WHERE g.project_id = ?
         AND g.progress < 100
         AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id) > 0
-        AND (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status NOT IN ('done', 'blocked')) > 0
+        AND (
+          (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status NOT IN ('done', 'blocked')) > 0
+          OR (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status = 'blocked'
+              AND (t.retry_count < ? OR t.reassign_count < ?)) > 0
+        )
       LIMIT 1
-    `).get(projectId) as { id: string } | undefined;
+    `).get(projectId, MAX_TASK_RETRIES, MAX_REASSIGNS) as { id: string } | undefined;
 
     if (activeGoal) return; // wait for current goal to finish
 
@@ -958,6 +1008,12 @@ export function createScheduler(
         state.paused = false;
         state.nextRetryAt = null;
         state.consecutiveRateLimits = 0; // full reset after cooldown
+        // AIMD: reset concurrency to max after full cooldown recovery
+        const prevConcurrency = getEffectiveConcurrency(projectId);
+        effectiveConcurrency.set(projectId, DEFAULT_MAX_CONCURRENCY);
+        if (prevConcurrency !== DEFAULT_MAX_CONCURRENCY) {
+          log.info(`AIMD: concurrency ${prevConcurrency} → ${DEFAULT_MAX_CONCURRENCY} for ${projectId} (cooldown reset)`);
+        }
         log.info(`Queue resumed after rate-limit cooldown for project ${projectId}`);
         db.prepare(
           "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)",
@@ -977,28 +1033,40 @@ export function createScheduler(
       return;
     }
 
+    // AIMD: Multiplicative Decrease — reduce concurrency instead of full pause
+    // consecutive 1~2회: 동시성을 절반으로 줄이고 계속 실행
+    const prevConcurrency = getEffectiveConcurrency(projectId);
+    const newConcurrency = Math.max(1, Math.floor(prevConcurrency * 0.5));
+    effectiveConcurrency.set(projectId, newConcurrency);
+    if (prevConcurrency !== newConcurrency) {
+      log.info(`AIMD: concurrency ${prevConcurrency} → ${newConcurrency} for ${projectId} (rate limit, multiplicative decrease)`);
+    }
+
+    // Do not pause — only reduce concurrency. Unpause immediately so the queue
+    // keeps running with the reduced slot count.
+    state.paused = false;
+    state.nextRetryAt = null;
+
     const backoffMs = Math.min(
       BACKOFF_BASE_MS * Math.pow(2, state.consecutiveRateLimits - 1),
       BACKOFF_MAX_MS,
     );
-    const retryAt = new Date(Date.now() + backoffMs);
-    state.nextRetryAt = retryAt;
 
-    log.warn(`Queue paused: rate limit (${state.consecutiveRateLimits}/${MAX_CONSECUTIVE_RATE_LIMITS}), retry in ${backoffMs / 1000}s`);
+    log.warn(`Queue AIMD: rate limit (${state.consecutiveRateLimits}/${MAX_CONSECUTIVE_RATE_LIMITS}), concurrency reduced to ${newConcurrency}, backoff ${backoffMs / 1000}s before next pick`);
 
     broadcast("queue:paused", {
       projectId,
       reason: "rate_limit",
       retryNumber: state.consecutiveRateLimits,
       maxRetries: MAX_CONSECUTIVE_RATE_LIMITS,
-      nextRetryAt: retryAt.toISOString(),
+      nextRetryAt: new Date(Date.now() + backoffMs).toISOString(),
       backoffMs,
     });
 
+    // Short backoff before allowing next pick — prevents immediate retry spam
     state.resumeTimer = setTimeout(() => {
-      state.paused = false;
       state.nextRetryAt = null;
-      log.info(`Queue resumed after backoff for project ${projectId}`);
+      log.info(`Queue AIMD backoff elapsed for project ${projectId}`);
       broadcast("queue:resumed", { projectId });
       if (timers.has(projectId)) poll(projectId);
     }, backoffMs);
@@ -1028,6 +1096,14 @@ export function createScheduler(
 
       // Success — reset rate limit counter
       state.consecutiveRateLimits = 0;
+
+      // AIMD: Additive Increase — restore concurrency by 1 on consecutive success
+      const prevConcurrency = getEffectiveConcurrency(projectId);
+      if (prevConcurrency < DEFAULT_MAX_CONCURRENCY) {
+        const newConcurrency = Math.min(DEFAULT_MAX_CONCURRENCY, prevConcurrency + 1);
+        effectiveConcurrency.set(projectId, newConcurrency);
+        log.info(`AIMD: concurrency ${prevConcurrency} → ${newConcurrency} for ${projectId} (success, additive increase)`);
+      }
 
       if (task.parent_task_id) {
         delegationEngine.checkParentCompletion(task.parent_task_id);
@@ -1111,7 +1187,7 @@ export function createScheduler(
     }
 
     const busy = getBusyAgents(projectId);
-    const availableSlots = DEFAULT_MAX_CONCURRENCY - busy.size;
+    const availableSlots = getEffectiveConcurrency(projectId) - busy.size;
 
     if (availableSlots <= 0) {
       // All slots occupied — wait for a task to finish
@@ -1279,7 +1355,7 @@ export function createScheduler(
         running: timers.has(projectId),
         paused: state.paused,
         activeTasks: getBusyAgents(projectId).size,
-        maxConcurrency: DEFAULT_MAX_CONCURRENCY,
+        maxConcurrency: getEffectiveConcurrency(projectId),
         rateLimitRetries: state.consecutiveRateLimits,
         nextRetryAt: state.nextRetryAt?.toISOString() ?? null,
       };
