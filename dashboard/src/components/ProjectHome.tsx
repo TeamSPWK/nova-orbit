@@ -1909,6 +1909,16 @@ export function ProjectHome() {
                       </button>
                     )}
                     <button
+                      onClick={async () => {
+                        const result = await api.orchestration.reassignAll(currentProjectId);
+                        showToast(t("reassignAllDone", { count: result.count }), "success");
+                        loadData();
+                      }}
+                      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium bg-gray-50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      {t("reassignAll")}
+                    </button>
+                    <button
                       onClick={handleToggleQueue}
                       disabled={queueToggling}
                       className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${

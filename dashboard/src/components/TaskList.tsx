@@ -336,14 +336,10 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
 
         <div className="flex items-center gap-1.5 shrink-0 ml-3">
           {/* Agent assignment */}
-          {task.assignee_id && agentMap[task.assignee_id] ? (
-            <span className="text-[10px] text-gray-400 dark:text-gray-400 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600">
-              {agentMap[task.assignee_id].name}
-            </span>
-          ) : assigningTaskId === task.id ? (
+          {assigningTaskId === task.id ? (
             <select
               autoFocus
-              defaultValue=""
+              defaultValue={task.assignee_id ?? ""}
               onChange={(e) => handleAssignSelect(task.id, e.target.value)}
               onBlur={() => setAssigningTaskId(null)}
               className="text-[10px] text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-blue-300 dark:border-blue-600 rounded px-1 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -353,6 +349,14 @@ export function TaskList({ tasks, agents, projectId, onUpdate, autopilotMode = "
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
+          ) : task.assignee_id && agentMap[task.assignee_id] ? (
+            <button
+              onClick={() => setAssigningTaskId(task.id)}
+              title={t("reassign")}
+              className="text-[10px] text-gray-400 dark:text-gray-400 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors cursor-pointer"
+            >
+              {agentMap[task.assignee_id].name}
+            </button>
           ) : (
             <button
               onClick={() => setAssigningTaskId(task.id)}

@@ -140,6 +140,7 @@ const en = {
   rejectStep3Manual: "Manually click 'Run' to start rework",
   rejectConfirm: "Reject",
   assign: "assign",
+  reassign: "Click to reassign",
   verified: "verified",
   unverified: "unverified",
   verify: "Verify",
@@ -440,6 +441,8 @@ const en = {
   fixTaskCreated: "Fix task created",
 
   // Queue controls
+  reassignAll: "Reassign All",
+  reassignAllDone: "Reassigned {{count}} tasks",
   runQueue: "Auto-run All",
   stopQueue: "Stop Auto-run",
   queueRunning: "Auto-running",

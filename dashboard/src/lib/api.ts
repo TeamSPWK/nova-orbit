@@ -197,6 +197,8 @@ export const api = {
       request<any>(`/orchestration/projects/${projectId}/stop-queue`, { method: "POST" }),
     resumeQueue: (projectId: string) =>
       request<any>(`/orchestration/projects/${projectId}/resume-queue`, { method: "POST" }),
+    reassignAll: (projectId: string) =>
+      request<{ status: string; count: number }>(`/orchestration/projects/${projectId}/reassign-all`, { method: "POST" }),
     pauseAgent: (agentId: string) =>
       request<any>(`/orchestration/agents/${agentId}/pause`, { method: "POST" }),
     resumeAgent: (agentId: string) =>

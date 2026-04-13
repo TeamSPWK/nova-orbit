@@ -574,6 +574,16 @@ export function createOrchestrationRoutes(ctx: AppContext): Router {
     res.json({ status: "queue_started", projectId });
   });
 
+  // Reassign all tasks — clear assignees and re-run auto-assignment
+  router.post("/projects/:projectId/reassign-all", (req, res) => {
+    const { projectId } = req.params;
+    const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const count = scheduler.reassignAll(projectId);
+    res.json({ status: "reassigned", count, projectId });
+  });
+
   // Stop priority queue for a project
   router.post("/projects/:projectId/stop-queue", (req, res) => {
     const { projectId } = req.params;

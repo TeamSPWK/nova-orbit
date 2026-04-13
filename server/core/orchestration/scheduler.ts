@@ -23,6 +23,8 @@ export interface Scheduler {
   getQueueState: (projectId: string) => QueueState;
   /** Notify that a goal was added or its spec completed — scheduler decides processing order. */
   notifyGoalReady: (projectId: string) => void;
+  /** Clear all task assignees and re-run auto-assignment. Returns count of assigned tasks. */
+  reassignAll: (projectId: string) => number;
 }
 
 export interface QueueState {
@@ -1416,6 +1418,28 @@ export function createScheduler(
      */
     notifyGoalReady(projectId: string): void {
       triggerGoalProcessingIfNeeded(projectId);
+    },
+
+    /**
+     * Clear all assignees on non-terminal tasks, then re-run role-aware
+     * auto-assignment. Returns the number of tasks reassigned.
+     */
+    reassignAll(projectId: string): number {
+      // Clear assignees on active tasks (not done/blocked-exhausted)
+      const cleared = db.prepare(
+        "UPDATE tasks SET assignee_id = NULL, updated_at = datetime('now') WHERE project_id = ? AND status IN ('todo', 'pending_approval')"
+      ).run(projectId);
+      log.info(`reassignAll: cleared ${cleared.changes} task assignees for project ${projectId}`);
+
+      // Re-run auto-assignment with current agent roster
+      autoAssignUnassigned(projectId);
+
+      const assigned = db.prepare(
+        "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status IN ('todo', 'pending_approval') AND assignee_id IS NOT NULL"
+      ).get(projectId) as { cnt: number };
+
+      broadcast("project:updated", { projectId });
+      return assigned.cnt;
     },
   };
 }

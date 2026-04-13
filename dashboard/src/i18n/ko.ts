@@ -140,6 +140,7 @@ const ko = {
   rejectStep3Manual: "수동으로 '실행' 버튼을 눌러 재작업을 시작하세요",
   rejectConfirm: "반려하기",
   assign: "담당자 지정",
+  reassign: "클릭하여 담당자 변경",
   verified: "검증됨",
   unverified: "미검증",
   verify: "검증",
@@ -440,6 +441,8 @@ const ko = {
   fixTaskCreated: "수정 태스크가 생성되었습니다",
 
   // Queue controls
+  reassignAll: "담당자 재배정",
+  reassignAllDone: "{{count}}개 태스크에 담당자를 재배정했습니다",
   runQueue: "전체 자동 실행",
   stopQueue: "자동 실행 중지",
   queueRunning: "자동 실행 중",
