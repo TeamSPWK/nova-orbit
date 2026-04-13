@@ -16,6 +16,7 @@ export function ProjectSettings({ projectId }: Props) {
   const [editingMission, setEditingMission] = useState(false);
   const [missionDraft, setMissionDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [suggestingMission, setSuggestingMission] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -185,16 +186,62 @@ export function ProjectSettings({ projectId }: Props) {
                   className="text-xs px-3 py-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
                   {t("settingsCancel")}
                 </button>
+                <button
+                  onClick={async () => {
+                    setSuggestingMission(true);
+                    try {
+                      const result = await api.projects.suggestMission(projectId);
+                      setMissionDraft(result.mission);
+                      setToast(result.reason);
+                    } catch (err: any) {
+                      setToast(err.message || t("missionSuggestFailed"));
+                    } finally {
+                      setSuggestingMission(false);
+                    }
+                  }}
+                  disabled={suggestingMission || saving}
+                  className="text-xs px-3 py-1 border border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {suggestingMission ? (
+                    <><svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg> {t("missionSuggesting")}</>
+                  ) : (
+                    <>{t("missionSuggest")}</>
+                  )}
+                </button>
               </div>
             </div>
           ) : (
-            <div className="flex items-start gap-2 group cursor-pointer" onClick={startEditMission} title={t("clickToEdit")}>
-              <p className="flex-1 text-sm text-gray-700 dark:text-gray-300">
-                {project.mission || <span className="text-gray-400 dark:text-gray-500 italic">{t("settingsNoMission")}</span>}
-              </p>
-              <span className="text-xs text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 transition-colors mt-0.5">
-                {t("settingsEdit")}
-              </span>
+            <div className="flex items-start gap-2">
+              <div className="flex-1 group cursor-pointer" onClick={startEditMission} title={t("clickToEdit")}>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {project.mission || <span className="text-gray-400 dark:text-gray-500 italic">{t("settingsNoMission")}</span>}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                <button onClick={startEditMission}
+                  className="text-xs text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors">
+                  {t("settingsEdit")}
+                </button>
+                <button
+                  onClick={async () => {
+                    setSuggestingMission(true);
+                    try {
+                      const result = await api.projects.suggestMission(projectId);
+                      setMissionDraft(result.mission);
+                      setEditingMission(true);
+                      setToast(result.reason);
+                    } catch (err: any) {
+                      setToast(err.message || t("missionSuggestFailed"));
+                    } finally {
+                      setSuggestingMission(false);
+                    }
+                  }}
+                  disabled={suggestingMission}
+                  className="text-xs text-indigo-400 dark:text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 transition-colors"
+                >
+                  {suggestingMission ? t("missionSuggesting") : t("missionSuggest")}
+                </button>
+              </div>
             </div>
           )}
         </div>

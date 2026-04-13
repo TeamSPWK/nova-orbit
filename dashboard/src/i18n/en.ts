@@ -300,6 +300,9 @@ const en = {
 
   // ProjectSettings hardcoded strings
   settingsMission: "Mission",
+  missionSuggest: "AI Suggest",
+  missionSuggesting: "Analyzing...",
+  missionSuggestFailed: "Mission suggestion failed",
   settingsProjectInfo: "Project Info",
   settingsWorkDirectory: "Project Folder",
   settingsSourceType: "Source Type",

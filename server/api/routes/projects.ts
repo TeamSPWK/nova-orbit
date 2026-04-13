@@ -603,6 +603,97 @@ ${branchList}
     res.json({ deleted });
   });
 
+  // AI-powered mission suggestion
+  router.post("/:id/suggest-mission", async (req, res) => {
+    req.setTimeout(300000);
+    res.setTimeout(300000);
+    const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as any;
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const agent = (db.prepare(
+      "SELECT * FROM agents WHERE project_id = ? AND role IN ('cto', 'pm') LIMIT 1",
+    ).get(project.id) as any)
+      ?? (db.prepare("SELECT * FROM agents WHERE project_id = ? LIMIT 1").get(project.id) as any);
+
+    if (!agent) return res.status(400).json({ error: "No agents available" });
+
+    const techStack = project.tech_stack ? JSON.parse(project.tech_stack) : null;
+    const techInfo = techStack
+      ? `\nTech Stack: ${techStack.languages?.join(", ")} / ${techStack.frameworks?.join(", ")}`
+      : "";
+
+    // Load project docs for context
+    let docsContext = "";
+    if (project.workdir) {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      for (const docFile of ["CLAUDE.md", "README.md"]) {
+        const p = path.join(project.workdir, docFile);
+        try {
+          if (fs.existsSync(p)) {
+            docsContext += `\n\n[${docFile}]\n${fs.readFileSync(p, "utf-8").slice(0, 3000)}`;
+            break;
+          }
+        } catch { /* skip */ }
+      }
+    }
+
+    // Existing goals for context
+    const goals = db.prepare("SELECT title FROM goals WHERE project_id = ?").all(project.id) as any[];
+    const goalsContext = goals.length > 0
+      ? `\n\nExisting goals:\n${goals.map((g: any) => `- ${g.title}`).join("\n")}`
+      : "";
+
+    const prompt = `You are a senior product strategist. Analyze this project and suggest a concise, actionable mission statement.
+
+Project: ${project.name}
+Current Mission: ${project.mission || "(not set)"}${techInfo}${goalsContext}${docsContext}
+
+Respond in this EXACT JSON format (no markdown, just raw JSON):
+{
+  "mission": "One-sentence mission statement that captures the project's core purpose and target outcome",
+  "reason": "Why this mission fits (1 sentence)"
+}
+
+Rules:
+- The mission should be specific to THIS project, not generic
+- Focus on the value delivered to users, not the tech
+- Keep it under 100 characters if possible
+- Respond in the same language as the project name/docs (Korean if Korean, English if English)`;
+
+    try {
+      if (!ctx.sessionManager) {
+        return res.status(503).json({ error: "Session manager not ready" });
+      }
+      const sessionKey = `suggest-mission-${project.id}-${Date.now()}`;
+      const session = ctx.sessionManager.spawnAgent(agent.id, project.workdir || process.cwd(), sessionKey);
+      try {
+        const result = await session.send(prompt);
+        if (result.exitCode !== 0 && result.stdout.trim() === "") {
+          throw new Error(`CLI failed (exit ${result.exitCode}): ${result.stderr.slice(0, 300)}`);
+        }
+        const { parseStreamJson } = await import("../../core/agent/adapters/stream-parser.js");
+        const parsed = parseStreamJson(result.stdout);
+        const raw = parsed.text || "";
+        if (!raw.trim()) throw new Error("No text output");
+
+        const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/) || raw.match(/(\{[\s\S]*\})/);
+        const jsonStr = jsonMatch ? jsonMatch[1] : raw;
+        const suggestion = JSON.parse(jsonStr);
+
+        res.json({
+          mission: String(suggestion.mission || "").slice(0, 200),
+          reason: String(suggestion.reason || "").slice(0, 300),
+        });
+      } finally {
+        ctx.sessionManager.killSession(sessionKey);
+      }
+    } catch (err: any) {
+      log.error("Failed to suggest mission", err);
+      res.status(500).json({ error: err.message || "Mission suggestion failed" });
+    }
+  });
+
   // Analyze a local directory (for project import)
   router.post("/analyze", (req, res) => {
     const { path: inputPath } = req.body;

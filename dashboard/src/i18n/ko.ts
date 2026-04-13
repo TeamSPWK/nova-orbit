@@ -300,6 +300,9 @@ const ko = {
 
   // ProjectSettings hardcoded strings
   settingsMission: "미션",
+  missionSuggest: "AI 추천",
+  missionSuggesting: "분석 중...",
+  missionSuggestFailed: "미션 추천에 실패했습니다",
   settingsProjectInfo: "프로젝트 정보",
   settingsWorkDirectory: "프로젝트 폴더",
   settingsSourceType: "소스 유형",

@@ -83,6 +83,8 @@ export const api = {
       request<Array<{ path: string; name: string; dir: string }>>(`/projects/${id}/docs`),
     agentFiles: (id: string) =>
       request<Array<{ filename: string; content: string }>>(`/projects/${id}/agent-files`),
+    suggestMission: (id: string) =>
+      request<{ mission: string; reason: string }>(`/projects/${id}/suggest-mission`, { method: "POST" }),
   },
   agents: {
     list: (projectId: string) => request<any[]>(`/agents?projectId=${projectId}`),
