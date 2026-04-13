@@ -43,6 +43,7 @@ const en = {
   addGoalAiSuggestWithSpec: "Also generate blueprints",
   addGoalAiSuggestMinimize: "Close — analysis continues in background",
   addGoalAiSuggestDismiss: "Dismiss all",
+  addGoalAiSuggestCountUnit: "",
   addGoalAiSuggestReady: "AI prepared {{count}} goals for you",
   addGoalAiSuggestReviewAction: "Review →",
   addGoalSuccess: "Goal added!",

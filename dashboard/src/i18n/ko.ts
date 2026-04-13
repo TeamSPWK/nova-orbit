@@ -43,6 +43,7 @@ const ko = {
   addGoalAiSuggestWithSpec: "기획서도 함께 생성",
   addGoalAiSuggestMinimize: "닫기 — 백그라운드에서 계속 분석합니다",
   addGoalAiSuggestDismiss: "모두 무시",
+  addGoalAiSuggestCountUnit: "개",
   addGoalAiSuggestReady: "AI가 {{count}}개 목표를 준비했습니다",
   addGoalAiSuggestReviewAction: "확인하기 →",
   addGoalSuccess: "목표가 추가되었습니다!",

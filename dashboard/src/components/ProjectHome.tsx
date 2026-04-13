@@ -44,7 +44,7 @@ function AddGoalDialog({
   suggestLoading: boolean;
   suggestError: string;
   suggestErrorDetail: string;
-  onStartSuggest: () => void;
+  onStartSuggest: (count?: number) => void;
   onDismissSuggestions: () => void;
 }) {
   const { t } = useTranslation();
@@ -57,7 +57,7 @@ function AddGoalDialog({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [withSpec, setWithSpec] = useState(true);
+  const [suggestCount, setSuggestCount] = useState(3);
 
   useEffect(() => { if (mode === "input") inputRef.current?.focus(); }, [mode]);
 
@@ -78,7 +78,7 @@ function AddGoalDialog({
 
   const handleSuggest = () => {
     setMode("suggest");
-    onStartSuggest();
+    onStartSuggest(suggestCount);
   };
 
   const toggleSelect = (idx: number) => {
@@ -90,16 +90,14 @@ function AddGoalDialog({
     });
   };
 
-  const handleAddSelected = () => {
+  const handleAddSelected = async () => {
     if (selected.size === 0 || submitting) return;
     setSubmitting(true);
     const selectedGoals = [...selected].map((i) => suggestions[i]);
+    // Always use direct creation — autopilot scheduler handles spec→decompose
+    // sequentially in priority/sort_order. No need for client-side spec trigger.
     for (const goal of selectedGoals) {
-      if (withSpec) {
-        onCreateWithSpec(goal.title, goal.description);
-      } else {
-        onCreateDirect(goal.title, goal.description);
-      }
+      await onCreateDirect(goal.title, goal.description);
     }
   };
 
@@ -221,66 +219,47 @@ function AddGoalDialog({
         <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-2">
           {mode === "input" ? (
             <>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleSubmit("direct")}
-                  disabled={!title.trim() || submitting}
-                  className="flex-1 text-xs px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors text-left"
-                >
-                  <div className="font-semibold">{t("addGoalCreateDirect")}</div>
-                  <div className="mt-0.5 opacity-60">{t("addGoalCreateDirectDesc")}</div>
-                </button>
-                <button
-                  onClick={() => handleSubmit("spec")}
-                  disabled={!title.trim() || submitting}
-                  className="flex-1 text-xs px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors text-left"
-                >
-                  {submitting ? (
-                    <div className="flex items-center gap-2">
-                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                      </svg>
-                      <span>{t("loading")}</span>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="font-semibold">{t("addGoalWithSpec")}</div>
-                      <div className="mt-0.5 opacity-60">{t("addGoalWithSpecDesc")}</div>
-                    </>
-                  )}
-                </button>
-              </div>
+              <button
+                onClick={() => handleSubmit("direct")}
+                disabled={!title.trim() || submitting}
+                className="w-full text-xs px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors text-left"
+              >
+                <div className="font-semibold">{t("addGoalCreateDirect")}</div>
+                <div className="mt-0.5 opacity-60">{t("addGoalCreateDirectDesc")}</div>
+              </button>
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
                 <span className="text-[10px] text-gray-400">or</span>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
               </div>
-              <button
-                onClick={handleSuggest}
-                disabled={submitting}
-                className="w-full text-xs px-4 py-2.5 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-40 transition-colors text-center"
-              >
-                <div className="font-semibold flex items-center justify-center gap-1.5">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-                  </svg>
-                  {t("addGoalAiSuggest")}
-                </div>
-                <div className="mt-0.5 opacity-60">{t("addGoalAiSuggestDesc")}</div>
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSuggest}
+                  disabled={submitting}
+                  className="flex-1 text-xs px-4 py-2.5 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-40 transition-colors text-center"
+                >
+                  <div className="font-semibold flex items-center justify-center gap-1.5">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                    </svg>
+                    {t("addGoalAiSuggest")}
+                  </div>
+                  <div className="mt-0.5 opacity-60">{t("addGoalAiSuggestDesc")}</div>
+                </button>
+                <select
+                  value={suggestCount}
+                  onChange={(e) => setSuggestCount(Number(e.target.value))}
+                  className="w-14 text-xs border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 rounded-lg bg-white dark:bg-[#1a1a2e] focus:outline-none focus:border-indigo-400 text-center"
+                >
+                  {[1, 2, 3, 5].map((n) => (
+                    <option key={n} value={n}>{n}{t("addGoalAiSuggestCountUnit")}</option>
+                  ))}
+                </select>
+              </div>
             </>
           ) : !suggestLoading && !suggestError && suggestions.length > 0 ? (
             <>
-              <label className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={withSpec}
-                  onChange={(e) => setWithSpec(e.target.checked)}
-                  className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-400 w-3.5 h-3.5"
-                />
-                {t("addGoalAiSuggestWithSpec")}
-              </label>
+              {/* withSpec checkbox removed — autopilot handles spec generation sequentially */}
               <button
                 onClick={handleAddSelected}
                 disabled={selected.size === 0 || submitting}
@@ -545,14 +524,14 @@ export function ProjectHome() {
   const [aiSuggestError, setAiSuggestError] = useState("");
   const [aiSuggestErrorDetail, setAiSuggestErrorDetail] = useState("");
 
-  const startAiSuggest = useCallback(async () => {
+  const startAiSuggest = useCallback(async (count?: number) => {
     if (!currentProjectId || aiSuggestLoading) return;
     setAiSuggestLoading(true);
     setAiSuggestError("");
     setAiSuggestErrorDetail("");
     setAiSuggestions([]);
     try {
-      const result = await api.goals.suggest(currentProjectId);
+      const result = await api.goals.suggest(currentProjectId, count);
       if (result.length === 0) {
         setAiSuggestError(t("addGoalAiSuggestEmpty"));
       } else {
@@ -959,9 +938,12 @@ export function ProjectHome() {
       const goal = await api.goals.create({ project_id: currentProjectId, title, description, withSpec: true });
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
-      // Start spec generation (autopilot decompose is suppressed via withSpec flag)
-      await api.goals.generateSpec(goal.id);
-      startSpecPolling(goal.id);
+      // When autopilot is active, scheduler handles spec→decompose sequentially.
+      // Client only triggers spec generation in manual mode.
+      if (!goal.autopilotHandled) {
+        await api.goals.generateSpec(goal.id);
+        startSpecPolling(goal.id);
+      }
     } catch (err: any) {
       showToast(t("specGenerateFailed"), "error", err.message);
     }

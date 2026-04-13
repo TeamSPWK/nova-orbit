@@ -129,8 +129,8 @@ export const api = {
       request<any>(`/goals/${goalId}/generate-spec`, { method: "POST" }),
     refineSpec: (goalId: string, prompt: string) =>
       request<any>(`/goals/${goalId}/refine-spec`, { method: "POST", body: JSON.stringify({ prompt }) }),
-    suggest: (projectId: string) =>
-      request<Array<{ title: string; description: string; priority: string; reason: string }>>("/goals/suggest", { method: "POST", body: JSON.stringify({ project_id: projectId }) }),
+    suggest: (projectId: string, count?: number) =>
+      request<Array<{ title: string; description: string; priority: string; reason: string }>>("/goals/suggest", { method: "POST", body: JSON.stringify({ project_id: projectId, count }) }),
   },
   tasks: {
     list: (projectId: string) => request<any[]>(`/tasks?projectId=${projectId}`),

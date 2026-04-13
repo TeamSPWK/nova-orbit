@@ -21,6 +21,8 @@ export interface Scheduler {
   isPaused: (projectId: string) => boolean;
   resumeQueue: (projectId: string) => void;
   getQueueState: (projectId: string) => QueueState;
+  /** Notify that a goal was added or its spec completed — scheduler decides processing order. */
+  notifyGoalReady: (projectId: string) => void;
 }
 
 export interface QueueState {
@@ -965,7 +967,14 @@ export function createScheduler(
           broadcast("project:updated", { projectId });
           setTimeout(() => {
             decomposRetryCount.delete(retryKey);
-            processNextGoal(projectId, goalId);
+            // Guard: goal may have been deleted during the retry delay
+            const stillExists = db.prepare("SELECT id FROM goals WHERE id = ?").get(goalId);
+            if (stillExists) {
+              processNextGoal(projectId, goalId);
+            } else {
+              log.info(`Decompose retry skipped: goal ${goalId} was deleted`);
+              triggerGoalProcessingIfNeeded(projectId);
+            }
           }, retryDelayMs);
         } else if (retryCount > 2) {
           decomposRetryCount.delete(retryKey);
@@ -1397,6 +1406,16 @@ export function createScheduler(
 
     setSpecGenerator(fn: (goalId: string) => Promise<any>): void {
       generateGoalSpec = fn;
+    },
+
+    /**
+     * Notify the scheduler that a new goal was added (or a spec completed).
+     * The scheduler decides whether to process it now or queue it behind
+     * the currently active goal — guaranteeing sequential, priority-ordered
+     * spec→decompose→execute pipeline.
+     */
+    notifyGoalReady(projectId: string): void {
+      triggerGoalProcessingIfNeeded(projectId);
     },
   };
 }

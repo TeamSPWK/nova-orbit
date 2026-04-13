@@ -78,42 +78,20 @@ export function createGoalRoutes(ctx: AppContext): Router {
 
       const goal = db.prepare("SELECT * FROM goals WHERE rowid = ?").get(result.lastInsertRowid) as any;
       broadcast("project:updated", { projectId: project_id });
-      res.status(201).json(goal);
+
+      // Check autopilot BEFORE responding so client knows whether to skip its own spec call
+      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(project_id) as { autopilot: string } | undefined;
+      const autopilotActive = !!(project && (project.autopilot === "goal" || project.autopilot === "full"));
+
+      res.status(201).json({ ...goal, autopilotHandled: autopilotActive });
 
       // --- Autopilot trigger (async, after response) ---
-      // When client already requested spec (withSpec=true), client handles the flow.
-      // Otherwise in autopilot mode: generate spec first, then decompose after spec completes.
-      // The spec→decompose chain is handled by the generate-spec endpoint's .then() callback.
-      const withSpec = req.body.withSpec === true;
-      if (!withSpec) {
-        const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(project_id) as { autopilot: string } | undefined;
-        if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
-          if (ctx.generateGoalSpec) {
-            // Auto-generate spec first → decompose after spec completes
-            log.info(`Autopilot: auto-generating spec for goal ${goal.id} before decompose`);
-
-            // Create placeholder spec row
-            db.prepare(
-              "INSERT INTO goal_specs (goal_id, prd_summary, feature_specs, user_flow, acceptance_criteria, tech_considerations, generated_by) VALUES (?, '{\"_status\":\"generating\"}', '[]', '[]', '[]', '[]', 'ai')"
-            ).run(goal.id);
-
-            ctx.generateGoalSpec(goal.id).then(() => {
-              log.info(`Autopilot: spec completed for goal ${goal.id}, triggering decompose`);
-              broadcast("project:updated", { projectId: project_id });
-              triggerAutopilotDecompose(goal.id, project_id);
-            }).catch((err: any) => {
-              log.error(`Autopilot: spec generation failed for goal ${goal.id}`, err);
-              const errorMsg = (err.message || "Unknown error").slice(0, 200).replace(/"/g, "'");
-              const failedJson = JSON.stringify({ _status: "failed", _error: errorMsg });
-              db.prepare("UPDATE goal_specs SET prd_summary = ?, updated_at = datetime('now') WHERE goal_id = ?")
-                .run(failedJson, goal.id);
-              broadcast("project:updated", { projectId: project_id });
-            });
-          } else {
-            // Fallback: no spec engine, decompose directly
-            triggerAutopilotDecompose(goal.id, project_id);
-          }
-        }
+      // In autopilot mode: ALWAYS delegate to scheduler regardless of withSpec.
+      // The scheduler handles spec→decompose sequentially in priority/sort_order.
+      // This prevents parallel spec generation when multiple goals are added at once.
+      if (autopilotActive && ctx.scheduler) {
+        log.info(`Autopilot: goal ${goal.id} added, notifying scheduler for sequential processing`);
+        ctx.scheduler.notifyGoalReady(project_id);
       }
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -198,8 +176,9 @@ export function createGoalRoutes(ctx: AppContext): Router {
     // Extend timeout for AI response (up to 5 min)
     req.setTimeout(300000);
     res.setTimeout(300000);
-    const { project_id } = req.body;
+    const { project_id, count: rawCount } = req.body;
     if (!project_id) return res.status(400).json({ error: "project_id required" });
+    const count = Math.max(1, Math.min(10, Number(rawCount) || 3));
 
     const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(project_id) as any;
     if (!project) return res.status(404).json({ error: "Project not found" });
@@ -242,7 +221,7 @@ export function createGoalRoutes(ctx: AppContext): Router {
       }
     }
 
-    const prompt = `You are a senior product strategist. Analyze this project and suggest 3-5 actionable goals.
+    const prompt = `You are a senior product strategist. Analyze this project and suggest exactly ${count} actionable goals.
 
 Project: ${project.name}
 Mission: ${project.mission || "(not set)"}${techInfo}${existingContext}${docsContext}
@@ -292,7 +271,7 @@ Rules:
 
         if (!Array.isArray(suggestions)) throw new Error("Expected array");
 
-        res.json(suggestions.slice(0, 5).map((s: any) => ({
+        res.json(suggestions.slice(0, count).map((s: any) => ({
           title: String(s.title || "").slice(0, 100),
           description: String(s.description || "").slice(0, 500),
           priority: ["high", "medium", "low"].includes(s.priority) ? s.priority : "medium",
@@ -401,10 +380,14 @@ Rules:
       log.info(`Spec generated for goal ${goalId}`);
       broadcast("project:updated", { projectId: goal.project_id });
 
-      // Spec complete → trigger autopilot decompose if enabled
-      const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(goal.project_id) as { autopilot: string } | undefined;
-      if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
-        triggerAutopilotDecompose(goalId, goal.project_id);
+      // Spec complete → notify scheduler so it can decompose in priority order.
+      // Previously called triggerAutopilotDecompose directly, which bypassed
+      // the scheduler's sequential lock and caused parallel decompose races.
+      if (ctx.scheduler) {
+        const project = db.prepare("SELECT autopilot FROM projects WHERE id = ?").get(goal.project_id) as { autopilot: string } | undefined;
+        if (project && (project.autopilot === "goal" || project.autopilot === "full")) {
+          ctx.scheduler.notifyGoalReady(goal.project_id);
+        }
       }
     }).catch((err: any) => {
       log.error(`Failed to generate spec for goal ${goalId}`, err);
@@ -448,76 +431,6 @@ Rules:
       res.status(500).json({ error: err.message });
     }
   });
-
-  // --- Internal: autopilot decompose + queue start ---
-  async function triggerAutopilotDecompose(goalId: string, projectId: string) {
-    // Guard: ensure engine and scheduler are available (lazy import from ctx)
-    if (!ctx.orchestrationEngine || !ctx.scheduler) {
-      log.warn("Autopilot trigger skipped: orchestration not initialized yet");
-      return;
-    }
-
-    try {
-      log.info(`Autopilot: auto-decomposing goal ${goalId}`);
-
-      // Check that goal doesn't already have tasks (race condition guard)
-      const existing = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE goal_id = ?").get(goalId) as { count: number };
-      if (existing.count > 0) {
-        log.warn(`Autopilot: goal ${goalId} already has tasks, skipping decompose`);
-        return;
-      }
-
-      // Skip if spec is currently being generated — decompose should wait for spec
-      const spec = db.prepare("SELECT prd_summary FROM goal_specs WHERE goal_id = ?").get(goalId) as { prd_summary: string } | undefined;
-      if (spec) {
-        try {
-          const prd = JSON.parse(spec.prd_summary);
-          if (prd._status === "generating") {
-            log.info(`Autopilot: goal ${goalId} has spec in progress, skipping decompose (will be triggered after spec completes)`);
-            return;
-          }
-        } catch { /* not JSON, proceed */ }
-      }
-
-      const result = await ctx.orchestrationEngine.decomposeGoal(goalId);
-
-      if (result.taskCount > 0) {
-        // Autopilot: auto-approve tasks so scheduler can pick them up immediately
-        const approved = db.prepare(
-          "UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'"
-        ).run(goalId);
-        log.info(`Autopilot: auto-approved ${approved.changes} tasks for goal ${goalId}`);
-
-        // Auto-start queue if not already running
-        if (!ctx.scheduler.isRunning(projectId)) {
-          log.info(`Autopilot: auto-starting queue for project ${projectId}`);
-          ctx.scheduler.startQueue(projectId);
-        }
-      }
-
-      db.prepare(
-        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot', ?)",
-      ).run(projectId, `Autopilot decomposed goal into ${result.taskCount} tasks`);
-    } catch (err: any) {
-      log.error(`Autopilot decompose failed for goal ${goalId}`, err);
-      db.prepare(
-        "INSERT INTO activities (project_id, type, message) VALUES (?, 'autopilot_error', ?)",
-      ).run(projectId, `Autopilot failed: ${err.message?.slice(0, 200)}`);
-
-      // Fallback: if tasks were partially created before the error, auto-approve them
-      const pending = db.prepare(
-        "UPDATE tasks SET status = 'todo' WHERE goal_id = ? AND status = 'pending_approval'"
-      ).run(goalId);
-      if (pending.changes > 0) {
-        log.info(`Autopilot fallback: auto-approved ${pending.changes} partially created tasks for goal ${goalId}`);
-        broadcast("project:updated", { projectId });
-
-        if (ctx.scheduler && !ctx.scheduler.isRunning(projectId)) {
-          ctx.scheduler.startQueue(projectId);
-        }
-      }
-    }
-  }
 
   return router;
 }
