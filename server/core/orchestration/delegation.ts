@@ -88,6 +88,18 @@ export function createDelegationEngine(
         return { delegated: false, subtaskIds: [] };
       }
 
+      // Guard: don't re-delegate if subtasks already exist (prevents duplicate creation
+      // when parent is reset to todo by stale-task recovery or retry logic)
+      const existingSubtasks = db.prepare(
+        "SELECT COUNT(*) as count FROM tasks WHERE parent_task_id = ?",
+      ).get(taskId) as { count: number };
+      if (existingSubtasks.count > 0) {
+        log.info(`Task ${taskId} already has ${existingSubtasks.count} subtasks — skipping re-delegation`);
+        // Re-mark parent as in_progress so subtask completion flow works
+        db.prepare("UPDATE tasks SET status = 'in_progress', updated_at = datetime('now') WHERE id = ? AND status = 'todo'").run(taskId);
+        return { delegated: true, subtaskIds: [] };
+      }
+
       // Check delegation depth — count parent chain
       let depth = 0;
       let current: string | null = task.parent_task_id;
