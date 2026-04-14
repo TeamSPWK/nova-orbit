@@ -720,8 +720,17 @@ export function ProjectHome() {
   // Listen for system:error events — show as toast
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ message?: string }>).detail;
-      showToast(detail?.message ?? t("systemErrorGeneric"), "error");
+      const detail = (e as CustomEvent<{
+        agentName?: string;
+        error?: { code?: string; message?: string; recovery?: string };
+      }>).detail;
+      // payload: { agentId, agentName, taskId, error: { code, message, detail, recovery } }
+      const err = detail?.error;
+      const agent = detail?.agentName;
+      const msg = err?.message
+        ? `${agent ? `[${agent}] ` : ""}${err.message}`
+        : t("systemErrorGeneric");
+      showToast(msg, "error");
     };
     window.addEventListener("nova:system-error", handler);
     return () => window.removeEventListener("nova:system-error", handler);

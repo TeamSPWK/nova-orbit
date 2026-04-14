@@ -71,8 +71,11 @@ function formatWsMessage(
     }
     case "project:updated":
       return t("activityProjectUpdated");
-    case "system:error":
-      return t("activitySystemError", { message: p.message ?? type });
+    case "system:error": {
+      const errMsg = p.error?.message ?? p.message ?? type;
+      const errAgent = p.agentName ? `[${p.agentName}] ` : "";
+      return `${errAgent}${t("activitySystemError", { message: errMsg })}`;
+    }
     case "task:git": {
       const parts: string[] = [];
       if (p.committed) parts.push(t("gitCommitted", { count: String(p.filesChanged ?? 0) }));

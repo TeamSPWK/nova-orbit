@@ -1,4 +1,5 @@
 import type { Database } from "better-sqlite3";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClaudeCodeAdapter, type ClaudeCodeSession } from "./adapters/claude-code.js";
 import { createLogger } from "../../utils/logger.js";
@@ -85,11 +86,36 @@ export function createSessionManager(db: Database): SessionManager {
       // NOTE: Project docs (plans, references) are NOT inlined — accessible via --add-dir
       // NOTE: Git log is NOT inlined — agent can run git commands if needed
 
+      // 프로젝트 CLAUDE.md 동적 주입 — 에이전트에게 프로젝트 규칙/컨벤션 전달
+      // 기존 수동 복붙("[Project Context from CLAUDE.md]")이 있으면 건너뛰어 중복 방지
+      const alreadyHasClaudeMd = resolution.prompt.includes("[Project Context from CLAUDE.md]");
+      let claudeMdContext = "";
+      if (projectWorkdir && !alreadyHasClaudeMd) {
+        const claudeMdPath = join(projectWorkdir, "CLAUDE.md");
+        if (existsSync(claudeMdPath)) {
+          try {
+            const content = readFileSync(claudeMdPath, "utf-8").trim();
+            if (content.length > 0) {
+              // 50KB 제한 — 비정상적으로 큰 CLAUDE.md 방어
+              const truncated = content.length > 50 * 1024
+                ? content.slice(0, 50 * 1024) + "\n\n...(truncated)"
+                : content;
+              claudeMdContext = `## Project Rules (CLAUDE.md)\n\n${truncated}\n\n---\n\n`;
+              log.info(`Loaded CLAUDE.md (${content.length} bytes) from ${projectWorkdir}`);
+            }
+          } catch (err) {
+            log.warn(`Failed to read CLAUDE.md from ${projectWorkdir}: ${err}`);
+          }
+        }
+      } else if (alreadyHasClaudeMd) {
+        log.info(`Skipping CLAUDE.md injection — already embedded in agent prompt (legacy static copy)`);
+      }
+
       // 에이전트 메모리 로드 (3KB 제한 — 시스템 프롬프트 비대화 방지)
       const dataDir = process.env.NOVA_ORBIT_DATA_DIR || join(process.cwd(), ".nova-orbit");
       const memory = loadMemory(dataDir, agentId);
 
-      const enrichedPrompt = resolution.prompt + contextChain + projectContext;
+      const enrichedPrompt = claudeMdContext + resolution.prompt + contextChain + projectContext;
 
       // Model resolution: agent-level override > role default > CLI default
       const resolvedModel = agent.model || ROLE_DEFAULT_MODEL[agent.role] || undefined;
