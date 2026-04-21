@@ -43,7 +43,7 @@ export function createGoalRoutes(ctx: AppContext): Router {
 
   // Create goal — triggers autopilot if enabled
   router.post("/", (req, res) => {
-    const { project_id, title, description, priority = "medium", references } = req.body;
+    const { project_id, title, description, priority = "medium", references, skip_adversarial } = req.body;
     // Input validation: type + length (prevents oversized payloads DoS)
     if (typeof project_id !== "string" || project_id.length === 0) {
       return res.status(400).json({ error: "project_id (string) is required" });
@@ -74,9 +74,11 @@ export function createGoalRoutes(ctx: AppContext): Router {
         "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM goals WHERE project_id = ?",
       ).get(project_id) as { next: number }).next;
 
+      const skipAdversarialVal = typeof skip_adversarial === "boolean" ? (skip_adversarial ? 1 : 0) : 0;
+
       const result = db.prepare(
-        "INSERT INTO goals (project_id, title, description, priority, \"references\", sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(project_id, goalTitle, goalDescription, priority, goalRefs, sortOrder);
+        "INSERT INTO goals (project_id, title, description, priority, \"references\", sort_order, skip_adversarial) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(project_id, goalTitle, goalDescription, priority, goalRefs, sortOrder, skipAdversarialVal);
 
       const goal = db.prepare("SELECT * FROM goals WHERE rowid = ?").get(result.lastInsertRowid) as any;
       broadcast("project:updated", { projectId: project_id });

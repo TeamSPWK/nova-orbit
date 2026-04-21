@@ -48,9 +48,10 @@ interface GoalRow {
   worktree_path: string | null;
   worktree_branch: string | null;
   acceptance_script: string | null;
-  squash_status: string;     // 'none' | 'pending_approval' | 'approved' | 'merged' | 'blocked'
+  squash_status: string;     // 'none' | 'pending_approval' | 'approved' | 'merged' | 'blocked' | 'triggering'
   squash_commit_sha: string | null;
   qa_regression_task_id: string | null;  // Phase 3: QA 회귀 태스크 ID (1회만 생성)
+  skip_adversarial?: number; // 1이면 adversarial 태스크 자동 주입 건너뜀
 }
 interface AgentRow {
   id: string;
@@ -159,6 +160,37 @@ export function recoverTasksFromPartialJson(raw: string): any[] {
   }
 
   return tasks;
+}
+
+/**
+ * DAG 순환 감지 — DFS 기반. 순환이 있는 노드 경로 배열을 반환한다.
+ */
+function detectCycles(tasks: Array<{ id: string; depends_on: string[] }>): string[][] {
+  const adj = new Map<string, string[]>();
+  tasks.forEach((t) => adj.set(t.id, t.depends_on));
+
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  const cycles: string[][] = [];
+
+  function dfs(node: string, path: string[]): void {
+    if (color.get(node) === GRAY) {
+      const cycleStart = path.indexOf(node);
+      if (cycleStart >= 0) cycles.push(path.slice(cycleStart).concat(node));
+      return;
+    }
+    if (color.get(node) === BLACK) return;
+    color.set(node, GRAY);
+    path.push(node);
+    for (const dep of adj.get(node) ?? []) dfs(dep, path);
+    path.pop();
+    color.set(node, BLACK);
+  }
+
+  for (const t of tasks) {
+    if ((color.get(t.id) ?? WHITE) === WHITE) dfs(t.id, []);
+  }
+  return cycles;
 }
 
 /**
@@ -1270,6 +1302,7 @@ Respond in this EXACT JSON format:
         const ADVERSARIAL_KEYWORDS_EN = ["detect", "parse", "extract", "analyze", "validate", "match", "find", "scan"];
 
         const shouldInjectAdversarial = (g: GoalRow): boolean => {
+          if (g.skip_adversarial === 1) return false;
           const text = `${g.title ?? ""} ${g.description ?? ""}`.toLowerCase();
           if (text.length < 50) return false; // 너무 단순한 goal 은 제외
           const hasKo = ADVERSARIAL_KEYWORDS_KO.some((k) => text.includes(k));
@@ -1433,6 +1466,34 @@ Respond in this EXACT JSON format:
             db.prepare(
               "UPDATE tasks SET depends_on = ? WHERE id = ?"
             ).run(JSON.stringify(resolvedDeps), taskId);
+          }
+        }
+
+        // Phase 2 완료 후 DAG 순환 감지 — 순환 발견 시 depends_on 초기화 + activity 기록
+        {
+          const allTaskIds = Array.from(orderToTaskId.values());
+          const insertedTasks = allTaskIds.map((tid) => {
+            const row = db.prepare("SELECT id, depends_on FROM tasks WHERE id = ?").get(tid) as { id: string; depends_on: string | null } | undefined;
+            if (!row) return null;
+            let deps: string[] = [];
+            try { deps = row.depends_on ? JSON.parse(row.depends_on) : []; } catch { deps = []; }
+            return { id: row.id, depends_on: deps };
+          }).filter((r): r is { id: string; depends_on: string[] } => r !== null);
+
+          const cycles = detectCycles(insertedTasks);
+          if (cycles.length > 0) {
+            const cycleIds = [...new Set(cycles.flat())];
+            for (const tid of cycleIds) {
+              db.prepare("UPDATE tasks SET depends_on = '[]' WHERE id = ?").run(tid);
+            }
+            db.prepare(
+              "INSERT INTO activities (project_id, type, message) VALUES (?, 'dag_cycle_reset', ?)",
+            ).run(
+              goal.project_id,
+              `의존성 순환 감지 — ${cycleIds.join(", ")} 의 depends_on 초기화`,
+            );
+            broadcast("project:updated", { projectId: goal.project_id });
+            log.warn(`DAG cycles detected and reset for goal ${goal.id}: ${cycleIds.join(", ")}`);
           }
         }
 
@@ -1778,6 +1839,8 @@ async function runGitWorkflow(
 /**
  * 태스크 done 전환 후 Goal-as-Unit squash 트리거 여부 확인.
  * 남은 태스크가 0이면 triggerGoalSquash() 호출.
+ *
+ * CAS 락: squash_status = 'triggering' 으로 조건부 UPDATE → changes === 0 이면 이미 다른 호출이 진입한 것으로 중복 방지.
  */
 async function checkAndTriggerGoalSquash(
   db: Database,
@@ -1785,17 +1848,49 @@ async function checkAndTriggerGoalSquash(
   goalId: string,
   worktreePath: string,
 ): Promise<void> {
+  // CAS: squash_status 가 'none' 인 경우에만 'triggering' 으로 전환 (원자적 mutex)
+  const cas = db.prepare(
+    "UPDATE goals SET squash_status = 'triggering' WHERE id = ? AND squash_status = 'none' AND goal_model = 'goal_as_unit'",
+  ).run(goalId);
+  if (cas.changes === 0) {
+    // 이미 다른 호출이 진입했거나, goal_model != goal_as_unit 이거나, squash_status != 'none'
+    return;
+  }
+
+  // CAS 성공 — 이제 남은 태스크 확인 (triggering 상태이므로 다른 호출은 진입 불가)
   const remaining = (db.prepare(
     "SELECT COUNT(*) as count FROM tasks WHERE goal_id = ? AND status != 'done' AND parent_task_id IS NULL",
   ).get(goalId) as { count: number }).count;
 
-  if (remaining > 0) return;
+  if (remaining > 0) {
+    // 아직 미완 태스크 있음 — triggering 해제하여 이후 호출이 재시도 가능하게 복원
+    db.prepare(
+      "UPDATE goals SET squash_status = 'none' WHERE id = ? AND squash_status = 'triggering'",
+    ).run(goalId);
+    return;
+  }
 
   const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as GoalRow | undefined;
-  if (!goal || goal.goal_model !== "goal_as_unit") return;
+  if (!goal) {
+    db.prepare(
+      "UPDATE goals SET squash_status = 'none' WHERE id = ? AND squash_status = 'triggering'",
+    ).run(goalId);
+    return;
+  }
 
   log.info(`All tasks done for goal ${goalId} — triggering squash`);
-  await triggerGoalSquash(db, broadcast, goal, worktreePath);
+  try {
+    await triggerGoalSquash(db, broadcast, goal, worktreePath);
+  } catch (err) {
+    // triggerGoalSquash 실패 시 triggering 해제 (내부에서 blocked 설정 안 된 경우 복원)
+    const currentStatus = (db.prepare("SELECT squash_status FROM goals WHERE id = ?").get(goalId) as { squash_status: string } | undefined)?.squash_status;
+    if (currentStatus === "triggering") {
+      db.prepare(
+        "UPDATE goals SET squash_status = 'none' WHERE id = ? AND squash_status = 'triggering'",
+      ).run(goalId);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -1827,7 +1922,7 @@ async function triggerGoalSquash(
       log.error(`Failed to create QA regression task for goal ${goal.id}: ${(e as Error).message}`);
       return; // squash_status 는 createQARegressionTask 내부에서 blocked 로 설정됨
     }
-    db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(qaTaskId, goal.id);
+    db.prepare("UPDATE goals SET qa_regression_task_id = ?, squash_status = 'none' WHERE id = ?").run(qaTaskId, goal.id);
     log.info(`QA regression task ${qaTaskId} created for goal ${goal.id}, waiting for completion`);
     broadcast("goal:qa_regression_created", { goalId: goal.id, qaTaskId });
     return; // squash 진행 안 함 — QA 태스크 done 대기
@@ -1840,15 +1935,18 @@ async function triggerGoalSquash(
     log.warn(`QA regression task ${goal.qa_regression_task_id} not found for goal ${goal.id} — recreating`);
     try {
       const newTaskId = createQARegressionTask(db, broadcast, goal);
-      db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(newTaskId, goal.id);
+      db.prepare("UPDATE goals SET qa_regression_task_id = ?, squash_status = 'none' WHERE id = ?").run(newTaskId, goal.id);
     } catch (e) {
       log.error(`Failed to recreate QA regression task for goal ${goal.id}: ${(e as Error).message}`);
+      db.prepare("UPDATE goals SET squash_status = 'none' WHERE id = ? AND squash_status = 'triggering'").run(goal.id);
     }
     return;
   }
   if (qaTask.status !== "done") {
     log.info(`QA regression task ${goal.qa_regression_task_id} still ${qaTask.status}, waiting`);
-    return; // 여전히 대기
+    // triggering 해제 — 다음 태스크 done 이벤트에서 재시도 가능
+    db.prepare("UPDATE goals SET squash_status = 'none' WHERE id = ? AND squash_status = 'triggering'").run(goal.id);
+    return;
   }
   // C-2: QA done 이지만 이미 pending_approval 이면 재broadcast 생략
   if (goal.squash_status === "pending_approval") {
@@ -1875,11 +1973,13 @@ async function triggerGoalSquash(
 
   // 변경된 파일 목록 수집
   // H-2: 태스크들이 commit 완료된 상태이므로 "git diff HEAD"는 빈 결과.
-  //      goal branch 에서 main 대비 변경된 파일을 수집한다.
+  //      goal branch 에서 base_branch 대비 변경된 파일을 수집한다.
+  const projectRow = db.prepare("SELECT base_branch FROM projects WHERE id = ?").get(goal.project_id) as { base_branch: string | null } | undefined;
+  const baseBranch = projectRow?.base_branch || "main";
   let filesChanged: string[] = [];
   try {
     const { spawnSync } = await import("node:child_process");
-    const diffResult = spawnSync("git", ["diff", "--name-only", "main...HEAD"], {
+    const diffResult = spawnSync("git", ["diff", "--name-only", `${baseBranch}...HEAD`], {
       cwd: worktreePath,
       stdio: "pipe",
       timeout: 10_000,
@@ -1888,11 +1988,11 @@ async function triggerGoalSquash(
     if (diffResult.status === 0) {
       filesChanged = diffResult.stdout.split("\n").filter(Boolean);
     }
-    // fallback: main 브랜치가 없는 경우 (initial commit 등) log 기반 수집
+    // fallback: base_branch 가 없는 경우 (initial commit 등) log 기반 수집
     if (filesChanged.length === 0) {
       const logResult = spawnSync(
         "git",
-        ["log", "--name-only", "--pretty=format:", "main..HEAD"],
+        ["log", "--name-only", "--pretty=format:", `${baseBranch}..HEAD`],
         { cwd: worktreePath, stdio: "pipe", timeout: 10_000, encoding: "utf-8" },
       );
       if (logResult.status === 0) {

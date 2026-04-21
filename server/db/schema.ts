@@ -422,6 +422,17 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE goals ADD COLUMN qa_regression_task_id TEXT");
   }
 
+  // skip_adversarial on goals — 1이면 adversarial 태스크 자동 주입 건너뜀
+  if (!goalColsLate.some((c) => c.name === "skip_adversarial")) {
+    db.exec("ALTER TABLE goals ADD COLUMN skip_adversarial INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // base_branch on projects — 기본값 'main', develop/master 등 지원
+  const projectColsLate = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
+  if (!projectColsLate.some((c) => c.name === "base_branch")) {
+    db.exec("ALTER TABLE projects ADD COLUMN base_branch TEXT NOT NULL DEFAULT 'main'");
+  }
+
 }
 
 export function generateId(): string {
