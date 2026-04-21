@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../stores/useStore";
+import { useToast } from "../stores/useToast";
 import { getApiKey } from "../lib/api";
 
 /** Send a message through the active WebSocket connection. */
@@ -155,6 +156,43 @@ export function useWebSocket() {
             case "project:branch-merge-complete":
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: { type: msg.type, data: msg.payload } }));
               break;
+            case "goal:squash_ready": {
+              const { goalId, commitMessage, filesChanged, acceptanceOutput } = msg.payload;
+              useStore.getState().updateGoal({ id: goalId, squash_status: "pending_approval" });
+              useToast.getState().showToast("목표 반영 승인이 필요합니다", "info");
+              window.dispatchEvent(new CustomEvent("nova:goal-squash-ready", {
+                detail: { goalId, commitMessage, filesChanged, acceptanceOutput },
+              }));
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            }
+            case "goal:merged": {
+              const { goalId, sha } = msg.payload;
+              useStore.getState().updateGoal({ id: goalId, squash_status: "merged", squash_commit_sha: sha });
+              useToast.getState().showToast(`반영 완료: ${String(sha ?? "").slice(0, 7)}`, "success");
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            }
+            case "goal:squash_blocked": {
+              const { goalId, output, reason } = msg.payload;
+              useStore.getState().updateGoal({ id: goalId, squash_status: "blocked" });
+              useToast.getState().showToast("목표 반영 차단됨", "error", output ?? reason);
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            }
+            case "goal:squash_failed": {
+              const { goalId, error } = msg.payload;
+              useStore.getState().updateGoal({ id: goalId, squash_status: "none" });
+              useToast.getState().showToast("목표 반영 실패", "error", error);
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            }
+            case "goal:qa_regression_created": {
+              const { goalId, qaTaskId } = msg.payload;
+              useStore.getState().updateGoal({ id: goalId, qa_regression_task_id: qaTaskId });
+              window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
+              break;
+            }
           }
         } catch {
           // Ignore

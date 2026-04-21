@@ -748,6 +748,31 @@ const en = {
 
   // Remaining tasks (#11)
   remainingTasks: "{{count}} left",
+
+  // Goal-as-Unit squash UI
+  goalSquashPendingBadge: "Pending Approval",
+  goalSquashApproveBtn: "Apply to Main",
+  goalSquashApprovedBadge: "Processing...",
+  goalSquashMergedBadge: "Applied",
+  goalSquashBlockedBadge: "Blocked",
+  goalSquashRetryBtn: "Retry",
+  goalQaRegressionWaiting: "QA Regression Pending",
+  goalSquashDialogTitle: "Apply Goal to Main",
+  goalSquashDialogDesc: "Review the details below before applying to main.",
+  goalSquashDialogBranch: "Branch",
+  goalSquashDialogCommitMsg: "Commit Message Preview",
+  goalSquashDialogFilesChanged: "Changed Files",
+  goalSquashDialogAcceptance: "Verification Output",
+  goalSquashDialogConfirmBtn: "Confirm & Apply",
+  goalSquashApproving: "Applying...",
+  toastSquashReady: "Goal is ready for approval",
+  toastSquashMerged: "Applied to main",
+  toastSquashBlocked: "Goal apply blocked",
+  toastSquashFailed: "Goal apply failed",
+  acceptanceScriptLabel: "Completion Verification Script",
+  acceptanceScriptPlaceholder: "Script to run before applying. E.g.: npx tsx scripts/drift-audit.ts",
+  acceptanceScriptHelp: "Runs automatically after all tasks are done. Exit code 0 = pass, otherwise blocked.",
+  adversarialBadge: "Pre-research",
 } as const;
 
 export default en;

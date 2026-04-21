@@ -20,6 +20,7 @@ import { ProjectStats } from "./ProjectStats";
 import { AutopilotModal } from "./AutopilotModal";
 import GoalSpecPanel from "./GoalSpecPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { GoalSquashApprovalDialog } from "./GoalSquashApprovalDialog";
 
 type Tab = "overview" | "agents" | "kanban" | "verification" | "sessions" | "settings";
 
@@ -37,8 +38,8 @@ function AddGoalDialog({
   onStartSuggest,
   onDismissSuggestions,
 }: {
-  onCreateDirect: (title: string, description: string) => void;
-  onCreateWithSpec: (title: string, description: string) => void;
+  onCreateDirect: (title: string, description: string, acceptanceScript?: string) => void;
+  onCreateWithSpec: (title: string, description: string, acceptanceScript?: string) => void;
   onCancel: () => void;
   suggestions: Suggestion[];
   suggestLoading: boolean;
@@ -53,6 +54,7 @@ function AddGoalDialog({
   const [mode, setMode] = useState<"input" | "suggest">(hasSuggestState ? "suggest" : "input");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [acceptanceScript, setAcceptanceScript] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -69,10 +71,11 @@ function AddGoalDialog({
   const handleSubmit = (submitMode: "direct" | "spec") => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
+    const script = acceptanceScript.trim() || undefined;
     if (submitMode === "spec") {
-      onCreateWithSpec(title.trim(), description.trim());
+      onCreateWithSpec(title.trim(), description.trim(), script);
     } else {
-      onCreateDirect(title.trim(), description.trim());
+      onCreateDirect(title.trim(), description.trim(), script);
     }
   };
 
@@ -142,6 +145,21 @@ function AddGoalDialog({
                 className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50 resize-none"
               />
               <p className="text-[11px] text-gray-400 dark:text-gray-500">{t("goalDescHelp")}</p>
+              <div>
+                <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1 block">
+                  {t("acceptanceScriptLabel")}
+                </label>
+                <textarea
+                  value={acceptanceScript}
+                  onChange={(e) => setAcceptanceScript(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+                  placeholder={t("acceptanceScriptPlaceholder")}
+                  disabled={submitting}
+                  rows={2}
+                  className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50 resize-none font-mono"
+                />
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">{t("acceptanceScriptHelp")}</p>
+              </div>
             </>
           ) : (
             <div className="space-y-2">
@@ -326,9 +344,9 @@ function EditGoalDialog({
   onSave,
   onCancel,
 }: {
-  goal: { id: string; title: string; description: string; references: string };
+  goal: { id: string; title: string; description: string; references: string; goal_model?: string; acceptance_script?: string | null };
   projectId: string;
-  onSave: (id: string, title: string, description: string, references: string[]) => void;
+  onSave: (id: string, title: string, description: string, references: string[], acceptanceScript?: string) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
@@ -336,6 +354,7 @@ function EditGoalDialog({
   const [description, setDescription] = useState(
     goal.title && goal.description !== goal.title ? goal.description : ""
   );
+  const [acceptanceScript, setAcceptanceScript] = useState(goal.acceptance_script ?? "");
   const parsedRefs = (() => { try { const r = JSON.parse(goal.references || "[]"); return Array.isArray(r) ? r : []; } catch { return []; } })();
   const [selectedRefs, setSelectedRefs] = useState<string[]>(parsedRefs);
   const [availableDocs, setAvailableDocs] = useState<Array<{ path: string; name: string; dir: string }>>([]);
@@ -360,7 +379,8 @@ function EditGoalDialog({
 
   const handleSave = () => {
     if (!title.trim()) return;
-    onSave(goal.id, title.trim(), description.trim(), selectedRefs);
+    const script = acceptanceScript.trim() || undefined;
+    onSave(goal.id, title.trim(), description.trim(), selectedRefs, script);
   };
 
   // Group docs by directory
@@ -455,6 +475,22 @@ function EditGoalDialog({
               </div>
             )}
           </div>
+          {goal.goal_model === "goal_as_unit" && (
+            <div>
+              <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1 block">
+                {t("acceptanceScriptLabel")}
+              </label>
+              <textarea
+                value={acceptanceScript}
+                onChange={(e) => setAcceptanceScript(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+                placeholder={t("acceptanceScriptPlaceholder")}
+                rows={2}
+                className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 resize-none font-mono"
+              />
+              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">{t("acceptanceScriptHelp")}</p>
+            </div>
+          )}
         </div>
         <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-2 shrink-0">
           <button
@@ -478,7 +514,7 @@ function EditGoalDialog({
 
 export function ProjectHome() {
   const { t } = useTranslation();
-  const { currentProjectId, projects, agents, setAgents, goals, setGoals, tasks, setTasks, updateProject } =
+  const { currentProjectId, projects, agents, setAgents, goals, setGoals, tasks, setTasks, updateProject, updateGoal } =
     useStore();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
@@ -570,6 +606,13 @@ export function ProjectHome() {
 
   // Goal Spec state
   const [specGoalId, setSpecGoalId] = useState<string | null>(null);
+
+  // Goal-as-Unit squash state
+  const [squashApprovalGoalId, setSquashApprovalGoalId] = useState<string | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [squashPayloadByGoalId, setSquashPayloadByGoalId] = useState<
+    Record<string, { commitMessage?: string; filesChanged?: string[]; acceptanceOutput?: string }>
+  >({});
 
   // Direct prompt state (side panel)
   const [panelPromptMessage, setPanelPromptMessage] = useState("");
@@ -716,6 +759,19 @@ export function ProjectHome() {
     const id = setInterval(() => setCountdownTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [queuePaused, queuePausedInfo?.nextRetryAt]);
+
+  // Listen for goal:squash_ready to store payload for dialog
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { goalId, commitMessage, filesChanged, acceptanceOutput } = (e as CustomEvent).detail;
+      setSquashPayloadByGoalId((prev) => ({
+        ...prev,
+        [goalId]: { commitMessage, filesChanged, acceptanceOutput },
+      }));
+    };
+    window.addEventListener("nova:goal-squash-ready", handler);
+    return () => window.removeEventListener("nova:goal-squash-ready", handler);
+  }, []);
 
   // Listen for system:error events — show as toast
   useEffect(() => {
@@ -926,12 +982,17 @@ export function ProjectHome() {
     specPollRefs.current.set(goalId, timer);
   };
 
-  const handleAddGoalDirect = async (title: string, description: string) => {
+  const handleAddGoalDirect = async (title: string, description: string, acceptanceScript?: string) => {
     setShowDialog(null);
     dismissAiSuggestions();
     if (!currentProjectId) return;
     try {
-      const goal = await api.goals.create({ project_id: currentProjectId, title, description });
+      const goal = await api.goals.create({
+        project_id: currentProjectId,
+        title,
+        description,
+        ...(acceptanceScript ? { acceptance_script: acceptanceScript } : {}),
+      });
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
     } catch (err: any) {
@@ -939,12 +1000,18 @@ export function ProjectHome() {
     }
   };
 
-  const handleAddGoalWithSpec = async (title: string, description: string) => {
+  const handleAddGoalWithSpec = async (title: string, description: string, acceptanceScript?: string) => {
     setShowDialog(null);
     dismissAiSuggestions();
     if (!currentProjectId) return;
     try {
-      const goal = await api.goals.create({ project_id: currentProjectId, title, description, withSpec: true });
+      const goal = await api.goals.create({
+        project_id: currentProjectId,
+        title,
+        description,
+        withSpec: true,
+        ...(acceptanceScript ? { acceptance_script: acceptanceScript } : {}),
+      });
       setGoals([...goals, goal]);
       showToast(t("addGoalSuccess"), "success");
       // When autopilot is active, scheduler handles spec→decompose sequentially.
@@ -958,14 +1025,34 @@ export function ProjectHome() {
     }
   };
 
-  const handleUpdateGoal = async (goalId: string, title: string, description: string, references?: string[]) => {
+  const handleUpdateGoal = async (goalId: string, title: string, description: string, references?: string[], acceptanceScript?: string) => {
     setEditGoalId(null);
     try {
-      const updated = await api.goals.update(goalId, { title, description, ...(references ? { references } : {}) });
+      const updated = await api.goals.update(goalId, {
+        title,
+        description,
+        ...(references ? { references } : {}),
+        ...(acceptanceScript !== undefined ? { acceptance_script: acceptanceScript || null } : {}),
+      });
       setGoals(goals.map((g) => g.id === goalId ? { ...g, ...updated } : g));
       showToast(t("goalUpdated"), "success");
     } catch (err: any) {
       showToast(t("decomposeFailed"), "error", err.message);
+    }
+  };
+
+  const handleSquashApprove = async (goalId: string) => {
+    setIsApproving(true);
+    try {
+      await api.goals.squashApprove(goalId);
+      showToast("반영이 시작됐습니다", "info");
+      updateGoal({ id: goalId, squash_status: "approved" });
+      setSquashApprovalGoalId(null);
+    } catch (err: any) {
+      showToast(err.message ?? "반영 요청에 실패했습니다", "error", err.detail);
+      // 다이얼로그 유지 (isApproving만 해제)
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -1203,6 +1290,22 @@ export function ProjectHome() {
               executeDecompose(goalId, true);
             }}
             onCancel={() => setReDecomposeGoalId(null)}
+          />
+        );
+      })()}
+      {squashApprovalGoalId && (() => {
+        const goal = goals.find((g) => g.id === squashApprovalGoalId);
+        if (!goal) return null;
+        const payload = squashPayloadByGoalId[squashApprovalGoalId] ?? {};
+        return (
+          <GoalSquashApprovalDialog
+            goal={goal}
+            commitMessage={payload.commitMessage}
+            filesChanged={payload.filesChanged}
+            acceptanceOutput={payload.acceptanceOutput}
+            onConfirm={() => handleSquashApprove(squashApprovalGoalId)}
+            onCancel={() => { if (!isApproving) setSquashApprovalGoalId(null); }}
+            isApproving={isApproving}
           />
         );
       })()}
@@ -1774,6 +1877,63 @@ export function ProjectHome() {
                             <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
                           )}
                         </div>
+                        {/* Goal-as-Unit squash UI */}
+                        {(goal as any).goal_model === "goal_as_unit" && (() => {
+                          const squashStatus = (goal as any).squash_status as string | undefined;
+                          const sha: string | null = (goal as any).squash_commit_sha ?? null;
+                          const qaTaskId: string | null = (goal as any).qa_regression_task_id ?? null;
+                          const qaTask = qaTaskId ? tasks.find((tk) => tk.id === qaTaskId) : null;
+                          const qaWaiting = qaTask && qaTask.status !== "done";
+                          return (
+                            <div className="px-3 pt-1.5 pb-1 flex flex-wrap gap-1.5 items-center">
+                              {squashStatus === "pending_approval" && (
+                                <>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 font-medium whitespace-nowrap">
+                                    {t("goalSquashPendingBadge")}
+                                  </span>
+                                  <button
+                                    onClick={() => setSquashApprovalGoalId(goal.id)}
+                                    className="text-[10px] px-2 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors font-medium whitespace-nowrap"
+                                  >
+                                    {t("goalSquashApproveBtn")}
+                                  </button>
+                                </>
+                              )}
+                              {squashStatus === "approved" && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-medium flex items-center gap-1 whitespace-nowrap">
+                                  <svg className="animate-spin w-2.5 h-2.5" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                  </svg>
+                                  {t("goalSquashApprovedBadge")}
+                                </span>
+                              )}
+                              {squashStatus === "merged" && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 font-medium whitespace-nowrap">
+                                  {t("goalSquashMergedBadge")} {sha ? sha.slice(0, 7) : ""}
+                                </span>
+                              )}
+                              {squashStatus === "blocked" && (
+                                <>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 font-medium whitespace-nowrap">
+                                    {t("goalSquashBlockedBadge")}
+                                  </span>
+                                  <button
+                                    onClick={() => handleDecomposeGoal(goal.id)}
+                                    className="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap"
+                                  >
+                                    {t("goalSquashRetryBtn")}
+                                  </button>
+                                </>
+                              )}
+                              {qaWaiting && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 font-medium whitespace-nowrap">
+                                  {t("goalQaRegressionWaiting")}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {hasDescription && (
                           <div
                             className="px-3 pt-1.5 pb-1 cursor-pointer group/desc"

@@ -49,6 +49,14 @@ interface Goal {
   references: string; // JSON array string
   priority: string;
   progress: number;
+  // Goal-as-Unit fields
+  goal_model: 'legacy' | 'goal_as_unit';
+  squash_status: 'none' | 'pending_approval' | 'approved' | 'merged' | 'blocked';
+  squash_commit_sha: string | null;
+  acceptance_script: string | null;
+  qa_regression_task_id: string | null;
+  worktree_path: string | null;
+  worktree_branch: string | null;
 }
 
 interface AppStore {
@@ -67,6 +75,7 @@ interface AppStore {
   // Goals
   goals: Goal[];
   setGoals: (goals: Goal[]) => void;
+  updateGoal: (goal: Partial<Goal> & { id: string }) => void;
 
   // Tasks
   tasks: Task[];
@@ -103,6 +112,10 @@ export const useStore = create<AppStore>((set) => ({
 
   goals: [],
   setGoals: (goals) => set({ goals }),
+  updateGoal: (goal) =>
+    set((state) => ({
+      goals: state.goals.map((g) => (g.id === goal.id ? { ...g, ...goal } : g)),
+    })),
 
   tasks: [],
   setTasks: (tasks) => set({ tasks }),
