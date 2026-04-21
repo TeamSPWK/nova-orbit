@@ -26,7 +26,10 @@ export const MAX_CONSECUTIVE_RATE_LIMITS = parseInt(process.env.NOVA_MAX_RATE_LI
  *  sleeps for this duration and retries once, so overnight / long-running
  *  autopilot sessions self-heal as soon as the API budget replenishes. */
 export const RATE_LIMIT_COOLDOWN_MS = parseInt(process.env.NOVA_RATE_LIMIT_COOLDOWN_MS ?? "900000", 10); // 15 min
-export const DEFAULT_MAX_CONCURRENCY = parseInt(process.env.NOVA_MAX_CONCURRENCY ?? "3", 10);
+// Solo founder workflow: sequential execution by default. Parallel 태스크는
+// 선행 출력이 반영되기 전에 후행이 출발해 맥락 엇갈림/false-positive 를 만든다.
+// env 로 override 가능하지만 기본값 1 — 품질 > wall-clock.
+export const DEFAULT_MAX_CONCURRENCY = parseInt(process.env.NOVA_MAX_CONCURRENCY ?? "1", 10);
 
 // --- Agent execution ---
 export const TASK_TIMEOUT_MS = parseInt(process.env.NOVA_TASK_TIMEOUT_MS ?? "600000", 10); // 10 min default
