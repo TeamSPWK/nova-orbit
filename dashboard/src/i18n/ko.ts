@@ -759,7 +759,7 @@ const ko = {
   goalSquashRetryBtn: "재시도",
   goalQaRegressionWaiting: "실전 QA 회귀 대기 중",
   goalSquashDialogTitle: "목표 반영 확인",
-  goalSquashDialogDesc: "아래 내용을 검토하고 main에 반영하세요.",
+  goalSquashDialogDesc: "아래 내용을 검토하고 기본 저장소에 반영하세요.",
   goalSquashDialogBranch: "반영 브랜치",
   goalSquashDialogCommitMsg: "커밋 메시지 프리뷰",
   goalSquashDialogFilesChanged: "변경 파일",
@@ -767,13 +767,20 @@ const ko = {
   goalSquashDialogConfirmBtn: "목표 반영 확정",
   goalSquashApproving: "처리 중...",
   toastSquashReady: "목표 반영 승인이 필요합니다",
-  toastSquashMerged: "반영 완료",
+  toastSquashMerged: "반영 완료: {{sha}}",
   toastSquashBlocked: "목표 반영 차단됨",
   toastSquashFailed: "목표 반영 실패",
   acceptanceScriptLabel: "완료 검증 스크립트",
   acceptanceScriptPlaceholder: "완료 직전 실행할 검증 스크립트. 예: npx tsx scripts/drift-audit.ts",
   acceptanceScriptHelp: "모든 태스크 완료 후 자동 실행됩니다. 종료 코드 0이면 통과, 그 외는 반영 차단.",
   adversarialBadge: "사전 조사",
+
+  // L-2: handleSquashApprove Toast 키
+  toastSquashApproveStart: "반영이 시작됐습니다",
+  toastSquashApproveFailed: "반영 요청에 실패했습니다",
+
+  // L-5: GoalSquashApprovalDialog 라벨
+  goalSquashDialogGoalLabel: "목표",
 } as const;
 
 export default ko;

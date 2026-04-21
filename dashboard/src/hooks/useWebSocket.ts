@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useStore } from "../stores/useStore";
 import { useToast } from "../stores/useToast";
 import { getApiKey } from "../lib/api";
@@ -15,6 +16,7 @@ let _wsInstance: WebSocket | null = null;
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -158,8 +160,13 @@ export function useWebSocket() {
               break;
             case "goal:squash_ready": {
               const { goalId, commitMessage, filesChanged, acceptanceOutput } = msg.payload;
+              // H-1: 퇴행 방지 — merged/approved 상태에서 pending_approval로 되돌리지 않음
+              const currentGoal = useStore.getState().goals.find((g) => g.id === goalId);
+              if (currentGoal?.squash_status === "merged" || currentGoal?.squash_status === "approved") {
+                break;
+              }
               useStore.getState().updateGoal({ id: goalId, squash_status: "pending_approval" });
-              useToast.getState().showToast("목표 반영 승인이 필요합니다", "info");
+              useToast.getState().showToast(t("toastSquashReady"), "info");
               window.dispatchEvent(new CustomEvent("nova:goal-squash-ready", {
                 detail: { goalId, commitMessage, filesChanged, acceptanceOutput },
               }));
@@ -169,21 +176,31 @@ export function useWebSocket() {
             case "goal:merged": {
               const { goalId, sha } = msg.payload;
               useStore.getState().updateGoal({ id: goalId, squash_status: "merged", squash_commit_sha: sha });
-              useToast.getState().showToast(`반영 완료: ${String(sha ?? "").slice(0, 7)}`, "success");
+              useToast.getState().showToast(t("toastSquashMerged", { sha: String(sha ?? "").slice(0, 7) }), "success");
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
             }
             case "goal:squash_blocked": {
               const { goalId, output, reason } = msg.payload;
+              // H-1: 퇴행 방지 — merged 상태에서 blocked로 되돌리지 않음
+              const blockedGoal = useStore.getState().goals.find((g) => g.id === goalId);
+              if (blockedGoal?.squash_status === "merged") {
+                break;
+              }
               useStore.getState().updateGoal({ id: goalId, squash_status: "blocked" });
-              useToast.getState().showToast("목표 반영 차단됨", "error", output ?? reason);
+              useToast.getState().showToast(t("toastSquashBlocked"), "error", output ?? reason);
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
             }
             case "goal:squash_failed": {
               const { goalId, error } = msg.payload;
+              // H-1: 퇴행 방지 — merged 상태에서 none으로 되돌리지 않음
+              const failedGoal = useStore.getState().goals.find((g) => g.id === goalId);
+              if (failedGoal?.squash_status === "merged") {
+                break;
+              }
               useStore.getState().updateGoal({ id: goalId, squash_status: "none" });
-              useToast.getState().showToast("목표 반영 실패", "error", error);
+              useToast.getState().showToast(t("toastSquashFailed"), "error", error);
               window.dispatchEvent(new CustomEvent("nova:refresh", { detail: msg }));
               break;
             }

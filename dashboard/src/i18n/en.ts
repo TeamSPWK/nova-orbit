@@ -758,7 +758,7 @@ const en = {
   goalSquashRetryBtn: "Retry",
   goalQaRegressionWaiting: "QA Regression Pending",
   goalSquashDialogTitle: "Apply Goal to Main",
-  goalSquashDialogDesc: "Review the details below before applying to main.",
+  goalSquashDialogDesc: "Review the details below before applying to main repository.",
   goalSquashDialogBranch: "Branch",
   goalSquashDialogCommitMsg: "Commit Message Preview",
   goalSquashDialogFilesChanged: "Changed Files",
@@ -766,13 +766,20 @@ const en = {
   goalSquashDialogConfirmBtn: "Confirm & Apply",
   goalSquashApproving: "Applying...",
   toastSquashReady: "Goal is ready for approval",
-  toastSquashMerged: "Applied to main",
+  toastSquashMerged: "Applied: {{sha}}",
   toastSquashBlocked: "Goal apply blocked",
   toastSquashFailed: "Goal apply failed",
   acceptanceScriptLabel: "Completion Verification Script",
   acceptanceScriptPlaceholder: "Script to run before applying. E.g.: npx tsx scripts/drift-audit.ts",
   acceptanceScriptHelp: "Runs automatically after all tasks are done. Exit code 0 = pass, otherwise blocked.",
   adversarialBadge: "Pre-research",
+
+  // L-2: handleSquashApprove Toast keys
+  toastSquashApproveStart: "Apply started",
+  toastSquashApproveFailed: "Failed to request apply",
+
+  // L-5: GoalSquashApprovalDialog labels
+  goalSquashDialogGoalLabel: "Goal",
 } as const;
 
 export default en;

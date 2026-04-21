@@ -70,7 +70,7 @@ export function GoalSquashApprovalDialog({
           {/* 목표 제목 */}
           <div>
             <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider block mb-1">
-              목표
+              {t("goalSquashDialogGoalLabel")}
             </span>
             <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{goal.title}</p>
           </div>

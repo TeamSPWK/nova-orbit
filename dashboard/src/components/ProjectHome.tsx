@@ -97,10 +97,11 @@ function AddGoalDialog({
     if (selected.size === 0 || submitting) return;
     setSubmitting(true);
     const selectedGoals = [...selected].map((i) => suggestions[i]);
+    const script = acceptanceScript.trim() || undefined;
     // Always use direct creation — autopilot scheduler handles spec→decompose
     // sequentially in priority/sort_order. No need for client-side spec trigger.
     for (const goal of selectedGoals) {
-      await onCreateDirect(goal.title, goal.description);
+      await onCreateDirect(goal.title, goal.description, script);
     }
   };
 
@@ -228,6 +229,22 @@ function AddGoalDialog({
                       </div>
                     </button>
                   ))}
+                  {/* M-2: AI 추천 경로 acceptance_script 공용 입력 */}
+                  <div className="pt-1">
+                    <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1 block">
+                      {t("acceptanceScriptLabel")}
+                    </label>
+                    <textarea
+                      value={acceptanceScript}
+                      onChange={(e) => setAcceptanceScript(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+                      placeholder={t("acceptanceScriptPlaceholder")}
+                      disabled={submitting}
+                      rows={2}
+                      className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-[#1a1a2e] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50 resize-none font-mono"
+                    />
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">{t("acceptanceScriptHelp")}</p>
+                  </div>
                 </>
               )}
             </div>
@@ -1045,11 +1062,11 @@ export function ProjectHome() {
     setIsApproving(true);
     try {
       await api.goals.squashApprove(goalId);
-      showToast("반영이 시작됐습니다", "info");
+      showToast(t("toastSquashApproveStart"), "info");
       updateGoal({ id: goalId, squash_status: "approved" });
       setSquashApprovalGoalId(null);
     } catch (err: any) {
-      showToast(err.message ?? "반영 요청에 실패했습니다", "error", err.detail);
+      showToast(err.message ?? t("toastSquashApproveFailed"), "error", err.detail);
       // 다이얼로그 유지 (isApproving만 해제)
     } finally {
       setIsApproving(false);
@@ -1878,10 +1895,10 @@ export function ProjectHome() {
                           )}
                         </div>
                         {/* Goal-as-Unit squash UI */}
-                        {(goal as any).goal_model === "goal_as_unit" && (() => {
-                          const squashStatus = (goal as any).squash_status as string | undefined;
-                          const sha: string | null = (goal as any).squash_commit_sha ?? null;
-                          const qaTaskId: string | null = (goal as any).qa_regression_task_id ?? null;
+                        {goal.goal_model === "goal_as_unit" && (() => {
+                          const squashStatus = goal.squash_status;
+                          const sha: string | null = goal.squash_commit_sha ?? null;
+                          const qaTaskId: string | null = goal.qa_regression_task_id ?? null;
                           const qaTask = qaTaskId ? tasks.find((tk) => tk.id === qaTaskId) : null;
                           const qaWaiting = qaTask && qaTask.status !== "done";
                           return (
