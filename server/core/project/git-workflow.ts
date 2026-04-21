@@ -337,6 +337,105 @@ export function createPR(
   return null;
 }
 
+// ─── Goal-as-Unit: Squash Merge ────────────────────────
+
+export interface SquashMergeResult {
+  sha: string | null;
+  prUrl: string | null;
+  error?: string;
+}
+
+/**
+ * Goal 완료 시 goal 브랜치를 squash merge.
+ *
+ * 모드:
+ *   local_only   → main 체크아웃 → git merge --squash goal/branch → git commit
+ *   main_direct  → squash merge → git push origin main
+ *   pr           → goal 브랜치 push → gh pr create (PR에서 squash-merge 선택은 사용자 몫)
+ *   branch_only  → local_only와 동일 (push 없음)
+ *
+ * goalBranch 삭제는 squash 성공 후 호출부에서 수행.
+ */
+export function squashMergeGoal(
+  projectWorkdir: string,
+  goalBranch: string,
+  commitMessage: string,
+  mode: GitMode,
+): SquashMergeResult {
+  try {
+    if (mode === "pr") {
+      // goal 브랜치 push → PR 생성 (사용자가 GitHub UI에서 squash-merge 선택)
+      const pushed = pushBranch(projectWorkdir, goalBranch);
+      if (!pushed) {
+        return { sha: null, prUrl: null, error: `Failed to push branch ${goalBranch}` };
+      }
+      const title = commitMessage.split("\n")[0] ?? goalBranch;
+      const body = commitMessage;
+      const prUrl = createPR(projectWorkdir, goalBranch, title, body);
+      return { sha: null, prUrl };
+    }
+
+    // local_only / main_direct / branch_only: squash merge to main
+    let defaultBranch: string;
+    try {
+      defaultBranch = getDefaultBranch(projectWorkdir);
+    } catch {
+      defaultBranch = "main";
+    }
+
+    // main 체크아웃
+    try {
+      gitExec(projectWorkdir, ["checkout", defaultBranch]);
+    } catch (err: any) {
+      return { sha: null, prUrl: null, error: `Failed to checkout ${defaultBranch}: ${err.message}` };
+    }
+
+    // squash merge
+    try {
+      gitExec(projectWorkdir, ["merge", "--squash", goalBranch]);
+    } catch (err: any) {
+      // 복구: main 체크아웃 유지, merge abort
+      try { gitExec(projectWorkdir, ["merge", "--abort"]); } catch { /* no merge to abort */ }
+      try { gitExec(projectWorkdir, ["reset", "--hard", "HEAD"]); } catch { /* best effort */ }
+      return { sha: null, prUrl: null, error: `Squash merge failed: ${err.message}` };
+    }
+
+    // commit
+    let sha: string | null = null;
+    try {
+      gitExec(projectWorkdir, ["commit", "-m", commitMessage]);
+      // 커밋 SHA 조회
+      const shaResult = spawnSync("git", ["rev-parse", "HEAD"], {
+        cwd: projectWorkdir,
+        stdio: "pipe",
+        timeout: 5_000,
+        encoding: "utf-8",
+      });
+      sha = shaResult.status === 0 ? shaResult.stdout.trim().slice(0, 40) : null;
+    } catch (err: any) {
+      // nothing to commit은 benign
+      if (err.message?.includes("nothing to commit") || err.message?.includes("no changes added")) {
+        return { sha: null, prUrl: null, error: "nothing-to-commit" };
+      }
+      return { sha: null, prUrl: null, error: `Commit failed: ${err.message}` };
+    }
+
+    // main_direct: push
+    if (mode === "main_direct") {
+      const pushed = pushBranch(projectWorkdir, defaultBranch);
+      if (!pushed) {
+        log.warn(`squashMergeGoal: push failed after commit — SHA=${sha}`);
+      }
+    }
+
+    log.info(`squashMergeGoal: ${goalBranch} → ${defaultBranch} (sha=${sha}, mode=${mode})`);
+    return { sha, prUrl: null };
+  } catch (err: any) {
+    log.error(`squashMergeGoal unexpected error: ${err.message}`);
+    return { sha: null, prUrl: null, error: err.message ?? String(err) };
+  }
+}
+
 // ─── High-level workflow ───────────────────────────────
 
 export interface GitWorkflowResult {

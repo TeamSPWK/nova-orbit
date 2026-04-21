@@ -151,23 +151,30 @@ export function removeWorktree(projectWorkdir: string, worktreePath: string, bra
 /**
  * 서버 시작 시 잔존 worktree + agent branch 일괄 정리.
  * recovery.ts에서 호출.
+ *
+ * @param excludePaths - 제외할 worktree 경로 목록 (Goal-as-Unit: squash_status != 'merged'인 goal worktree)
  */
-export function cleanupStaleWorktrees(projectWorkdir: string): number {
+export function cleanupStaleWorktrees(projectWorkdir: string, excludePaths: string[] = []): number {
   if (!existsSync(join(projectWorkdir, ".git"))) return 0;
 
   let cleaned = 0;
   const worktrees = listWorktrees(projectWorkdir);
   const mainWorktree = projectWorkdir;
+  const excludeSet = new Set(excludePaths);
 
   for (const wt of worktrees) {
     if (wt === mainWorktree) continue; // main worktree는 건드리지 않음
+    if (excludeSet.has(wt)) {
+      log.info(`Skipping active goal worktree: ${wt}`);
+      continue; // Goal-as-Unit: 진행 중 goal worktree는 보존
+    }
     if (wt.includes(".nova-worktrees")) {
       removeWorktree(projectWorkdir, wt);
       cleaned++;
     }
   }
 
-  // 잔존 agent/* branch 정리
+  // 잔존 agent/* branch 정리 (goal/* 브랜치는 Goal-as-Unit squash 후 제거하므로 여기서는 제외)
   try {
     const result = spawnSync("git", ["branch", "--list", "agent/*"], {
       cwd: projectWorkdir,
@@ -191,6 +198,36 @@ export function cleanupStaleWorktrees(projectWorkdir: string): number {
     }
   } catch { /* best effort */ }
 
+  // 서버 재시작 시 dangling nova-checkpoint- stash 정리
+  try {
+    const stashListResult = spawnSync("git", ["stash", "list"], {
+      cwd: projectWorkdir,
+      stdio: "pipe",
+      timeout: 10_000,
+      encoding: "utf-8",
+    });
+    if (stashListResult.status === 0 && stashListResult.stdout) {
+      const stashLines = stashListResult.stdout.split("\n").filter(Boolean);
+      // 역순으로 처리해야 stash index가 올바름 (뒤에서부터 drop)
+      const checkpointIndices: number[] = [];
+      stashLines.forEach((line, idx) => {
+        if (line.includes("nova-checkpoint-")) {
+          checkpointIndices.push(idx);
+        }
+      });
+      // 높은 인덱스부터 drop (낮은 인덱스 변동 방지)
+      for (const idx of checkpointIndices.sort((a, b) => b - a)) {
+        spawnSync("git", ["stash", "drop", `stash@{${idx}}`], {
+          cwd: projectWorkdir,
+          stdio: "pipe",
+          timeout: 10_000,
+        });
+        log.info(`Cleaned up stale nova-checkpoint stash at index ${idx}`);
+        cleaned++;
+      }
+    }
+  } catch { /* best effort */ }
+
   if (cleaned > 0) log.info(`Cleaned up ${cleaned} stale worktrees/branches in ${projectWorkdir}`);
   return cleaned;
 }
@@ -207,6 +244,175 @@ export function listWorktrees(projectWorkdir: string): string[] {
     .split("\n")
     .filter((line) => line.startsWith("worktree "))
     .map((line) => line.replace("worktree ", ""));
+}
+
+/**
+ * Goal 단위 공유 worktree 생성 (Goal-as-Unit 모델).
+ *
+ * 구조: {projectWorkdir}/.nova-worktrees/goal-{goalSlug}-{uid}/
+ * Branch: goal/{goalSlug}-{uid}
+ *
+ * 태스크마다 새 worktree를 만드는 기존 createWorktree()와 달리,
+ * Goal 실행 시작 시 1회만 호출하여 해당 Goal의 모든 태스크가 공유한다.
+ */
+export function createGoalWorktree(
+  projectWorkdir: string,
+  goalSlug: string,
+): WorktreeInfo | null {
+  if (!existsSync(join(projectWorkdir, ".git"))) {
+    log.info("Not a git repo — skipping goal worktree isolation");
+    return null;
+  }
+
+  ensureGitignoreHasWorktreeExcludes(projectWorkdir);
+
+  const headCheck = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: projectWorkdir,
+    stdio: "pipe",
+    timeout: 5_000,
+  });
+  if (headCheck.status !== 0) {
+    log.warn("No commits in repo — skipping goal worktree isolation");
+    return null;
+  }
+
+  const safeSlug = slugify(goalSlug).slice(0, 50) || "goal";
+  const uid = randomBytes(4).toString("hex");
+  const branch = `goal/${safeSlug}-${uid}`;
+  const worktreePath = join(projectWorkdir, ".nova-worktrees", `goal-${safeSlug}-${uid}`);
+
+  const result = spawnSync("git", ["worktree", "add", "-b", branch, worktreePath], {
+    cwd: projectWorkdir,
+    stdio: "pipe",
+    timeout: 30_000,
+  });
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString() ?? "";
+    log.error(`Failed to create goal worktree: ${stderr}`);
+    return null;
+  }
+
+  log.info(`Created goal worktree: ${worktreePath} (branch: ${branch})`);
+  return { path: worktreePath, branch };
+}
+
+/**
+ * 태스크 시작 전 stash 체크포인트 생성.
+ * 중복 push 방지: 동일 taskId stash가 이미 있으면 false 반환.
+ * 변경사항이 없으면 false 반환.
+ */
+export function stashCheckpoint(worktreePath: string, taskId: string): boolean {
+  const label = `nova-checkpoint-${taskId}`;
+
+  // 중복 체크
+  const listResult = spawnSync("git", ["stash", "list"], {
+    cwd: worktreePath,
+    stdio: "pipe",
+    timeout: 10_000,
+    encoding: "utf-8",
+  });
+  if (listResult.status === 0 && listResult.stdout.includes(label)) {
+    log.info(`Stash checkpoint already exists for task ${taskId} — skipping`);
+    return false;
+  }
+
+  const pushResult = spawnSync("git", ["stash", "push", "-m", label], {
+    cwd: worktreePath,
+    stdio: "pipe",
+    timeout: 15_000,
+    encoding: "utf-8",
+  });
+
+  if (pushResult.status !== 0) {
+    log.warn(`stashCheckpoint failed for task ${taskId}: ${pushResult.stderr?.toString()}`);
+    return false;
+  }
+
+  // "No local changes to save" 처리
+  if (pushResult.stdout?.toString().includes("No local changes")) {
+    return false;
+  }
+
+  log.info(`Stash checkpoint created for task ${taskId}`);
+  return true;
+}
+
+/**
+ * 태스크 실패(blocked) 시 stash 체크포인트 복원.
+ * stash 목록에서 taskId를 찾아 `git stash pop --index stash@{N}` 수행.
+ * 충돌 시 git checkout -- . + git stash drop 후 false 반환.
+ */
+export function restoreCheckpoint(worktreePath: string, taskId: string): boolean {
+  const label = `nova-checkpoint-${taskId}`;
+
+  const listResult = spawnSync("git", ["stash", "list"], {
+    cwd: worktreePath,
+    stdio: "pipe",
+    timeout: 10_000,
+    encoding: "utf-8",
+  });
+
+  if (listResult.status !== 0) {
+    log.warn(`restoreCheckpoint: git stash list failed for task ${taskId}`);
+    return false;
+  }
+
+  const lines = listResult.stdout.split("\n").filter(Boolean);
+  const idx = lines.findIndex((line) => line.includes(label));
+  if (idx === -1) {
+    log.warn(`restoreCheckpoint: no checkpoint found for task ${taskId}`);
+    return false;
+  }
+
+  const stashRef = `stash@{${idx}}`;
+  const popResult = spawnSync("git", ["stash", "pop", "--index", stashRef], {
+    cwd: worktreePath,
+    stdio: "pipe",
+    timeout: 15_000,
+    encoding: "utf-8",
+  });
+
+  if (popResult.status !== 0) {
+    // 충돌 발생 — 강제 복구
+    log.warn(`restoreCheckpoint conflict for task ${taskId} — forcing checkout`);
+    spawnSync("git", ["checkout", "--", "."], { cwd: worktreePath, stdio: "pipe", timeout: 10_000 });
+    spawnSync("git", ["stash", "drop", stashRef], { cwd: worktreePath, stdio: "pipe", timeout: 10_000 });
+    return false;
+  }
+
+  log.info(`Restored stash checkpoint for task ${taskId}`);
+  return true;
+}
+
+/**
+ * 태스크 성공 시 stash 체크포인트 제거.
+ * 실패는 무시 (best-effort).
+ */
+export function dropCheckpoint(worktreePath: string, taskId: string): void {
+  const label = `nova-checkpoint-${taskId}`;
+
+  const listResult = spawnSync("git", ["stash", "list"], {
+    cwd: worktreePath,
+    stdio: "pipe",
+    timeout: 10_000,
+    encoding: "utf-8",
+  });
+
+  if (listResult.status !== 0) return;
+
+  const lines = listResult.stdout.split("\n").filter(Boolean);
+  const idx = lines.findIndex((line) => line.includes(label));
+  if (idx === -1) return;
+
+  const stashRef = `stash@{${idx}}`;
+  spawnSync("git", ["stash", "drop", stashRef], {
+    cwd: worktreePath,
+    stdio: "pipe",
+    timeout: 10_000,
+  });
+
+  log.info(`Dropped stash checkpoint for task ${taskId}`);
 }
 
 function slugify(s: string): string {

@@ -390,6 +390,33 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'");
   }
 
+  // Goal-as-Unit: acceptance_script on tasks — Task 수준 acceptance gate
+  if (!taskColsLate.some((c) => c.name === "acceptance_script")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN acceptance_script TEXT");
+  }
+
+  // Goal-as-Unit: goals 테이블 컬럼 추가
+  // 증분 마이그레이션 — 기존 goals는 DEFAULT 값으로 자동 적용 (legacy 호환)
+  const goalColsLate = db.prepare("PRAGMA table_info(goals)").all() as { name: string }[];
+  if (!goalColsLate.some((c) => c.name === "goal_model")) {
+    db.exec("ALTER TABLE goals ADD COLUMN goal_model TEXT NOT NULL DEFAULT 'legacy'");
+  }
+  if (!goalColsLate.some((c) => c.name === "worktree_path")) {
+    db.exec("ALTER TABLE goals ADD COLUMN worktree_path TEXT");
+  }
+  if (!goalColsLate.some((c) => c.name === "worktree_branch")) {
+    db.exec("ALTER TABLE goals ADD COLUMN worktree_branch TEXT");
+  }
+  if (!goalColsLate.some((c) => c.name === "acceptance_script")) {
+    db.exec("ALTER TABLE goals ADD COLUMN acceptance_script TEXT");
+  }
+  if (!goalColsLate.some((c) => c.name === "squash_commit_sha")) {
+    db.exec("ALTER TABLE goals ADD COLUMN squash_commit_sha TEXT");
+  }
+  if (!goalColsLate.some((c) => c.name === "squash_status")) {
+    db.exec("ALTER TABLE goals ADD COLUMN squash_status TEXT NOT NULL DEFAULT 'none'");
+  }
+
 }
 
 export function generateId(): string {

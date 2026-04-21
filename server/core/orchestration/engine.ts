@@ -1,10 +1,11 @@
 import type { Database } from "better-sqlite3";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { SessionManager } from "../agent/session.js";
 import { parseStreamJson } from "../agent/adapters/stream-parser.js";
 import { createQualityGate } from "../quality-gate/evaluator.js";
 import { createDelegationEngine } from "./delegation.js";
-import { executeGitWorkflow, getDefaultBranch, type GitHubConfig, type GitWorkflowResult } from "../project/git-workflow.js";
+import { executeGitWorkflow, getDefaultBranch, squashMergeGoal, type GitHubConfig, type GitMode, type GitWorkflowResult } from "../project/git-workflow.js";
 import type { WorktreeInfo } from "../project/worktree.js";
 import { createLogger } from "../../utils/logger.js";
 import { MAX_TITLE_LEN, MAX_DESC_LEN, MAX_SUMMARY_LEN, MAX_TASKS_PER_GOAL, MAX_TASK_RETRIES, MAX_REASSIGNS } from "../../utils/constants.js";
@@ -43,6 +44,12 @@ interface GoalRow {
   project_id: string;
   title: string;
   description: string;
+  goal_model: string;        // 'legacy' | 'goal_as_unit'
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  acceptance_script: string | null;
+  squash_status: string;     // 'none' | 'pending_approval' | 'approved' | 'merged' | 'blocked'
+  squash_commit_sha: string | null;
 }
 interface AgentRow {
   id: string;
@@ -428,9 +435,48 @@ export function createOrchestrationEngine(
       let effectiveWorkdir = workdir;
       let worktreeInfo: WorktreeInfo | null = null;
 
+      // Goal 정보 조회 — goal_model 분기 결정
+      const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(task.goal_id) as GoalRow | undefined;
+      const isGoalAsUnit = goal?.goal_model === "goal_as_unit";
+
       if (!needsWorktree) {
         log.info(`Skipping worktree for agent "${agentName}" (needs_worktree=0) — using project root`);
+      } else if (isGoalAsUnit) {
+        // Goal-as-Unit: 공유 worktree 사용 (Goal 시작 시 1회 생성)
+        try {
+          const { createGoalWorktree, stashCheckpoint } = await import("../project/worktree.js");
+
+          let goalWorktreePath = goal?.worktree_path;
+          let goalWorktreeBranch = goal?.worktree_branch;
+
+          if (!goalWorktreePath) {
+            // 첫 태스크: goal worktree 생성
+            const goalSlug = (goal?.title || goal?.description || task.goal_id).slice(0, 50);
+            const newWorktree = createGoalWorktree(workdir, goalSlug);
+            if (newWorktree) {
+              goalWorktreePath = newWorktree.path;
+              goalWorktreeBranch = newWorktree.branch;
+              // goals 테이블에 worktree_path/worktree_branch 저장
+              db.prepare(
+                "UPDATE goals SET worktree_path = ?, worktree_branch = ? WHERE id = ?",
+              ).run(goalWorktreePath, goalWorktreeBranch, task.goal_id);
+              log.info(`Goal worktree created: ${goalWorktreePath} (branch: ${goalWorktreeBranch})`);
+            } else {
+              log.warn(`Goal worktree creation failed — using project root for goal ${task.goal_id}`);
+            }
+          }
+
+          if (goalWorktreePath) {
+            effectiveWorkdir = goalWorktreePath;
+            // 태스크 시작 전 stash 체크포인트
+            stashCheckpoint(goalWorktreePath, task.id);
+            log.info(`Goal-as-Unit: using shared worktree ${goalWorktreePath}`);
+          }
+        } catch (err: any) {
+          log.warn(`Goal-as-Unit worktree setup failed, using project root: ${err.message}`);
+        }
       } else {
+        // Legacy: 태스크마다 독립 worktree
         try {
           const { createWorktree } = await import("../project/worktree.js");
           worktreeInfo = createWorktree(workdir, agentName, task.title);
@@ -524,11 +570,24 @@ introduce a different framework / language / build tool to solve this task.` : "
 `
           : "";
 
+        // Goal-as-Unit: 이전 태스크 result_summary 체인 주입
+        let previousTaskContext = "";
+        if (isGoalAsUnit) {
+          const prevTasks = db.prepare(`
+            SELECT title, result_summary FROM tasks
+            WHERE goal_id = ? AND status = 'done' AND result_summary IS NOT NULL
+            ORDER BY sort_order ASC, updated_at ASC
+          `).all(task.goal_id) as { title: string; result_summary: string }[];
+          if (prevTasks.length > 0) {
+            previousTaskContext = `\n## 이전 태스크 완료 상태\n${prevTasks.map((t) => `- [완료] ${t.title}: ${t.result_summary.slice(0, 200)}`).join("\n")}\n`;
+          }
+        }
+
         const implementationPrompt = `
 # Task: ${task.title}
 
 ${task.description}
-${scopeAnchor}${architectContext ? `\n## Architecture Design\n${architectContext}\n` : ""}
+${previousTaskContext}${scopeAnchor}${architectContext ? `\n## Architecture Design\n${architectContext}\n` : ""}
 ## Nova Auto-Apply Rules
 ${autoApplyRules || "Follow clean code conventions and existing patterns."}
 
@@ -778,6 +837,14 @@ Fix ONLY these issues. Do not modify other code.
           const rePass = reVerification.verdict === "pass" || reVerification.verdict === "conditional";
 
           if (rePass) {
+            if (isGoalAsUnit) {
+              // Goal-as-Unit: git workflow 없음, 체크포인트 제거 후 done 전환
+              const { dropCheckpoint } = await import("../project/worktree.js");
+              dropCheckpoint(effectiveWorkdir, task.id);
+              transitionTask(db, broadcast, task, "done");
+              await checkAndTriggerGoalSquash(db, broadcast, task.goal_id, effectiveWorkdir);
+              return { success: true, verdict: reVerification.verdict };
+            }
             const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
             if (gitResult?.error) {
               const errorClass = gitResult.errorClass ?? "permanent";
@@ -796,6 +863,19 @@ Fix ONLY these issues. Do not modify other code.
               transitionTask(db, broadcast, task, "blocked");
               return { success: false, verdict: "git-error" };
             }
+          } else if (isGoalAsUnit) {
+            // Goal-as-Unit: QG re-verify FAIL → stash 복원 후 blocked
+            try {
+              const { restoreCheckpoint } = await import("../project/worktree.js");
+              const restored = restoreCheckpoint(effectiveWorkdir, task.id);
+              if (!restored) {
+                db.prepare(
+                  "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'autopilot_warning', ?)",
+                ).run(task.project_id, task.assignee_id, `[goal-as-unit] 체크포인트 복원 실패 — 수동 개입 필요: ${task.title}`);
+              }
+            } catch (restoreErr: any) {
+              log.warn(`restoreCheckpoint failed for task ${task.id}: ${restoreErr.message}`);
+            }
           }
 
           transitionTask(db, broadcast, task, rePass ? "done" : "blocked");
@@ -811,6 +891,14 @@ Fix ONLY these issues. Do not modify other code.
         const passed = verification.verdict === "pass" || verification.verdict === "conditional";
 
         if (passed) {
+          if (isGoalAsUnit) {
+            // Goal-as-Unit: git workflow 없음, 체크포인트 제거 후 done 전환
+            const { dropCheckpoint } = await import("../project/worktree.js");
+            dropCheckpoint(effectiveWorkdir, task.id);
+            transitionTask(db, broadcast, task, "done");
+            await checkAndTriggerGoalSquash(db, broadcast, task.goal_id, effectiveWorkdir);
+            return { success: true, verdict: verification.verdict };
+          }
           const gitResult = await runGitWorkflow(db, broadcast, task, project, agentName, effectiveWorkdir, worktreeInfo?.branch);
           if (gitResult?.error) {
             // Classify the git failure so autopilot can decide: auto-recover
@@ -847,6 +935,21 @@ Fix ONLY these issues. Do not modify other code.
               "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'git_error', ?)",
             ).run(task.project_id, task.assignee_id, `Recoverable git error (${errorCode}) — will retry: ${task.title}`);
             return { success: false, verdict: "git-error" };
+          }
+        }
+
+        if (!passed && isGoalAsUnit) {
+          // Goal-as-Unit: QG FAIL → stash 복원 후 blocked
+          try {
+            const { restoreCheckpoint } = await import("../project/worktree.js");
+            const restored = restoreCheckpoint(effectiveWorkdir, task.id);
+            if (!restored) {
+              db.prepare(
+                "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'autopilot_warning', ?)",
+              ).run(task.project_id, task.assignee_id, `[goal-as-unit] 체크포인트 복원 실패 — 수동 개입 필요: ${task.title}`);
+            }
+          } catch (restoreErr: any) {
+            log.warn(`restoreCheckpoint failed for task ${task.id}: ${restoreErr.message}`);
           }
         }
 
@@ -897,8 +1000,8 @@ Fix ONLY these issues. Do not modify other code.
           .run(task.assignee_id);
         broadcast("agent:status", { id: task.assignee_id, name: agentName, status: "idle" });
 
-        // Worktree + branch 정리 (Sprint 4)
-        if (worktreeInfo) {
+        // Worktree + branch 정리 (Sprint 4 — legacy 모델만 / Goal-as-Unit은 Goal 완료 시 정리)
+        if (worktreeInfo && !isGoalAsUnit) {
           try {
             const { removeWorktree } = await import("../project/worktree.js");
             removeWorktree(workdir, worktreeInfo.path, worktreeInfo.branch);
@@ -1256,6 +1359,13 @@ Respond in this EXACT JSON format:
           }
         }
 
+        // 신규 goal은 goal_as_unit 모델로 승격 (legacy goal은 이미 'legacy' 값이므로 덮어쓰지 않음)
+        const currentGoal = db.prepare("SELECT goal_model FROM goals WHERE id = ?").get(goal.id) as { goal_model: string } | undefined;
+        if (currentGoal?.goal_model === "legacy") {
+          db.prepare("UPDATE goals SET goal_model = 'goal_as_unit' WHERE id = ?").run(goal.id);
+          log.info(`Goal ${goal.id} upgraded to goal_as_unit model`);
+        }
+
         log.info(`Created ${created} tasks from goal decomposition`);
         db.prepare(
           "INSERT INTO activities (project_id, agent_id, type, message) VALUES (?, ?, 'decompose_completed', ?)",
@@ -1586,6 +1696,128 @@ async function runGitWorkflow(
   }
 
   return result;
+}
+
+/**
+ * 태스크 done 전환 후 Goal-as-Unit squash 트리거 여부 확인.
+ * 남은 태스크가 0이면 triggerGoalSquash() 호출.
+ */
+async function checkAndTriggerGoalSquash(
+  db: Database,
+  broadcast: (event: string, data: unknown) => void,
+  goalId: string,
+  worktreePath: string,
+): Promise<void> {
+  const remaining = (db.prepare(
+    "SELECT COUNT(*) as count FROM tasks WHERE goal_id = ? AND status != 'done' AND parent_task_id IS NULL",
+  ).get(goalId) as { count: number }).count;
+
+  if (remaining > 0) return;
+
+  const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as GoalRow | undefined;
+  if (!goal || goal.goal_model !== "goal_as_unit") return;
+
+  log.info(`All tasks done for goal ${goalId} — triggering squash`);
+  await triggerGoalSquash(db, broadcast, goal, worktreePath);
+}
+
+/**
+ * Goal 완료 후 squash 파이프라인 시작.
+ * 1. acceptance_script 실행 (있을 경우)
+ * 2. FAIL → squash_status='blocked'
+ * 3. PASS or 없음 → squash_status='pending_approval' + broadcast
+ */
+async function triggerGoalSquash(
+  db: Database,
+  broadcast: (event: string, data: unknown) => void,
+  goal: GoalRow,
+  worktreePath: string,
+): Promise<void> {
+  if (goal.acceptance_script) {
+    const scriptResult = runAcceptanceScript(worktreePath, goal.acceptance_script);
+    if (!scriptResult.passed) {
+      db.prepare(
+        "UPDATE goals SET squash_status = 'blocked' WHERE id = ?",
+      ).run(goal.id);
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'goal_squash_blocked', ?)",
+      ).run(goal.project_id, `[goal-as-unit] Acceptance script FAIL — squash 차단: ${goal.title?.slice(0, 80)}\n${scriptResult.output.slice(0, 500)}`);
+      broadcast("goal:squash_blocked", { goalId: goal.id, output: scriptResult.output });
+      log.warn(`Goal ${goal.id} squash blocked by acceptance script`);
+      return;
+    }
+    log.info(`Goal ${goal.id} acceptance script PASS`);
+  }
+
+  // 변경된 파일 목록 수집
+  let filesChanged: string[] = [];
+  try {
+    const { spawnSync } = await import("node:child_process");
+    const diffResult = spawnSync("git", ["diff", "--name-only", "HEAD"], {
+      cwd: worktreePath,
+      stdio: "pipe",
+      timeout: 10_000,
+      encoding: "utf-8",
+    });
+    if (diffResult.status === 0) {
+      filesChanged = diffResult.stdout.split("\n").filter(Boolean);
+    }
+  } catch { /* best effort */ }
+
+  // 커밋 메시지 자동 생성
+  const doneTasks = db.prepare(
+    "SELECT title FROM tasks WHERE goal_id = ? AND status = 'done' AND parent_task_id IS NULL ORDER BY sort_order ASC",
+  ).all(goal.id) as { title: string }[];
+  const commitMessage = buildSquashCommitMessage(goal, doneTasks.map((t) => t.title));
+
+  db.prepare(
+    "UPDATE goals SET squash_status = 'pending_approval' WHERE id = ?",
+  ).run(goal.id);
+
+  broadcast("goal:squash_ready", {
+    goalId: goal.id,
+    commitMessage,
+    filesChanged,
+    acceptanceOutput: "",
+  });
+
+  log.info(`Goal ${goal.id} squash ready — pending_approval`);
+}
+
+/**
+ * acceptance_script 실행.
+ * spawnSync, 타임아웃 2분, stdin=/dev/null, 종료코드 0 = PASS.
+ */
+function runAcceptanceScript(
+  workdir: string,
+  script: string,
+  timeoutMs: number = 120_000,
+): { passed: boolean; output: string } {
+  const result = spawnSync("sh", ["-c", script], {
+    cwd: workdir,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: timeoutMs,
+    encoding: "utf-8",
+  });
+
+  const rawOutput = [result.stdout ?? "", result.stderr ?? ""].join("\n").trim();
+  const output = rawOutput.slice(0, 1000);
+
+  if (result.error) {
+    // ETIMEDOUT or SIGKILL
+    return { passed: false, output: `Script error: ${result.error.message}\n${output}` };
+  }
+
+  const passed = result.status === 0;
+  return { passed, output };
+}
+
+/**
+ * Goal squash commit 메시지 자동 생성.
+ */
+function buildSquashCommitMessage(goal: GoalRow, taskTitles: string[]): string {
+  const taskBullets = taskTitles.map((t) => `- ${t}`).join("\n");
+  return `${goal.title || goal.description}\n\nTasks:\n${taskBullets}\n\nGenerated by Nova Orbit (Goal-as-Unit)`;
 }
 
 function updateGoalProgress(db: Database, goalId: string): void {
