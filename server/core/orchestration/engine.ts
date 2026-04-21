@@ -1262,7 +1262,7 @@ Respond in this EXACT JSON format:
         }
         const tasks = decomposed.tasks ?? [];
 
-        const safeTasks = tasks.slice(0, MAX_TASKS_PER_GOAL);
+        let safeTasks = tasks.slice(0, MAX_TASKS_PER_GOAL);
 
         // Phase 3 — S1: Adversarial Task 자동 주입
         // 휴리스틱: 조사성 키워드가 포함된 goal 에 사전 실패 패턴 수집 태스크를 prepend
@@ -1283,6 +1283,23 @@ Respond in this EXACT JSON format:
         };
 
         if (shouldInjectAdversarial(goal) && safeTasks.length > 0) {
+          // C-1: adversarial 자리 확보 — unshift 전에 slice 하여 drop 후 depends_on 정리
+          if (safeTasks.length >= MAX_TASKS_PER_GOAL) {
+            const dropped = safeTasks.slice(MAX_TASKS_PER_GOAL - 1);
+            const droppedOrders = new Set(
+              dropped
+                .map((t: any) => t.order)
+                .filter((o: any) => typeof o === "number"),
+            );
+            safeTasks = safeTasks.slice(0, MAX_TASKS_PER_GOAL - 1);
+            // 드롭된 태스크를 depends_on 으로 참조하던 태스크 정리
+            for (const t of safeTasks) {
+              if (Array.isArray(t.depends_on)) {
+                t.depends_on = t.depends_on.filter((d: any) => !droppedOrders.has(d));
+              }
+            }
+            log.warn(`Adversarial injection: dropped ${dropped.length} low-priority task(s) to fit MAX_TASKS_PER_GOAL`);
+          }
           // 기존 태스크들 order +1 (adversarial 이 order=1 을 차지)
           for (const t of safeTasks) {
             if (typeof t.order === "number") t.order += 1;
@@ -1312,8 +1329,6 @@ Respond in this EXACT JSON format:
             stack_hint: "",
             depends_on: [],
           });
-          // MAX_TASKS_PER_GOAL 초과 방지 — adversarial 포함해서 제한 안에 맞추기
-          if (safeTasks.length > MAX_TASKS_PER_GOAL) safeTasks.pop();
           log.info(`Adversarial task injected for goal ${goal.id} (slug=${slug})`);
         }
 
@@ -1797,14 +1812,21 @@ async function triggerGoalSquash(
 ): Promise<void> {
   // early return: 이미 처리 완료된 상태는 재진입 차단
   if (
-    goal.squash_status !== "none" &&
-    goal.squash_status !== "pending_approval"
+    goal.squash_status === "blocked" ||
+    goal.squash_status === "approved" ||
+    goal.squash_status === "merged"
   ) return;
 
   // Phase 3 — S2: QA 회귀 태스크 생성 + squash 진입 전 차단
   // qa_regression_task_id 가 없으면 첫 호출 → QA 태스크 생성 후 대기
   if (!goal.qa_regression_task_id) {
-    const qaTaskId = createQARegressionTask(db, broadcast, goal);
+    let qaTaskId: string;
+    try {
+      qaTaskId = createQARegressionTask(db, broadcast, goal);
+    } catch (e) {
+      log.error(`Failed to create QA regression task for goal ${goal.id}: ${(e as Error).message}`);
+      return; // squash_status 는 createQARegressionTask 내부에서 blocked 로 설정됨
+    }
     db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(qaTaskId, goal.id);
     log.info(`QA regression task ${qaTaskId} created for goal ${goal.id}, waiting for completion`);
     broadcast("goal:qa_regression_created", { goalId: goal.id, qaTaskId });
@@ -1816,13 +1838,22 @@ async function triggerGoalSquash(
   if (!qaTask) {
     // 태스크가 삭제됐으면 재생성 (recovery)
     log.warn(`QA regression task ${goal.qa_regression_task_id} not found for goal ${goal.id} — recreating`);
-    const newTaskId = createQARegressionTask(db, broadcast, goal);
-    db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(newTaskId, goal.id);
+    try {
+      const newTaskId = createQARegressionTask(db, broadcast, goal);
+      db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(newTaskId, goal.id);
+    } catch (e) {
+      log.error(`Failed to recreate QA regression task for goal ${goal.id}: ${(e as Error).message}`);
+    }
     return;
   }
   if (qaTask.status !== "done") {
     log.info(`QA regression task ${goal.qa_regression_task_id} still ${qaTask.status}, waiting`);
     return; // 여전히 대기
+  }
+  // C-2: QA done 이지만 이미 pending_approval 이면 재broadcast 생략
+  if (goal.squash_status === "pending_approval") {
+    log.info(`Goal ${goal.id} already in pending_approval — skip re-broadcast`);
+    return;
   }
   // QA 태스크 done → 이후 acceptance_script + pending_approval 경로 진행
 
@@ -1904,13 +1935,26 @@ function createQARegressionTask(
   broadcast: (event: string, data: unknown) => void,
   goal: GoalRow,
 ): string {
-  const qaAgent = db.prepare(
-    "SELECT id FROM agents WHERE project_id = ? AND role = 'qa' LIMIT 1",
-  ).get(goal.project_id) as { id: string } | undefined;
-  const reviewerAgent = db.prepare(
-    "SELECT id FROM agents WHERE project_id = ? AND role = 'reviewer' LIMIT 1",
-  ).get(goal.project_id) as { id: string } | undefined;
-  const assignee = qaAgent ?? reviewerAgent;
+  // H-2: fallback chain — qa → reviewer → qa-*/test-* → coder → non-cto → any
+  const assignee =
+    (db.prepare("SELECT id FROM agents WHERE project_id = ? AND role = 'qa' LIMIT 1").get(goal.project_id) as { id: string } | undefined) ??
+    (db.prepare("SELECT id FROM agents WHERE project_id = ? AND role = 'reviewer' LIMIT 1").get(goal.project_id) as { id: string } | undefined) ??
+    (db.prepare("SELECT id FROM agents WHERE project_id = ? AND (role LIKE 'qa%' OR role LIKE 'test%') LIMIT 1").get(goal.project_id) as { id: string } | undefined) ??
+    (db.prepare("SELECT id FROM agents WHERE project_id = ? AND role = 'coder' LIMIT 1").get(goal.project_id) as { id: string } | undefined) ??
+    (db.prepare("SELECT id FROM agents WHERE project_id = ? AND role != 'cto' LIMIT 1").get(goal.project_id) as { id: string } | undefined) ??
+    (db.prepare("SELECT id FROM agents WHERE project_id = ? LIMIT 1").get(goal.project_id) as { id: string } | undefined);
+
+  if (!assignee) {
+    db.prepare("UPDATE goals SET squash_status = 'blocked' WHERE id = ?").run(goal.id);
+    db.prepare(
+      "INSERT INTO activities (project_id, type, message) VALUES (?, 'qa_regression_failed', ?)",
+    ).run(
+      goal.project_id,
+      `QA 회귀 태스크 생성 실패: 에이전트 없음 — "${(goal.title || goal.description || "").slice(0, 60)}"`,
+    );
+    broadcast("goal:squash_blocked", { goalId: goal.id, reason: "no_agent" });
+    throw new Error(`No agent available for QA regression task in project ${goal.project_id}`);
+  }
 
   const desc = [
     "Goal 완료 직전 실전 QA 회귀 테스트.",
