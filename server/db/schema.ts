@@ -417,6 +417,11 @@ export function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE goals ADD COLUMN squash_status TEXT NOT NULL DEFAULT 'none'");
   }
 
+  // Phase 3: QA 회귀 태스크 ID — squash 진입 전 1회만 생성 보장 (idempotent)
+  if (!goalColsLate.some((c) => c.name === "qa_regression_task_id")) {
+    db.exec("ALTER TABLE goals ADD COLUMN qa_regression_task_id TEXT");
+  }
+
 }
 
 export function generateId(): string {

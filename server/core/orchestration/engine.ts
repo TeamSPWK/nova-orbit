@@ -50,6 +50,7 @@ interface GoalRow {
   acceptance_script: string | null;
   squash_status: string;     // 'none' | 'pending_approval' | 'approved' | 'merged' | 'blocked'
   squash_commit_sha: string | null;
+  qa_regression_task_id: string | null;  // Phase 3: QA 회귀 태스크 ID (1회만 생성)
 }
 interface AgentRow {
   id: string;
@@ -1263,6 +1264,59 @@ Respond in this EXACT JSON format:
 
         const safeTasks = tasks.slice(0, MAX_TASKS_PER_GOAL);
 
+        // Phase 3 — S1: Adversarial Task 자동 주입
+        // 휴리스틱: 조사성 키워드가 포함된 goal 에 사전 실패 패턴 수집 태스크를 prepend
+        const ADVERSARIAL_KEYWORDS_KO = ["감지", "분석", "추출", "파싱", "검증", "탐지", "매칭"];
+        const ADVERSARIAL_KEYWORDS_EN = ["detect", "parse", "extract", "analyze", "validate", "match", "find", "scan"];
+
+        const shouldInjectAdversarial = (g: GoalRow): boolean => {
+          const text = `${g.title ?? ""} ${g.description ?? ""}`.toLowerCase();
+          if (text.length < 50) return false; // 너무 단순한 goal 은 제외
+          const hasKo = ADVERSARIAL_KEYWORDS_KO.some((k) => text.includes(k));
+          const hasEn = ADVERSARIAL_KEYWORDS_EN.some((k) => text.includes(k));
+          return hasKo || hasEn;
+        };
+
+        const goalSlug = (g: GoalRow): string => {
+          const base = (g.title || g.description || "goal").slice(0, 40);
+          return base.toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/^-+|-+$/g, "");
+        };
+
+        if (shouldInjectAdversarial(goal) && safeTasks.length > 0) {
+          // 기존 태스크들 order +1 (adversarial 이 order=1 을 차지)
+          for (const t of safeTasks) {
+            if (typeof t.order === "number") t.order += 1;
+            // depends_on 의 order 번호도 함께 이동
+            if (Array.isArray(t.depends_on)) {
+              t.depends_on = t.depends_on.map((n: unknown) => typeof n === "number" ? n + 1 : n);
+            }
+          }
+          const slug = goalSlug(goal);
+          safeTasks.unshift({
+            title: "[사전 조사] 실세계 실패 패턴 10가지 수집",
+            description: [
+              "이 기능이 실세계 사용자 데이터에서 실패할 수 있는 10가지 패턴을 수집하라.",
+              "",
+              "수행:",
+              "- 실제 사용자 워크스페이스 샘플링 (이 프로젝트 루트 포함)",
+              "- 각 패턴: 입력 예시 + 예상 결과 + 실패 이유",
+              `- 결과물: docs/design/${slug}-edge-cases.md 파일 작성`,
+              "",
+              "이 조사는 후속 구현 태스크의 false-positive 를 예방하기 위함이다.",
+            ].join("\n"),
+            role: (availableAgents.find((a) => a.role === "qa")?.role) ?? "coder",
+            priority: "high",
+            order: 1,
+            type: "content",
+            target_files: [`docs/design/${slug}-edge-cases.md`],
+            stack_hint: "",
+            depends_on: [],
+          });
+          // MAX_TASKS_PER_GOAL 초과 방지 — adversarial 포함해서 제한 안에 맞추기
+          if (safeTasks.length > MAX_TASKS_PER_GOAL) safeTasks.pop();
+          log.info(`Adversarial task injected for goal ${goal.id} (slug=${slug})`);
+        }
+
         // Auto-assign agents by role — prefer CTO's children, fallback to all non-CTO
         const projectAgents = db.prepare(
           "SELECT * FROM agents WHERE project_id = ?",
@@ -1741,6 +1795,37 @@ async function triggerGoalSquash(
   goal: GoalRow,
   worktreePath: string,
 ): Promise<void> {
+  // early return: 이미 처리 완료된 상태는 재진입 차단
+  if (
+    goal.squash_status !== "none" &&
+    goal.squash_status !== "pending_approval"
+  ) return;
+
+  // Phase 3 — S2: QA 회귀 태스크 생성 + squash 진입 전 차단
+  // qa_regression_task_id 가 없으면 첫 호출 → QA 태스크 생성 후 대기
+  if (!goal.qa_regression_task_id) {
+    const qaTaskId = createQARegressionTask(db, broadcast, goal);
+    db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(qaTaskId, goal.id);
+    log.info(`QA regression task ${qaTaskId} created for goal ${goal.id}, waiting for completion`);
+    broadcast("goal:qa_regression_created", { goalId: goal.id, qaTaskId });
+    return; // squash 진행 안 함 — QA 태스크 done 대기
+  }
+
+  // qa_regression_task_id 가 있으면 해당 태스크 상태 확인
+  const qaTask = db.prepare("SELECT status FROM tasks WHERE id = ?").get(goal.qa_regression_task_id) as { status: string } | undefined;
+  if (!qaTask) {
+    // 태스크가 삭제됐으면 재생성 (recovery)
+    log.warn(`QA regression task ${goal.qa_regression_task_id} not found for goal ${goal.id} — recreating`);
+    const newTaskId = createQARegressionTask(db, broadcast, goal);
+    db.prepare("UPDATE goals SET qa_regression_task_id = ? WHERE id = ?").run(newTaskId, goal.id);
+    return;
+  }
+  if (qaTask.status !== "done") {
+    log.info(`QA regression task ${goal.qa_regression_task_id} still ${qaTask.status}, waiting`);
+    return; // 여전히 대기
+  }
+  // QA 태스크 done → 이후 acceptance_script + pending_approval 경로 진행
+
   if (goal.acceptance_script) {
     const scriptResult = runAcceptanceScript(worktreePath, goal.acceptance_script);
     if (!scriptResult.passed) {
@@ -1808,6 +1893,67 @@ async function triggerGoalSquash(
   });
 
   log.info(`Goal ${goal.id} squash ready — pending_approval`);
+}
+
+/**
+ * Phase 3 — S2: Goal 완료 직전 실전 QA 회귀 태스크 생성.
+ * qa || reviewer 에이전트에 배정. 한 번만 생성 (idempotent 보장은 호출자 책임).
+ */
+function createQARegressionTask(
+  db: Database,
+  broadcast: (event: string, data: unknown) => void,
+  goal: GoalRow,
+): string {
+  const qaAgent = db.prepare(
+    "SELECT id FROM agents WHERE project_id = ? AND role = 'qa' LIMIT 1",
+  ).get(goal.project_id) as { id: string } | undefined;
+  const reviewerAgent = db.prepare(
+    "SELECT id FROM agents WHERE project_id = ? AND role = 'reviewer' LIMIT 1",
+  ).get(goal.project_id) as { id: string } | undefined;
+  const assignee = qaAgent ?? reviewerAgent;
+
+  const desc = [
+    "Goal 완료 직전 실전 QA 회귀 테스트.",
+    "",
+    "수행:",
+    "1. 이 worktree 에서 dev 서버 기동 (npm run dev 또는 동등)",
+    "2. Goal 의 핵심 기능을 실제 UI 에서 5분간 사용",
+    "3. git diff main...HEAD 전체 리뷰 — 의도하지 않은 변경 없는지",
+    "4. 기존 기능 회귀 체크 (홈 / 주요 페이지 load OK)",
+    "",
+    "결과물:",
+    "- PASS: description 업데이트 \"회귀 없음, 핵심 기능 정상\"",
+    "- FAIL: 발견 이슈 나열 → Fix 태스크 수동 추가 필요",
+    "",
+    "이 태스크가 done 돼야 squash 단계로 진입한다.",
+  ].join("\n");
+
+  const maxOrder = (db.prepare(
+    "SELECT MAX(sort_order) as m FROM tasks WHERE goal_id = ?",
+  ).get(goal.id) as { m: number | null })?.m ?? 0;
+
+  const row = db.prepare(`
+    INSERT INTO tasks (goal_id, project_id, title, description, assignee_id, status, priority, sort_order, task_type)
+    VALUES (?, ?, ?, ?, ?, 'todo', 'critical', ?, 'review')
+    RETURNING id
+  `).get(
+    goal.id,
+    goal.project_id,
+    "[실전 QA 회귀] 앱 실행 + 전체 diff 리뷰",
+    desc,
+    assignee?.id ?? null,
+    maxOrder + 1,
+  ) as { id: string };
+
+  db.prepare(
+    "INSERT INTO activities (project_id, type, message) VALUES (?, 'qa_regression_created', ?)",
+  ).run(
+    goal.project_id,
+    `QA 회귀 태스크 생성: "${(goal.title || goal.description || "").slice(0, 60)}" — squash 진입 전 필수`,
+  );
+  broadcast("project:updated", { projectId: goal.project_id });
+
+  return row.id;
 }
 
 /**
