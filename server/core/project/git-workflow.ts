@@ -352,6 +352,8 @@ export interface SquashMergeResult {
  *   local_only   → main 체크아웃 → git merge --squash goal/branch → git commit
  *   main_direct  → squash merge → git push origin main
  *   pr           → goal 브랜치 push → gh pr create (PR에서 squash-merge 선택은 사용자 몫)
+ *                  참고: gh CLI 는 `gh pr create --squash` 옵션을 제공하지 않는다.
+ *                  squash merge 는 PR 생성 후 `gh pr merge --squash` 또는 GitHub UI 에서만 가능.
  *   branch_only  → local_only와 동일 (push 없음)
  *
  * goalBranch 삭제는 squash 성공 후 호출부에서 수행.

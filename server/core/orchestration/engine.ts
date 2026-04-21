@@ -1312,7 +1312,10 @@ Respond in this EXACT JSON format:
 
         const goalSlug = (g: GoalRow): string => {
           const base = (g.title || g.description || "goal").slice(0, 40);
-          return base.toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/^-+|-+$/g, "");
+          const normalized = base.toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/^-+|-+$/g, "");
+          // Phase 6 edge fix: slug 에 goal id 6자 suffix → 제목 40자 동일 시 파일 덮어쓰기 방지.
+          const shortId = g.id.slice(-6);
+          return normalized ? `${normalized}-${shortId}` : shortId;
         };
 
         if (shouldInjectAdversarial(goal) && safeTasks.length > 0) {
