@@ -488,7 +488,8 @@ Rules:
       return res.status(400).json({ error: "Goal has no worktree_branch — cannot squash merge" });
     }
 
-    const mergeResult = squashMergeGoal(projectWorkdir, goal.worktree_branch, commitMessage, gitMode);
+    const projectBaseBranch = (db.prepare("SELECT base_branch FROM projects WHERE id = ?").get(goal.project_id) as { base_branch: string | null } | undefined)?.base_branch ?? undefined;
+    const mergeResult = squashMergeGoal(projectWorkdir, goal.worktree_branch, commitMessage, gitMode, projectBaseBranch);
 
     if (mergeResult.error && mergeResult.error !== "nothing-to-commit") {
       db.prepare("UPDATE goals SET squash_status = 'blocked' WHERE id = ?").run(goalId);

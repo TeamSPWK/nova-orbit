@@ -1912,15 +1912,23 @@ async function triggerGoalSquash(
     goal.squash_status === "merged"
   ) return;
 
+  // baseBranch 는 QA 태스크 description + squash merge 모두에서 사용 — 함수 상단에서 한 번만 조회
+  const projectRow = db.prepare("SELECT base_branch FROM projects WHERE id = ?").get(goal.project_id) as { base_branch: string | null } | undefined;
+  const baseBranch = projectRow?.base_branch || "main";
+
   // Phase 3 — S2: QA 회귀 태스크 생성 + squash 진입 전 차단
   // qa_regression_task_id 가 없으면 첫 호출 → QA 태스크 생성 후 대기
   if (!goal.qa_regression_task_id) {
     let qaTaskId: string;
     try {
-      qaTaskId = createQARegressionTask(db, broadcast, goal);
+      qaTaskId = createQARegressionTask(db, broadcast, goal, baseBranch);
     } catch (e) {
       log.error(`Failed to create QA regression task for goal ${goal.id}: ${(e as Error).message}`);
-      return; // squash_status 는 createQARegressionTask 내부에서 blocked 로 설정됨
+      // createQARegressionTask 내부에서 blocked 로 설정하지 않은 경우 triggering 복원
+      db.prepare(
+        "UPDATE goals SET squash_status = 'none' WHERE id = ? AND squash_status = 'triggering'"
+      ).run(goal.id);
+      return;
     }
     db.prepare("UPDATE goals SET qa_regression_task_id = ?, squash_status = 'none' WHERE id = ?").run(qaTaskId, goal.id);
     log.info(`QA regression task ${qaTaskId} created for goal ${goal.id}, waiting for completion`);
@@ -1934,7 +1942,7 @@ async function triggerGoalSquash(
     // 태스크가 삭제됐으면 재생성 (recovery)
     log.warn(`QA regression task ${goal.qa_regression_task_id} not found for goal ${goal.id} — recreating`);
     try {
-      const newTaskId = createQARegressionTask(db, broadcast, goal);
+      const newTaskId = createQARegressionTask(db, broadcast, goal, baseBranch);
       db.prepare("UPDATE goals SET qa_regression_task_id = ?, squash_status = 'none' WHERE id = ?").run(newTaskId, goal.id);
     } catch (e) {
       log.error(`Failed to recreate QA regression task for goal ${goal.id}: ${(e as Error).message}`);
@@ -1974,8 +1982,6 @@ async function triggerGoalSquash(
   // 변경된 파일 목록 수집
   // H-2: 태스크들이 commit 완료된 상태이므로 "git diff HEAD"는 빈 결과.
   //      goal branch 에서 base_branch 대비 변경된 파일을 수집한다.
-  const projectRow = db.prepare("SELECT base_branch FROM projects WHERE id = ?").get(goal.project_id) as { base_branch: string | null } | undefined;
-  const baseBranch = projectRow?.base_branch || "main";
   let filesChanged: string[] = [];
   try {
     const { spawnSync } = await import("node:child_process");
@@ -2034,6 +2040,7 @@ function createQARegressionTask(
   db: Database,
   broadcast: (event: string, data: unknown) => void,
   goal: GoalRow,
+  baseBranch: string = "main",
 ): string {
   // H-2: fallback chain — qa → reviewer → qa-*/test-* → coder → non-cto → any
   const assignee =
@@ -2062,7 +2069,7 @@ function createQARegressionTask(
     "수행:",
     "1. 이 worktree 에서 dev 서버 기동 (npm run dev 또는 동등)",
     "2. Goal 의 핵심 기능을 실제 UI 에서 5분간 사용",
-    "3. git diff main...HEAD 전체 리뷰 — 의도하지 않은 변경 없는지",
+    `3. git diff ${baseBranch}...HEAD 전체 리뷰 — 의도하지 않은 변경 없는지`,
     "4. 기존 기능 회귀 체크 (홈 / 주요 페이지 load OK)",
     "",
     "결과물:",

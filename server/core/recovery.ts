@@ -102,11 +102,28 @@ export function recoverOnStartup(db: Database): RecoveryResult {
     }
   }
 
+  // 5. 'triggering' 상태 복구 — 서버가 CAS 진입 후 크래시하면 goal 이 영구 'triggering' 에 고착.
+  //    재시작 시 모두 'none' 으로 복원한다.
+  recoverTriggeringGoals(db);
+
   if (recoveredTasks > 0 || killedProcesses > 0 || cleanedWorktrees > 0) {
     log.info(`Recovery complete: ${recoveredTasks} tasks restored, ${killedProcesses} orphan processes killed, ${cleanedWorktrees} stale worktrees cleaned`);
   }
 
   return { recoveredTasks, killedProcesses };
+}
+
+/**
+ * 'triggering' 상태 복구 — 서버가 CAS 로 진입한 뒤 크래시하면 goal 이 영구 'triggering' 상태에 고착.
+ * 재시작 시 모두 'none' 으로 복원한다.
+ */
+export function recoverTriggeringGoals(db: Database): void {
+  const result = db.prepare(
+    "UPDATE goals SET squash_status = 'none' WHERE squash_status = 'triggering'"
+  ).run();
+  if (result.changes > 0) {
+    log.info(`Recovered ${result.changes} goal(s) from 'triggering' state after restart`);
+  }
 }
 
 /**

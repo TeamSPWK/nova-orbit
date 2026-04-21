@@ -361,6 +361,7 @@ export function squashMergeGoal(
   goalBranch: string,
   commitMessage: string,
   mode: GitMode,
+  baseBranch?: string,
 ): SquashMergeResult {
   try {
     if (mode === "pr") {
@@ -375,15 +376,19 @@ export function squashMergeGoal(
       return { sha: null, prUrl };
     }
 
-    // local_only / main_direct / branch_only: squash merge to main
+    // local_only / main_direct / branch_only: squash merge to base branch
     let defaultBranch: string;
-    try {
-      defaultBranch = getDefaultBranch(projectWorkdir);
-    } catch {
-      defaultBranch = "main";
+    if (baseBranch) {
+      defaultBranch = baseBranch;
+    } else {
+      try {
+        defaultBranch = getDefaultBranch(projectWorkdir);
+      } catch {
+        defaultBranch = "main";
+      }
     }
 
-    // main 체크아웃
+    // base branch 체크아웃
     try {
       gitExec(projectWorkdir, ["checkout", defaultBranch]);
     } catch (err: any) {
