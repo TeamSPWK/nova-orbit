@@ -1045,6 +1045,14 @@ Fix ONLY these issues. Do not modify other code.
         throw new Error(`Goal ${goalId} not found`);
       }
 
+      // H-3: tasks INSERT 전에 미리 goal_model='goal_as_unit' 설정.
+      //      tasks INSERT 이후 승격 시 scheduler 가 그 사이에 legacy 경로로 태스크를 pick 할 수 있음.
+      if (goal.goal_model !== "goal_as_unit") {
+        db.prepare("UPDATE goals SET goal_model = 'goal_as_unit' WHERE id = ?").run(goal.id);
+        goal.goal_model = "goal_as_unit";
+        log.info(`Goal ${goal.id} pre-upgraded to goal_as_unit before task decomposition`);
+      }
+
       const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(goal.project_id) as ProjectRow | undefined;
 
       log.info(`Decomposing goal: "${goal.title || goal.description}"`);
@@ -1750,10 +1758,12 @@ async function triggerGoalSquash(
   }
 
   // 변경된 파일 목록 수집
+  // H-2: 태스크들이 commit 완료된 상태이므로 "git diff HEAD"는 빈 결과.
+  //      goal branch 에서 main 대비 변경된 파일을 수집한다.
   let filesChanged: string[] = [];
   try {
     const { spawnSync } = await import("node:child_process");
-    const diffResult = spawnSync("git", ["diff", "--name-only", "HEAD"], {
+    const diffResult = spawnSync("git", ["diff", "--name-only", "main...HEAD"], {
       cwd: worktreePath,
       stdio: "pipe",
       timeout: 10_000,
@@ -1761,6 +1771,22 @@ async function triggerGoalSquash(
     });
     if (diffResult.status === 0) {
       filesChanged = diffResult.stdout.split("\n").filter(Boolean);
+    }
+    // fallback: main 브랜치가 없는 경우 (initial commit 등) log 기반 수집
+    if (filesChanged.length === 0) {
+      const logResult = spawnSync(
+        "git",
+        ["log", "--name-only", "--pretty=format:", "main..HEAD"],
+        { cwd: worktreePath, stdio: "pipe", timeout: 10_000, encoding: "utf-8" },
+      );
+      if (logResult.status === 0) {
+        const seen = new Set<string>();
+        for (const line of logResult.stdout.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed) seen.add(trimmed);
+        }
+        filesChanged = Array.from(seen);
+      }
     }
   } catch { /* best effort */ }
 

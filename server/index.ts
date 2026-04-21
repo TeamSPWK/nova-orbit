@@ -6,7 +6,7 @@ import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync } from "n
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createDatabase, migrate } from "./db/schema.js";
-import { recoverOnStartup } from "./core/recovery.js";
+import { recoverOnStartup, rebroadcastPendingApprovals } from "./core/recovery.js";
 import { createProjectRoutes } from "./api/routes/projects.js";
 import { createAgentRoutes } from "./api/routes/agents.js";
 import { createTaskRoutes } from "./api/routes/tasks.js";
@@ -174,6 +174,9 @@ export async function startServer(config: ServerConfig): Promise<void> {
   };
 
   const ctx: AppContext = { db, wss, broadcast };
+
+  // M-3: pending_approval goal broadcast 재발송 (broadcast 준비 후)
+  rebroadcastPendingApprovals(db, broadcast);
 
   // WebSocket handler
   createWSHandler(wss, apiKey);

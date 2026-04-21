@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { Database } from "better-sqlite3";
 import { createLogger } from "../utils/logger.js";
 import { cleanupStaleWorktrees } from "./project/worktree.js";
@@ -82,11 +83,20 @@ export function recoverOnStartup(db: Database): RecoveryResult {
   }
 
   // 4. 잔존 worktree + agent branch 정리 (프로젝트별)
+  //    단, pending_approval / approved 상태 goal 의 worktree 는 보존
   let cleanedWorktrees = 0;
-  const projects = db.prepare("SELECT workdir FROM projects WHERE status = 'active' AND workdir != ''").all() as { workdir: string }[];
+  const projects = db.prepare("SELECT id, workdir FROM projects WHERE status = 'active' AND workdir != ''").all() as { id: string; workdir: string }[];
   for (const p of projects) {
     try {
-      cleanedWorktrees += cleanupStaleWorktrees(p.workdir);
+      // H-1: active goal worktree 경로 수집 — squash 미완료(merged/none 제외) goal 보존
+      const activeWorktreePaths = (db.prepare(
+        `SELECT worktree_path FROM goals
+          WHERE project_id = ?
+            AND squash_status NOT IN ('merged', 'none')
+            AND worktree_path IS NOT NULL`,
+      ).all(p.id) as { worktree_path: string }[]).map((r) => r.worktree_path);
+
+      cleanedWorktrees += cleanupStaleWorktrees(p.workdir, activeWorktreePaths);
     } catch (err: any) {
       log.warn(`Worktree cleanup failed for ${p.workdir}: ${err.message}`);
     }
@@ -97,4 +107,46 @@ export function recoverOnStartup(db: Database): RecoveryResult {
   }
 
   return { recoveredTasks, killedProcesses };
+}
+
+/**
+ * M-3: 서버 재시작 후 pending_approval 상태 goal 에 대해 goal:squash_ready 재발송.
+ * WebSocket 서버와 broadcast 함수가 준비된 이후에 호출해야 한다.
+ *
+ * - worktree_path 실제 존재 확인
+ * - 존재 시 broadcast 재발송 → 사용자가 승인 버튼을 볼 수 있음
+ * - 존재 안 하면 squash_status='blocked' + activity 경고 기록
+ */
+export function rebroadcastPendingApprovals(
+  db: Database,
+  broadcast: (event: string, data: unknown) => void,
+): void {
+  const pendingGoals = db.prepare(
+    `SELECT g.id, g.title, g.project_id, g.worktree_path, g.worktree_branch
+       FROM goals g
+      WHERE g.squash_status = 'pending_approval'`,
+  ).all() as { id: string; title: string; project_id: string; worktree_path: string | null; worktree_branch: string | null }[];
+
+  for (const goal of pendingGoals) {
+    if (goal.worktree_path && existsSync(goal.worktree_path)) {
+      broadcast("goal:squash_ready", {
+        goalId: goal.id,
+        commitMessage: `feat: ${goal.title ?? goal.id}`,
+        filesChanged: [],
+        acceptanceOutput: "",
+      });
+      log.info(`Rebroadcast goal:squash_ready for goal ${goal.id} (pending_approval)`);
+    } else {
+      db.prepare(
+        "UPDATE goals SET squash_status = 'blocked' WHERE id = ?",
+      ).run(goal.id);
+      db.prepare(
+        "INSERT INTO activities (project_id, type, message) VALUES (?, 'goal_squash_blocked', ?)",
+      ).run(
+        goal.project_id,
+        `[recovery] worktree 없음 — squash 차단: ${(goal.title ?? goal.id).slice(0, 80)}`,
+      );
+      log.warn(`Goal ${goal.id} worktree missing on restart — squash blocked`);
+    }
+  }
 }
