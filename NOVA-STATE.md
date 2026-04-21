@@ -1,88 +1,111 @@
 # Nova State
 
 ## Current
-- **Goal**: 오케스트레이션 프로세스 개선 — 태스크 독립 배포 단위 취급 근본 원인 해결
-- **Phase**: Goal-as-Unit 백엔드 + Quality Gate Phase 3 완료 (Dashboard UI 후속)
+- **Goal**: 오케스트레이션 프로세스 개선 + Known Gaps 수습 (2 오케스트레이션 연속)
+- **Phase**: 백엔드 + UI + 안정성 + Edge + E2E 체크리스트 완료 — 실운영 검증 대기
 - **Blocker**: none
 
 ## Tasks (이번 세션 — 2026-04-21)
 
-### 오케스트레이션 프로세스 개선 (3 phase)
+### 오케스트레이션 1 — 프로세스 개선 (`orch-mo7yfv1z-g3ct`)
 | Phase | Status | Note |
 |-------|--------|------|
-| Phase 1 — 동시성 기본값 3→1 | done | wall-clock 보다 맥락 일관성 우선 |
-| Phase 2-A — Goal-as-Unit 설계 (CPS) | done | docs/design/goal-as-unit.md |
-| Phase 2-B — 백엔드 구현 | done | schema/worktree/git/engine/api 7파일 |
-| Phase 2-C — Evaluator + Fix | done | CONDITIONAL → Fix(H-1/H-2/H-3/M-3) → PASS |
-| Phase 3-A — Quality Gate 설계 | done | docs/design/quality-gate-phase3.md |
-| Phase 3-B — Adversarial + QA 회귀 구현 | done | engine.ts 확장 + 마이그레이션 |
-| Phase 3-C — Evaluator + Fix | done | CONDITIONAL → Fix(C-1/C-2/H-2) → PASS |
+| Phase 1 — 동시성 기본값 3→1 | done | wall-clock < 맥락 일관성 |
+| Phase 2 — Goal-as-Unit 백엔드 | done | 설계+구현+Evaluator+Fix |
+| Phase 3 — Adversarial + QA 회귀 | done | 설계+구현+Evaluator+Fix |
+
+### 오케스트레이션 2 — Known Gaps 수습 (`orch-mo7zyif8-n8sk`)
+| Phase | Status | Note |
+|-------|--------|------|
+| Phase 4 — Dashboard UI | done | 설계+구현+Evaluator+Fix (10파일) |
+| Phase 5 — 안정성 보강 | done | baseBranch + DAG + skip + CAS + Fix |
+| Phase 6 — Edge fixes | done | goalSlug uid + gh squash 주석 |
+| Phase 7 — E2E 검증 | done | smoke.sh + 체크리스트 8섹션 |
 
 ## Recently Done (max 3)
-| Task | Completed | Ref |
-|------|-----------|-----|
-| 오케스트레이션 프로세스 개선 3 phase | 2026-04-21 | `3698892`, `454dcfa`, `d94e325`, `92eea62`, `1984f68`, `7414d1c` |
-| markwand drift 기능 goal 100% + 대응 수습 | 2026-04-20 | `f17bb1c` 외 13커밋 (markwand repo) |
-| delegation 서브태스크 중복 생성 방지 | 2026-04-14 | `540a92f` |
+| Task | Completed | Refs |
+|------|-----------|------|
+| Known Gaps 수습 4 phase | 2026-04-21 | `0a01aff`, `b56764c`, `5d6583d`, `ce6a96f`, `9b305a5`, `c42b9f6`, `5f60143` |
+| 오케스트레이션 프로세스 개선 3 phase | 2026-04-21 | `3698892`, `454dcfa`, `d94e325`, `92eea62`, `1984f68`, `7414d1c`, `d360a62` |
+| markwand drift goal 100% + 대응 수습 | 2026-04-20 | `f17bb1c` 외 13커밋 (markwand repo) |
 
 ## Known Gaps
 | Area | Uncovered Content | Priority |
 |------|-------------------|----------|
-| Goal-as-Unit 대시보드 UI | squash 승인 버튼 / acceptance_script 입력 / QA 회귀 상태 표시 | **High** |
-| Goal-as-Unit E2E 런타임 검증 | 실제 agent 로 1 goal decompose→worktree→stash→squash 관통 테스트 | **High** |
-| QA 회귀 태스크 실행 능력 | 에이전트가 "앱 실행 + UI 클릭 + diff 리뷰" 를 실제로 수행할지 불확실 | High |
-| Adversarial 주입 UI 옵션 | skip_adversarial 플래그 + decompose 결과 거부 경로 | Medium |
-| triggerGoalSquash race (concurrency>1) | `DEFAULT_MAX_CONCURRENCY=1` 기본값 전제 — 사용자 override 시 트랜잭션 필요 | Medium |
-| main 외 baseBranch 프로젝트 | `git diff main...HEAD` 하드코드, develop/master 프로젝트 미지원 | Medium |
-| `gh pr create --squash` 검증 | branch_pr 모드 실제 CLI 옵션 미확인 | Low |
-| goalSlug 유일성 | title 40자 동일 시 edge-cases.md 덮어쓰기 | Low |
-| DAG 순환 의존성 방지 | decompose 시 순환 감지 로직 미구현 | High |
-| AIMD 쿨다운 후 resume 검증 | 장시간 운영 시 재현 테스트 필요 | Medium |
+| E2E 실운영 검증 | `docs/verification/goal-as-unit-e2e.md` 체크리스트 관통 필요 | **High** |
+| QA 회귀 에이전트 능력 | 실제 "앱 실행 + UI 클릭" 수행 능력은 에이전트 의존 | High |
+| concurrency>1 고부하 | CAS 락 방어했으나 race 실측 미완 | Medium |
+| base_branch 설정 UI | DB 컬럼만 존재, API/UI 로 설정 경로 없음 — SQL 직접 수정 필요 | Medium |
+| skip_adversarial UI 토글 | API 만 지원, goal 생성 UI 에 체크박스 없음 | Medium |
+| branch_pr squash UX | `gh pr create --squash` 미존재 — 사용자가 GitHub UI 에서 선택 (주석만 명시) | Low |
+| DAG 순환 edge 그래프 | 매우 깊은(100+) 태스크 그래프 성능 미측정 | Low |
+| AIMD 쿨다운 resume | 장시간 운영 시 재현 테스트 필요 (이전 세션부터) | Medium |
 
-## Key Architecture Changes
+## Key Architecture Changes (2026-04-21)
 
-### Goal-as-Unit 아키텍처 (2026-04-21)
-- **Before**: Task-per-worktree, 태스크 단위 commit → goal 당 N개 커밋 파편화
-- **After**: Goal-per-worktree, 태스크 완료 시 WIP 유지, goal 완료 시 **1 squash commit**
-- 신규 컬럼: `goals.goal_model`('legacy'|'goal_as_unit'), `worktree_path`, `worktree_branch`, `acceptance_script`, `squash_commit_sha`, `squash_status`, `qa_regression_task_id`
-- 호환성: 기존 goal 은 'legacy' 유지, 신규 decompose 시점에 'goal_as_unit' 자동 승격
-- 재시작 복구: `recoverOnStartup()` 이 active goal worktree 제외 + `pending_approval` 재broadcast
+### Goal-as-Unit 아키텍처 전환
+- **Before**: Task-per-worktree, 태스크 단위 commit → goal 당 N 커밋 파편화
+- **After**: Goal-per-worktree, WIP 유지, goal 완료 시 **1 squash commit**
+- 신규 컬럼: `goals.{goal_model, worktree_path, worktree_branch, acceptance_script, squash_commit_sha, squash_status, qa_regression_task_id, skip_adversarial}`, `projects.base_branch`, `tasks.acceptance_script`
+- squash_status enum: `none | triggering | pending_approval | approved | merged | blocked`
+- 호환성: `goal_model='legacy'` 기본값 — 기존 goal 그대로 동작
 
-### 태스크 체크포인트 (2026-04-21)
+### 태스크 체크포인트 (stash 기반)
 - 태스크 시작 전 `git stash push -m "nova-checkpoint-{taskId}"`
 - 실패 시 restoreCheckpoint — 해당 태스크만 롤백, goal 전체 보존
 - 충돌 시 `checkout -- .` + `stash drop` + blocked 전환
 
-### Squash Merge + 사용자 승인 (2026-04-21)
-- Goal 완료 감지 → QA 회귀 태스크 생성 대기 → acceptance_script → `pending_approval`
-- 대시보드 승인 클릭 → `squashMergeGoal()` 모드별 (local_only/main_direct/pr) → 1 커밋
+### Squash Merge + 사용자 승인 파이프라인
+- 모든 태스크 완료 + QA 회귀 태스크 완료 → `acceptance_script` 실행 → `pending_approval`
+- CAS 락 (`UPDATE ... WHERE squash_status='none'`) 로 동시 진입 차단
+- 서버 재시작 시 `pending_approval` 재broadcast + `triggering` 고착 복구
+- 모드별: `local_only` / `main_direct` / `pr` — `projects.base_branch` 전파
 
-### Adversarial Task 자동 주입 (2026-04-21)
-- Goal title/description 에 감지/분석/추출/파싱/detect/parse/extract/analyze/validate/match/find/scan 키워드 포함 + 50자 이상 시
-- `[사전 조사] 실세계 실패 패턴 10가지 수집` 태스크를 order=1 로 prepend
-- MAX_TASKS_PER_GOAL 꽉 찬 경우 low-priority 태스크 drop 후 depends_on 재정리
+### Adversarial Task 자동 주입
+- Goal title/desc 에 감지/분석/추출/파싱/detect/parse/... 키워드 포함 + 50자 이상 시
+- `[사전 조사] 실세계 실패 패턴 10가지 수집` 태스크 order=1 prepend
+- `goals.skip_adversarial=1` 로 끄기 가능 (POST /goals body)
+- MAX 꽉 찬 경우 low-priority 드롭 후 depends_on 정리
 
-### QA 회귀 태스크 자동 생성 (2026-04-21)
-- Goal 모든 태스크 완료 시 triggerGoalSquash 첫 호출 → QA 회귀 태스크 1개 생성 (idempotent)
-- 내용: "앱 실행 + 전체 diff 리뷰 + 기존 기능 회귀 체크"
+### QA 회귀 태스크 자동 생성
+- Goal 모든 태스크 완료 → triggerGoalSquash 첫 호출 → QA 회귀 태스크 1개 생성 (idempotent)
 - assignee fallback: qa → reviewer → qa*/test* → coder → non-cto → any
-- QA done 돼야 실제 squash 진입
+- QA done 후에야 실제 squash 진입
 
-### 동시 실행 기본값 3→1 (2026-04-21)
+### DAG 순환 감지
+- decomposeGoal Phase 2 직후 Tarjan-esque DFS 로 순환 탐지
+- 발견 시 해당 태스크 `depends_on = []` 리셋 + activity 기록
+
+### Dashboard UI
+- `GoalSquashApprovalDialog` — 커밋 메시지/파일/acceptance 결과 프리뷰
+- Goal 카드 squash 배지 5상태 (pending_approval/approved/merged/blocked/triggering 숨김)
+- QA 회귀 대기 배지
+- AddGoalDialog/EditGoalDialog acceptance_script 필드 (AI 추천 경로도 지원)
+- WebSocket 핸들러 5종 (squash_ready, merged, blocked, failed, qa_regression_created)
+- merged/approved 상태 퇴행 가드
+- i18n: ko.ts + en.ts, "목표 반영 / 완료 검증 스크립트 / 실전 QA 회귀" 용어
+- Adversarial 태스크 violet 배지 (`[사전 조사]` prefix)
+
+### 동시 실행 기본값 3→1
 - Solo founder 워크플로우 — 품질 > wall-clock
-- 병렬 실행이 선행 태스크 output 을 못 받아 false-positive 파생 (drift 사례)
+- 병렬 실행이 선행 태스크 output 못 받아 false-positive 파생 (drift 사례)
 - `NOVA_MAX_CONCURRENCY` env 로 override 가능
 
+### 검증 인프라
+- `scripts/smoke-goal-as-unit.sh`: schema 컬럼 + 이상 상태 자동 감지
+- `docs/verification/goal-as-unit-e2e.md`: 실사용 체크리스트 8섹션
+
+## 이전 세션 아키텍처 (유지)
+
 ### delegation 중복 방지 가드 (2026-04-14)
-- **원인**: 부모 태스크 blocked→stale→todo 리셋 시 attemptDelegation() 재호출 → 동일 서브태스크 무한 생성
-- **수정**: delegation.ts에 `SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?` 가드 추가
+- delegation.ts `SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?` 가드
 
 ### 오케스트레이션 3대 개선 (2026-04-12)
-1. **태스크 유형별 검증**: task_type(code/content/config/review) 컬럼 + evaluator 4분기 프롬프트
-2. **적응형 동시성 AIMD**: rate limit 1~2회 → 동시성 절반, 성공 시 +1, 3회 → 15분 쿨다운
-3. **태스크 의존성 그래프**: depends_on 컬럼, decompose 시 order→ID 매핑, pickNextTasks DAG 필터
+1. task_type 컬럼 + evaluator 4분기 검증
+2. 적응형 동시성 AIMD
+3. 태스크 의존성 그래프 (depends_on)
 
 ## Last Activity
+- /nova:orchestrator → PASS — Known Gaps 수습 4 phase 완료 (7 커밋) | 2026-04-21T02:58+09:00
 - /nova:orchestrator → PASS — 오케스트레이션 프로세스 개선 3 phase 완료 (6 커밋) | 2026-04-21T02:17+09:00
 - context compacted | 2026-04-21T01:21:19Z
-- delegation 서브태스크 중복 생성 버그 수정 + zippit 데이터 정리 | 2026-04-14T22:48:00+09:00
